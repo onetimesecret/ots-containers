@@ -17,14 +17,18 @@ app = cyclopts.App(
 # Type aliases (defined here to avoid circular imports)
 Delay = Annotated[
     int,
-    cyclopts.Parameter(name=["--delay", "-d"], help="Seconds between operations"),
+    cyclopts.Parameter(
+        name=["--delay", "-d"], help="Seconds between operations"
+    ),
 ]
 Ports = Annotated[
     tuple[int, ...], cyclopts.Parameter(help="Container ports to operate on")
 ]
 OptionalPorts = Annotated[
     tuple[int, ...],
-    cyclopts.Parameter(help="Container ports (discovers running instances if omitted)"),
+    cyclopts.Parameter(
+        help="Container ports (discovers running instances if omitted)"
+    ),
 ]
 
 
@@ -40,7 +44,10 @@ def _resolve_ports(ports: tuple[int, ...]) -> tuple[int, ...]:
 
 
 def _for_each(
-    ports: tuple[int, ...], delay: int, action: "Callable[[int], None]", verb: str
+    ports: tuple[int, ...],
+    delay: int,
+    action: "Callable[[int], None]",
+    verb: str,
 ) -> None:
     """Run action for each port with delay between."""
     import time
@@ -105,7 +112,7 @@ def redeploy(
     force: Annotated[
         bool,
         cyclopts.Parameter(
-            help="Teardown and recreate (deletes .env, stops, then deploys fresh)"
+            help="Teardown and recreate (deletes .env, stops, redeploys)"
         ),
     ] = False,
 ):
@@ -229,7 +236,9 @@ def status(ports: OptionalPorts = ()):
 def logs(
     ports: OptionalPorts = (),
     lines: Annotated[int, cyclopts.Parameter(name=["--lines", "-n"])] = 50,
-    follow: Annotated[bool, cyclopts.Parameter(name=["--follow", "-f"])] = False,
+    follow: Annotated[
+        bool, cyclopts.Parameter(name=["--follow", "-f"])
+    ] = False,
 ):
     """Show logs for instance(s)."""
     ports = _resolve_ports(ports)

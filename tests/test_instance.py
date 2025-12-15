@@ -45,7 +45,9 @@ class TestInstanceHelp:
             app(["instance", "deploy", "--help"])
         assert exc_info.value.code == 0
         captured = capsys.readouterr()
-        assert "port" in captured.out.lower() or "deploy" in captured.out.lower()
+        assert (
+            "port" in captured.out.lower() or "deploy" in captured.out.lower()
+        )
 
     def test_instance_redeploy_help(self, capsys):
         """instance redeploy --help should work."""
@@ -55,7 +57,10 @@ class TestInstanceHelp:
             app(["instance", "redeploy", "--help"])
         assert exc_info.value.code == 0
         captured = capsys.readouterr()
-        assert "force" in captured.out.lower() or "redeploy" in captured.out.lower()
+        assert (
+            "force" in captured.out.lower()
+            or "redeploy" in captured.out.lower()
+        )
 
 
 class TestDeployCommand:
@@ -81,11 +86,15 @@ class TestDeployCommand:
         mocker.patch(
             "ots_containers.commands.instance.Config", return_value=mock_config
         )
-        mock_assets = mocker.patch("ots_containers.commands.instance.assets.update")
+        mock_assets = mocker.patch(
+            "ots_containers.commands.instance.assets.update"
+        )
         mock_quadlet = mocker.patch(
             "ots_containers.commands.instance.quadlet.write_template"
         )
-        _mock_systemd = mocker.patch("ots_containers.commands.instance.systemd.start")
+        _mock_systemd = mocker.patch(
+            "ots_containers.commands.instance.systemd.start"
+        )
         mock_config.env_file.return_value = mocker.MagicMock()
         mock_config.env_file.return_value.write_text = mocker.MagicMock()
         mocker.patch.object(

@@ -12,7 +12,9 @@ from ots_containers.config import Config
 class TestAssetsUpdate:
     """Test the assets.update function."""
 
-    def test_update_raises_user_friendly_error_on_volume_mount_failure(self, mocker):
+    def test_update_raises_user_friendly_error_on_volume_mount_failure(
+        self, mocker
+    ):
         """Volume mount failure should raise SystemExit with helpful message.
 
         Currently broken: raises raw CalledProcessError with traceback.
@@ -90,7 +92,7 @@ class TestAssetsUpdate:
 
         # Verify podman.cp was called with empty/current dir path (dangerous!)
         cp_call = mock_run.call_args_list[3]
-        # When stdout is empty, Path("").strip() becomes ".", the current directory
+        # When stdout is empty, Path("").strip() becomes "." (current dir)
         assert cp_call[0][0][3] == "."  # Empty path becomes current dir
 
     def test_update_without_create_volume(self, mocker):

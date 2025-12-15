@@ -59,6 +59,7 @@ include = ["src"]
 [tool.ruff]
 target-version = "py311"
 src = ["src"]
+line-length = 80
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP"]
