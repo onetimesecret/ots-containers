@@ -2,7 +2,6 @@
 """Instance management app and commands for OTS containers."""
 
 import subprocess
-from collections.abc import Callable
 from typing import Annotated
 
 import cyclopts
@@ -10,6 +9,7 @@ import cyclopts
 from ots_containers import assets, quadlet, systemd
 from ots_containers.config import Config
 
+from ._helpers import for_each, resolve_ports, write_env_file
 from .annotations import Delay, OptionalPorts, Ports
 
 app = cyclopts.App(
@@ -18,47 +18,10 @@ app = cyclopts.App(
 )
 
 
-def _resolve_ports(ports: tuple[int, ...]) -> tuple[int, ...]:
-    """Return provided ports, or discover running instances if none given."""
-    if ports:
-        return ports
-    discovered = systemd.discover_instances()
-    if not discovered:
-        print("No running instances found")
-        return ()
-    return tuple(discovered)
-
-
-def _for_each(
-    ports: tuple[int, ...],
-    delay: int,
-    action: Callable[[int], None],
-    verb: str,
-) -> None:
-    """Run action for each port with delay between."""
-    import time
-
-    total = len(ports)
-    for i, port in enumerate(ports, 1):
-        print(f"[{i}/{total}] {verb} container on port {port}...")
-        action(port)
-        if i < total and delay > 0:
-            print(f"Waiting {delay}s...")
-            time.sleep(delay)
-    print(f"Processed {total} container(s)")
-
-
-def _write_env_file(cfg: Config, port: int) -> None:
-    """Write .env-{port} from template with port substitution."""
-    template = (cfg.base_dir / "config" / ".env").read_text()
-    content = template.replace("${PORT}", str(port)).replace("$PORT", str(port))
-    cfg.env_file(port).write_text(content)
-
-
 @app.default
 def list_instances(ports: OptionalPorts = (), alias: str = "instances"):
     """List running instances (auto-discovers if no ports given)."""
-    ports = _resolve_ports(ports)
+    ports = resolve_ports(ports)
     if not ports:
         return
     print("Instances:")
@@ -84,11 +47,11 @@ def deploy(ports: Ports, delay: Delay = 5):
     def do_deploy(port: int) -> None:
         env_file = cfg.env_file(port)
         print(f"Writing {env_file}")
-        _write_env_file(cfg, port)
+        write_env_file(cfg, port)
         print(f"Starting onetime@{port}")
         systemd.start(f"onetime@{port}")
 
-    _for_each(ports, delay, do_deploy, "Deploying")
+    for_each(ports, delay, do_deploy, "Deploying")
 
 
 @app.command
@@ -105,7 +68,7 @@ def redeploy(
     Use after editing config.yaml or config/.env template.
     Use --force to fully teardown and recreate.
     """
-    ports = _resolve_ports(ports)
+    ports = resolve_ports(ports)
     if not ports:
         return
     cfg = Config()
@@ -127,7 +90,7 @@ def redeploy(
                 env_file.unlink()
         # Deploy
         print(f"Writing {env_file}")
-        _write_env_file(cfg, port)
+        write_env_file(cfg, port)
         unit = f"onetime@{port}"
         if force or not systemd.unit_exists(unit):
             print(f"Starting {unit}")
@@ -137,7 +100,7 @@ def redeploy(
             systemd.restart(unit)
 
     verb = "Force redeploying" if force else "Redeploying"
-    _for_each(ports, delay, do_redeploy, verb)
+    for_each(ports, delay, do_redeploy, verb)
 
 
 @app.command
@@ -146,7 +109,7 @@ def undeploy(ports: OptionalPorts = (), delay: Delay = 5):
 
     Stops systemd service and deletes .env-{port} config file.
     """
-    ports = _resolve_ports(ports)
+    ports = resolve_ports(ports)
     if not ports:
         return
     cfg = Config()
@@ -159,7 +122,7 @@ def undeploy(ports: OptionalPorts = (), delay: Delay = 5):
             print(f"Removing {env_file}")
             env_file.unlink()
 
-    _for_each(ports, delay, do_undeploy, "Undeploying")
+    for_each(ports, delay, do_undeploy, "Undeploying")
 
 
 @app.command
@@ -169,7 +132,7 @@ def start(ports: OptionalPorts = ()):
     Picks up manual edits to .env-{port}. Does NOT regenerate from
     config.yaml or config/.env - use 'redeploy' for that.
     """
-    ports = _resolve_ports(ports)
+    ports = resolve_ports(ports)
     if not ports:
         return
     for port in ports:
@@ -183,7 +146,7 @@ def stop(ports: OptionalPorts = ()):
 
     Does NOT affect .env or quadlet config.
     """
-    ports = _resolve_ports(ports)
+    ports = resolve_ports(ports)
     if not ports:
         return
     for port in ports:
@@ -198,7 +161,7 @@ def restart(ports: OptionalPorts = ()):
     Picks up manual edits to .env-{port}. Does NOT regenerate from
     config.yaml or config/.env - use 'redeploy' for that.
     """
-    ports = _resolve_ports(ports)
+    ports = resolve_ports(ports)
     if not ports:
         return
     for port in ports:
@@ -214,7 +177,7 @@ def restart(ports: OptionalPorts = ()):
 @app.command
 def status(ports: OptionalPorts = ()):
     """Show systemd status for instance(s)."""
-    ports = _resolve_ports(ports)
+    ports = resolve_ports(ports)
     if not ports:
         return
     for port in ports:
@@ -229,7 +192,7 @@ def logs(
     follow: Annotated[bool, cyclopts.Parameter(name=["--follow", "-f"])] = False,
 ):
     """Show logs for instance(s)."""
-    ports = _resolve_ports(ports)
+    ports = resolve_ports(ports)
     if not ports:
         return
     units = [f"onetime@{port}" for port in ports]

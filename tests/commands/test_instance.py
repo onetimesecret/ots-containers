@@ -111,7 +111,7 @@ class TestRedeployCommand:
     def test_redeploy_with_no_instances_found(self, mocker, capsys):
         """redeploy with no ports should discover instances."""
         mocker.patch(
-            "ots_containers.commands.instance.app.systemd.discover_instances",
+            "ots_containers.commands.instance._helpers.systemd.discover_instances",
             return_value=[],
         )
 
@@ -128,7 +128,7 @@ class TestRedeployCommand:
         mock_config.template_path = tmp_path / "template"
         mocker.patch("ots_containers.commands.instance.app.Config", return_value=mock_config)
         mocker.patch(
-            "ots_containers.commands.instance.app.systemd.discover_instances",
+            "ots_containers.commands.instance._helpers.systemd.discover_instances",
             return_value=[7143],
         )
         mocker.patch("ots_containers.commands.instance.app.assets.update")
@@ -158,7 +158,7 @@ class TestRedeployCommand:
         mock_config.template_path = tmp_path / "template"
         mocker.patch("ots_containers.commands.instance.app.Config", return_value=mock_config)
         mocker.patch(
-            "ots_containers.commands.instance.app.systemd.discover_instances",
+            "ots_containers.commands.instance._helpers.systemd.discover_instances",
             return_value=[7143],
         )
         mocker.patch("ots_containers.commands.instance.app.assets.update")
