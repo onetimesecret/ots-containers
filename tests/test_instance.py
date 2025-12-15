@@ -90,7 +90,7 @@ class TestDeployCommand:
             "ots_containers.commands.instance.assets.update"
         )
         mock_quadlet = mocker.patch(
-            "ots_containers.commands.instance.quadlet.write_template"
+            "ots_containers.commands.instance.quadlet.write_all"
         )
         _mock_systemd = mocker.patch(
             "ots_containers.commands.instance.systemd.start"
@@ -118,6 +118,40 @@ class TestDeployCommand:
         mock_quadlet.assert_called_once_with(mock_config)
 
 
+class TestQuadletIntegration:
+    """Test quadlet generation."""
+
+    def test_write_all_creates_both_files(self, mocker, tmp_path):
+        """write_all should create both network and container quadlet files."""
+        from ots_containers import quadlet
+        from ots_containers.config import Config
+
+        mock_daemon_reload = mocker.patch(
+            "ots_containers.quadlet.systemd.daemon_reload"
+        )
+
+        cfg = Config(
+            template_path=tmp_path / "onetime@.container",
+            network_path=tmp_path / "onetime.network",
+        )
+
+        quadlet.write_all(cfg)
+
+        assert cfg.template_path.exists()
+        assert cfg.network_path.exists()
+        mock_daemon_reload.assert_called_once()
+
+        # Verify network file content
+        network_content = cfg.network_path.read_text()
+        assert "Driver=macvlan" in network_content
+        assert f"Options=parent={cfg.parent_interface}" in network_content
+
+        # Verify container file content
+        container_content = cfg.template_path.read_text()
+        assert "Network=onetime.network" in container_content
+        assert "PublishPort=%i:3000" in container_content
+
+
 class TestRedeployCommand:
     """Test redeploy command execution with mocked dependencies."""
 
@@ -133,12 +167,12 @@ class TestRedeployCommand:
         captured = capsys.readouterr()
         assert "No running instances found" in captured.out
 
-    def test_redeploy_uses_cfg_template_path(self, mocker):
+    def test_redeploy_uses_cfg_template_path(self, mocker, tmp_path):
         """redeploy should use cfg.template_path (not quadlet.template_path)."""
         # This test verifies the fix for the AttributeError
         mock_config = mocker.MagicMock()
         mock_config.base_dir = mocker.MagicMock()
-        mock_config.template_path = "/path/to/template"
+        mock_config.template_path = tmp_path / "template"
         mocker.patch(
             "ots_containers.commands.instance.Config", return_value=mock_config
         )
@@ -147,7 +181,7 @@ class TestRedeployCommand:
             return_value=[7143],
         )
         mocker.patch("ots_containers.commands.instance.assets.update")
-        mocker.patch("ots_containers.commands.instance.quadlet.write_template")
+        mocker.patch("ots_containers.commands.instance.quadlet.write_all")
         mocker.patch("ots_containers.commands.instance.systemd.restart")
 
         mock_env_template = mocker.MagicMock()

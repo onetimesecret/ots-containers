@@ -15,6 +15,20 @@ class Config:
     )
     tag: str = field(default_factory=lambda: os.environ.get("TAG", "current"))
     template_path: Path = Path("/etc/containers/systemd/onetime@.container")
+    network_path: Path = Path("/etc/containers/systemd/onetime.network")
+    network_name: str = "onetime"
+
+    # Macvlan network settings - read from environment or use defaults
+    # These must match the private network where maindb lives
+    parent_interface: str = field(
+        default_factory=lambda: os.environ.get("NETWORK_INTERFACE", "eth1")
+    )
+    network_subnet: str = field(
+        default_factory=lambda: os.environ.get("NETWORK_SUBNET", "10.0.0.0/24")
+    )
+    network_gateway: str = field(
+        default_factory=lambda: os.environ.get("NETWORK_GATEWAY", "10.0.0.1")
+    )
 
     @property
     def image_with_tag(self) -> str:

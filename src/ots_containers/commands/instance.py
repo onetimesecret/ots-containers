@@ -92,8 +92,8 @@ def deploy(ports: Ports, delay: Delay = 5):
     print(f"Reading config from {cfg.base_dir / 'config' / 'config.yaml'}")
     print(f"Updating assets from {cfg.base_dir / 'config'}")
     assets.update(cfg, create_volume=True)
-    print(f"Writing quadlet template to {cfg.template_path}")
-    quadlet.write_template(cfg)
+    print(f"Writing quadlet files to {cfg.template_path.parent}")
+    quadlet.write_all(cfg)
 
     def do_deploy(port: int) -> None:
         env_file = cfg.env_file(port)
@@ -129,8 +129,8 @@ def redeploy(
     print(f"Reading config from {cfg.base_dir / 'config' / 'config.yaml'}")
     print(f"Updating assets from {cfg.base_dir / 'config'}")
     assets.update(cfg, create_volume=force)
-    print(f"Writing quadlet template to {cfg.template_path}")
-    quadlet.write_template(cfg)
+    print(f"Writing quadlet files to {cfg.template_path.parent}")
+    quadlet.write_all(cfg)
 
     def do_redeploy(port: int) -> None:
         env_file = cfg.env_file(port)
