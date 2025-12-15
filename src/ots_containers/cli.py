@@ -35,7 +35,10 @@ app = cyclopts.App(
 )
 
 Delay = Annotated[
-    int, cyclopts.Parameter("--delay -d", help="Seconds between operations")
+    int,
+    cyclopts.Parameter(
+        name=["--delay", "-d"], help="Seconds between operations"
+    ),
 ]
 Ports = Annotated[
     tuple[int, ...], cyclopts.Parameter(help="Container ports to operate on")
@@ -192,16 +195,22 @@ def status(ports: OptionalPorts = ()):
 
 
 @app.command
-def start(ports: Ports):
+def start(ports: OptionalPorts = ()):
     """Start systemd unit(s) for the given port(s)."""
+    ports = _resolve_ports(ports)
+    if not ports:
+        return
     for port in ports:
         systemd.start(f"onetime@{port}")
         print(f"Started onetime@{port}")
 
 
 @app.command
-def stop(ports: Ports):
+def stop(ports: OptionalPorts = ()):
     """Stop systemd unit(s) for the given port(s)."""
+    ports = _resolve_ports(ports)
+    if not ports:
+        return
     for port in ports:
         systemd.stop(f"onetime@{port}")
         print(f"Stopped onetime@{port}")
@@ -221,8 +230,10 @@ def restart(ports: OptionalPorts = ()):
 @app.command
 def logs(
     ports: OptionalPorts = (),
-    lines: Annotated[int, cyclopts.Parameter("--lines -n")] = 50,
-    follow: Annotated[bool, cyclopts.Parameter("--follow -f")] = False,
+    lines: Annotated[int, cyclopts.Parameter(name=["--lines", "-n"])] = 50,
+    follow: Annotated[
+        bool, cyclopts.Parameter(name=["--follow", "-f"])
+    ] = False,
 ):
     """Show logs for running containers (or specified ports)."""
     import subprocess
