@@ -93,16 +93,20 @@ class TestAssetsUpdate:
         # When stdout is empty, Path("").strip() becomes "." (current dir)
         assert cp_call[0][0][3] == "."  # Empty path becomes current dir
 
-    def test_update_without_create_volume(self, mocker):
+    def test_update_without_create_volume(self, mocker, tmp_path):
         """Test update skips volume creation when create_volume=False."""
         mock_run = mocker.patch("subprocess.run")
+
+        # Use tmp_path to avoid permission issues on real filesystem
+        fake_volume_path = tmp_path / "volume_data"
+        fake_volume_path.mkdir()
 
         mock_run.side_effect = [
             # volume.mount succeeds (no volume.create call)
             subprocess.CompletedProcess(
                 args=["podman", "volume", "mount", "static_assets"],
                 returncode=0,
-                stdout="/var/lib/containers/storage/volumes/static_assets/_data\n",
+                stdout=f"{fake_volume_path}\n",
             ),
             # podman.create succeeds
             subprocess.CompletedProcess(
@@ -132,16 +136,20 @@ class TestAssetsUpdate:
         assert "mount" in first_call[0][0]
         assert "create" not in first_call[0][0]
 
-    def test_update_cleans_up_container_on_cp_failure(self, mocker):
+    def test_update_cleans_up_container_on_cp_failure(self, mocker, tmp_path):
         """Test container is removed even when cp fails."""
         mock_run = mocker.patch("subprocess.run")
+
+        # Use tmp_path to avoid permission issues on real filesystem
+        fake_volume_path = tmp_path / "volume_data"
+        fake_volume_path.mkdir()
 
         mock_run.side_effect = [
             # volume.mount succeeds
             subprocess.CompletedProcess(
                 args=["podman", "volume", "mount", "static_assets"],
                 returncode=0,
-                stdout="/var/lib/containers/storage/volumes/static_assets/_data\n",
+                stdout=f"{fake_volume_path}\n",
             ),
             # podman.create succeeds
             subprocess.CompletedProcess(
