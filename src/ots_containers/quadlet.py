@@ -21,15 +21,13 @@ Volume=static_assets:/app/public:ro
 WantedBy=multi-user.target
 """
 
-# Macvlan network - containers get IPs on the private network
-# and can reach other hosts (like maindb) directly.
-# Requires: parent interface name, subnet, gateway from private network.
 NETWORK_TEMPLATE = """\
 [Network]
 Driver=macvlan
-Options=parent={parent_interface}
-Subnet={subnet}
-Gateway={gateway}
+InterfaceName={parent_interface}
+Subnet={network_subnet}
+Gateway={network_gateway}
+DNS=9.9.9.9
 """
 
 
@@ -37,8 +35,8 @@ def write_network(cfg: Config) -> None:
     """Write the Podman network quadlet file."""
     content = NETWORK_TEMPLATE.format(
         parent_interface=cfg.parent_interface,
-        subnet=cfg.network_subnet,
-        gateway=cfg.network_gateway,
+        network_subnet=cfg.network_subnet,
+        network_gateway=cfg.network_gateway,
     )
     cfg.network_path.parent.mkdir(parents=True, exist_ok=True)
     cfg.network_path.write_text(content)

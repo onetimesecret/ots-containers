@@ -144,7 +144,7 @@ class TestQuadletIntegration:
         # Verify network file content
         network_content = cfg.network_path.read_text()
         assert "Driver=macvlan" in network_content
-        assert f"Options=parent={cfg.parent_interface}" in network_content
+        assert f"InterfaceName={cfg.parent_interface}" in network_content
 
         # Verify container file content
         container_content = cfg.template_path.read_text()
