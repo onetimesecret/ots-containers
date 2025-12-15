@@ -170,8 +170,26 @@ def list_(ports: OptionalPorts = ()):
         print(f"  onetime@{port}")
 
 
-def _ps_via_api():
-    """List containers using podman-py API (requires podman.socket)."""
+@app.command
+def podman_ps():
+    """Show running podman containers (subprocess)."""
+    import subprocess
+
+    subprocess.run(
+        [
+            "podman",
+            "ps",
+            "--filter",
+            "name=systemd-onetime",
+            "--format",
+            "table {{.ID}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}\t{{.Names}}",
+        ]
+    )
+
+
+@app.command
+def ps():
+    """Show running OTS containers (podman view)."""
     from podman import PodmanClient
 
     with PodmanClient() as client:
@@ -215,32 +233,6 @@ def _ps_via_api():
             print(
                 f"{container_id:<12}  {image:<40}  {status:<15}  {ports:<20}  {name}"
             )
-
-
-def _ps_via_cli():
-    """List containers using podman CLI (fallback)."""
-    import subprocess
-
-    subprocess.run(
-        [
-            "podman",
-            "ps",
-            "--filter",
-            "name=systemd-onetime",
-            "--format",
-            "table {{.ID}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}\t{{.Names}}",
-        ]
-    )
-
-
-@app.command
-def ps():
-    """Show running OTS containers (podman view)."""
-    try:
-        _ps_via_api()
-    except Exception:
-        # Fallback to CLI if API unavailable (socket not running)
-        _ps_via_cli()
 
 
 @app.command
