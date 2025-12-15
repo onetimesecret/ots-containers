@@ -332,7 +332,7 @@ def exec_shell(
     shell = command or os.environ.get("SHELL", "/bin/sh")
 
     for port in ports:
-        container = f"systemd-onetime_{port}"
+        container = f"onetime@{port}"
         print(f"=== Entering {container} ===")
         # Interactive exec requires subprocess.run with no capture
         subprocess.run(["podman", "exec", "-it", container, shell])

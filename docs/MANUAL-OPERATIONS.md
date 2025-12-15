@@ -157,14 +157,14 @@ systemctl list-unit-files 'onetime@7043' --plain --no-legend
 ### List Running Containers
 
 ```bash
-podman ps --filter name=systemd-onetime \
+podman ps --filter name=onetime \
     --format 'table {{.ID}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}\t{{.Names}}'
 ```
 
 ### Execute Shell in Container
 
 ```bash
-podman exec -it systemd-onetime_7043 /bin/sh
+podman exec -it onetime@7043 /bin/sh
 ```
 
 ---

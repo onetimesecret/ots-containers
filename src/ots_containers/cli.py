@@ -50,7 +50,7 @@ def _default():
 def ps():
     """Show running OTS containers (podman view)."""
     podman.ps(
-        filter="name=systemd-onetime",
+        filter="name=onetime",
         format="table {{.ID}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}\t{{.Names}}",
     )
 

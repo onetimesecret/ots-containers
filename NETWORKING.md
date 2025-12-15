@@ -33,7 +33,7 @@ You may see `3000/tcp` in the PORTS column of `podman ps`:
 
 ```
 CONTAINER ID  IMAGE       STATUS         PORTS      NAMES
-ae74f478fef1  ...         Up 5 minutes   3000/tcp   systemd-onetime_7043
+ae74f478fef1  ...         Up 5 minutes   3000/tcp   onetime@7043
 ```
 
 **This is misleading but harmless.** The `3000/tcp` comes from the `EXPOSE 3000`
@@ -118,7 +118,7 @@ ss -tlnp | grep 7043
 curl http://localhost:7043/api/v2/status
 
 # Or exec into container
-sudo podman exec -it systemd-onetime_7043 ss -tlnp
+sudo podman exec -it onetime@7043 ss -tlnp
 ```
 
 ### Port conflict on startup
