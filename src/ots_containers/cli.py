@@ -25,6 +25,7 @@ from .commands import instance
 from .podman import podman
 
 app = cyclopts.App(
+    name="ots-containers",
     help="Manage OTS Podman containers via Quadlets",
     version=__version__,
 )
@@ -32,6 +33,12 @@ app = cyclopts.App(
 # Register topic sub-apps
 app.command(instance.app)
 app.command(assets_cmd.app)
+
+
+@app.default
+def _default():
+    """Show help when no command is specified."""
+    app.help_print([])
 
 
 # Root-level command for quick access
