@@ -1,0 +1,44 @@
+# deployment/>=v0.23/ots-containers/pyproject.toml
+#
+# Installation:
+#   pipx install .                    # Recommended: isolated environment
+#   pip install .                     # System-wide
+#   pip install -e .                  # Development mode
+#
+# Verify: ots-containers --help
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "ots-containers"
+version = "0.1.0"
+description = "Podman Quadlet container management for OneTimeSecret"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+authors = [{ name = "OneTime Secret", email = "ops@onetimesecret.com" }]
+keywords = ["podman", "containers", "quadlet", "systemd", "onetimesecret"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: System Administrators",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: System :: Systems Administration",
+]
+dependencies = ["cyclopts>=3.9"]
+
+[project.scripts]
+ots-containers = "ots_containers.cli:app"
+
+[project.urls]
+Homepage = "https://onetimesecret.com"
+Repository = "https://github.com/onetimesecret/ots_containers"
+Issues = "https://github.com/onetimesecret/ots_containers/issues"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/ots_containers"]
