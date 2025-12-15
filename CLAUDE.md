@@ -20,6 +20,9 @@ pytest tests/test_quadlet.py -k "test_template"
 # Run tests with coverage (CI threshold: 70%)
 pytest tests/ --cov=ots_containers --cov-report=term-missing --cov-fail-under=70
 
+# IMPORTANT: See docs/TESTING.md for testing patterns
+# Key rule: mock responses must use tmp_path, not real system paths
+
 # Lint and format
 ruff check src/
 ruff format src/
