@@ -32,6 +32,9 @@ classifiers = [
 ]
 dependencies = ["cyclopts>=3.9", "podman>=5.0"]
 
+[project.optional-dependencies]
+test = ["pytest>=8.0", "pytest-mock>=3.14"]
+
 [project.scripts]
 ots-containers = "ots_containers.cli:app"
 
@@ -39,6 +42,10 @@ ots-containers = "ots_containers.cli:app"
 Homepage = "https://onetimesecret.com"
 Repository = "https://github.com/onetimesecret/ots_containers"
 Issues = "https://github.com/onetimesecret/ots_containers/issues"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/ots_containers"]
