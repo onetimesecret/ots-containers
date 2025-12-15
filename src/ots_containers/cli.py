@@ -149,17 +149,46 @@ def list_(ports: Ports):
 
 @app.command
 def ps():
-    """Show running OTS containers."""
+    """Show running OTS containers (podman view)."""
     import subprocess
 
     subprocess.run(
         [
             "podman",
             "ps",
+            "--filter",
+            "name=systemd-onetime",
             "--format",
             "table {{.ID}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}\t{{.Names}}",
         ]
     )
+
+
+@app.command
+def status(ports: Ports):
+    """Show systemd status for container(s) on PORT(s)."""
+    # systemctl list-units 'onetime@*'
+    for port in ports:
+        systemd.status(f"onetime@{port}")
+        print()
+
+
+@app.command
+def logs(
+    ports: Ports,
+    lines: Annotated[int, cyclopts.Parameter("--lines -n")] = 50,
+    follow: Annotated[bool, cyclopts.Parameter("--follow -f")] = False,
+):
+    """Show logs for container(s) on PORT(s)."""
+    import subprocess
+
+    units = [f"onetime@{port}" for port in ports]
+    cmd = ["sudo", "journalctl", "--no-pager", f"-n{lines}"]
+    if follow:
+        cmd.append("-f")
+    for unit in units:
+        cmd.extend(["-u", unit])
+    subprocess.run(cmd)
 
 
 if __name__ == "__main__":
