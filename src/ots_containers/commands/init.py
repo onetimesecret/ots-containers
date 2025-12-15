@@ -31,24 +31,36 @@ def _get_owner_group() -> tuple[int, int]:
     return (os.getuid(), os.getgid())
 
 
-def _create_directory(path: Path, mode: int = 0o755, quiet: bool = False) -> bool:
-    """Create directory with mode. Returns True if created, False if existed."""
+def _create_directory(path: Path, mode: int = 0o755, quiet: bool = False) -> bool | None:
+    """Create directory with mode.
+
+    Returns:
+        True if created, False if existed, None if permission denied.
+    """
     if path.exists():
         if not quiet:
             print(f"  [exists] {path}")
         return False
 
-    path.mkdir(parents=True, mode=mode)
-    uid, gid = _get_owner_group()
-    os.chown(path, uid, gid)
+    try:
+        path.mkdir(parents=True, mode=mode)
+        uid, gid = _get_owner_group()
+        os.chown(path, uid, gid)
+    except PermissionError:
+        print(f"  [denied] {path} - permission denied (run with sudo?)")
+        return None
 
     if not quiet:
         print(f"  [created] {path}")
     return True
 
 
-def _copy_template(src: Path, dest: Path, quiet: bool = False) -> bool:
-    """Copy template file if destination doesn't exist. Returns True if copied."""
+def _copy_template(src: Path, dest: Path, quiet: bool = False) -> bool | None:
+    """Copy template file if destination doesn't exist.
+
+    Returns:
+        True if copied, False if existed or source missing, None if permission denied.
+    """
     if dest.exists():
         if not quiet:
             print(f"  [exists] {dest}")
@@ -59,9 +71,13 @@ def _copy_template(src: Path, dest: Path, quiet: bool = False) -> bool:
             print(f"  [skip] {dest} (source {src} not found)")
         return False
 
-    shutil.copy2(src, dest)
-    uid, gid = _get_owner_group()
-    os.chown(dest, uid, gid)
+    try:
+        shutil.copy2(src, dest)
+        uid, gid = _get_owner_group()
+        os.chown(dest, uid, gid)
+    except PermissionError:
+        print(f"  [denied] {dest} - permission denied (run with sudo?)")
+        return None
 
     if not quiet:
         print(f"  [copied] {src} -> {dest}")
@@ -115,7 +131,8 @@ def init(
             print(f"  [MISSING] {cfg.config_dir}")
             all_ok = False
     else:
-        _create_directory(cfg.config_dir, mode=0o755, quiet=quiet)
+        if _create_directory(cfg.config_dir, mode=0o755, quiet=quiet) is None:
+            all_ok = False
 
     # 2. Create var directory
     if not quiet or check:
@@ -127,7 +144,8 @@ def init(
             print(f"  [MISSING] {cfg.var_dir}")
             all_ok = False
     else:
-        _create_directory(cfg.var_dir, mode=0o755, quiet=quiet)
+        if _create_directory(cfg.var_dir, mode=0o755, quiet=quiet) is None:
+            all_ok = False
 
     # 3. Create quadlet parent directory
     if not quiet or check:
@@ -140,7 +158,8 @@ def init(
             print(f"  [MISSING] {quadlet_dir}")
             all_ok = False
     else:
-        _create_directory(quadlet_dir, mode=0o755, quiet=quiet)
+        if _create_directory(quadlet_dir, mode=0o755, quiet=quiet) is None:
+            all_ok = False
 
     # 4. Copy templates if source provided
     if source_dir:
@@ -156,7 +175,8 @@ def init(
                 print(f"  [MISSING] {cfg.config_yaml}")
                 all_ok = False
         else:
-            _copy_template(source_dir / "config.yaml", cfg.config_yaml, quiet=quiet)
+            if _copy_template(source_dir / "config.yaml", cfg.config_yaml, quiet=quiet) is None:
+                all_ok = False
 
         # Copy .env template
         if check:
@@ -166,7 +186,8 @@ def init(
                 print(f"  [MISSING] {cfg.env_template}")
                 all_ok = False
         else:
-            _copy_template(source_dir / ".env", cfg.env_template, quiet=quiet)
+            if _copy_template(source_dir / ".env", cfg.env_template, quiet=quiet) is None:
+                all_ok = False
     else:
         if not quiet or check:
             print("\nTemplate files:")
@@ -200,11 +221,15 @@ def init(
             if not quiet:
                 print(f"  [exists] {cfg.db_path}")
         else:
-            db.init_db(cfg.db_path)
-            uid, gid = _get_owner_group()
-            os.chown(cfg.db_path, uid, gid)
-            if not quiet:
-                print(f"  [created] {cfg.db_path}")
+            try:
+                db.init_db(cfg.db_path)
+                uid, gid = _get_owner_group()
+                os.chown(cfg.db_path, uid, gid)
+                if not quiet:
+                    print(f"  [created] {cfg.db_path}")
+            except PermissionError:
+                print(f"  [denied] {cfg.db_path} - permission denied (run with sudo?)")
+                all_ok = False
 
     # Summary
     if check:
@@ -216,7 +241,11 @@ def init(
         return 0 if all_ok else 1
 
     if not quiet:
-        print("\nInitialization complete.")
+        if all_ok:
+            print("\nInitialization complete.")
+        else:
+            print("\nInitialization incomplete - some operations failed.")
+            print("Try running with elevated privileges: sudo ots init")
         print("\nNext steps:")
         if not cfg.config_yaml.exists():
             print(f"  1. Create {cfg.config_yaml}")
@@ -225,4 +254,4 @@ def init(
         print("  3. Run 'ots image pull --tag <version>' to pull an image")
         print("  4. Run 'ots instance deploy <port>' to start an instance")
 
-    return 0
+    return 0 if all_ok else 1
