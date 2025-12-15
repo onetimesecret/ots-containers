@@ -66,7 +66,7 @@ def _write_env_file(cfg: Config, port: int) -> None:
 
 
 @app.default
-def list_instances(ports: OptionalPorts = ()):
+def list_instances(ports: OptionalPorts = (), alias: str = "instances"):
     """List running instances (auto-discovers if no ports given)."""
     ports = _resolve_ports(ports)
     if not ports:
@@ -79,19 +79,24 @@ def list_instances(ports: OptionalPorts = ()):
 
 @app.command
 def deploy(ports: Ports, delay: Delay = 5):
-    """Write .env-{port} from config/.env template, update quadlet, start systemd.
+    """Deploy new instance(s) from config.yaml and config/.env template.
 
-    Creates .env-{port} from template, writes quadlet config, starts systemd service.
+    Creates .env-{port}, writes quadlet config, starts systemd service.
     """
     cfg = Config()
     cfg.validate()
+    print(f"Reading config from {cfg.config_file}")
+    print(f"Updating assets from {cfg.assets_dir}")
     assets.update(cfg, create_volume=True)
+    print(f"Writing quadlet template to {quadlet.template_path(cfg)}")
     quadlet.write_template(cfg)
 
     def do_deploy(port: int) -> None:
+        env_file = cfg.env_file(port)
+        print(f"Writing {env_file}")
         _write_env_file(cfg, port)
+        print(f"Starting onetime@{port}")
         systemd.start(f"onetime@{port}")
-        systemd.status(f"onetime@{port}")
 
     _for_each(ports, delay, do_deploy, "Deploying")
 
@@ -107,9 +112,9 @@ def redeploy(
         ),
     ] = False,
 ):
-    """Refresh .env-{port} and quadlet from templates, restart systemd.
+    """Regenerate .env-{port} and quadlet from config.yaml/config/.env, restart.
 
-    Rewrites .env-{port} from config/.env template, updates quadlet config, restarts service.
+    Use after editing config.yaml or config/.env template.
     Use --force to fully teardown and recreate.
     """
     ports = _resolve_ports(ports)
@@ -117,23 +122,30 @@ def redeploy(
         return
     cfg = Config()
     cfg.validate()
+    print(f"Reading config from {cfg.config_file}")
+    print(f"Updating assets from {cfg.assets_dir}")
     assets.update(cfg, create_volume=force)
+    print(f"Writing quadlet template to {quadlet.template_path(cfg)}")
     quadlet.write_template(cfg)
 
     def do_redeploy(port: int) -> None:
+        env_file = cfg.env_file(port)
         if force:
             # Teardown first
+            print(f"Stopping onetime@{port}")
             systemd.stop(f"onetime@{port}")
-            env_file = cfg.env_file(port)
             if env_file.exists():
+                print(f"Removing {env_file}")
                 env_file.unlink()
         # Deploy
+        print(f"Writing {env_file}")
         _write_env_file(cfg, port)
         if force:
+            print(f"Starting onetime@{port}")
             systemd.start(f"onetime@{port}")
         else:
+            print(f"Restarting onetime@{port}")
             systemd.restart(f"onetime@{port}")
-        systemd.status(f"onetime@{port}")
 
     verb = "Force redeploying" if force else "Redeploying"
     _for_each(ports, delay, do_redeploy, verb)
@@ -151,11 +163,12 @@ def undeploy(ports: OptionalPorts = (), delay: Delay = 5):
     cfg = Config()
 
     def do_undeploy(port: int) -> None:
+        print(f"Stopping onetime@{port}")
         systemd.stop(f"onetime@{port}")
         env_file = cfg.env_file(port)
         if env_file.exists():
+            print(f"Removing {env_file}")
             env_file.unlink()
-        print(f"Removed onetime@{port}")
 
     _for_each(ports, delay, do_undeploy, "Undeploying")
 
@@ -164,7 +177,8 @@ def undeploy(ports: OptionalPorts = (), delay: Delay = 5):
 def start(ports: OptionalPorts = ()):
     """Start systemd unit(s) for instance(s).
 
-    Does NOT refresh .env or quadlet config. Use 'redeploy' to pick up config changes.
+    Picks up manual edits to .env-{port}. Does NOT regenerate from
+    config.yaml or config/.env - use 'redeploy' for that.
     """
     ports = _resolve_ports(ports)
     if not ports:
@@ -192,7 +206,8 @@ def stop(ports: OptionalPorts = ()):
 def restart(ports: OptionalPorts = ()):
     """Restart systemd unit(s) for instance(s).
 
-    Does NOT refresh .env or quadlet config. Use 'redeploy' to pick up config changes.
+    Picks up manual edits to .env-{port}. Does NOT regenerate from
+    config.yaml or config/.env - use 'redeploy' for that.
     """
     ports = _resolve_ports(ports)
     if not ports:
