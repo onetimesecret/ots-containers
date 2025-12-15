@@ -6,7 +6,7 @@ from typing import Annotated
 
 import cyclopts
 
-from ots_containers import assets, quadlet, systemd
+from ots_containers import assets, db, quadlet, systemd
 from ots_containers.config import Config
 
 from ._helpers import for_each, resolve_ports, write_env_file
@@ -35,9 +35,15 @@ def deploy(ports: Ports, delay: Delay = 5):
     """Deploy new instance(s) from config.yaml and .env template.
 
     Creates .env-{port}, writes quadlet config, starts systemd service.
+    Records deployment to timeline for audit and rollback support.
     """
     cfg = Config()
     cfg.validate()
+
+    # Resolve image/tag (handles CURRENT/ROLLBACK aliases)
+    image, tag = cfg.resolve_image_tag()
+    print(f"Image: {image}:{tag}")
+
     print(f"Reading config from {cfg.config_yaml}")
     print(f"Reading env template from {cfg.env_template}")
     assets.update(cfg, create_volume=True)
@@ -49,7 +55,29 @@ def deploy(ports: Ports, delay: Delay = 5):
         print(f"Writing {env_file}")
         write_env_file(cfg, port)
         print(f"Starting onetime@{port}")
-        systemd.start(f"onetime@{port}")
+        try:
+            systemd.start(f"onetime@{port}")
+            # Record successful deployment
+            db.record_deployment(
+                cfg.db_path,
+                image=image,
+                tag=tag,
+                action="deploy",
+                port=port,
+                success=True,
+            )
+        except Exception as e:
+            # Record failed deployment
+            db.record_deployment(
+                cfg.db_path,
+                image=image,
+                tag=tag,
+                action="deploy",
+                port=port,
+                success=False,
+                notes=str(e),
+            )
+            raise
 
     for_each(ports, delay, do_deploy, "Deploying")
 
@@ -67,12 +95,18 @@ def redeploy(
 
     Use after editing config.yaml or .env template.
     Use --force to fully teardown and recreate.
+    Records deployment to timeline for audit and rollback support.
     """
     ports = resolve_ports(ports)
     if not ports:
         return
     cfg = Config()
     cfg.validate()
+
+    # Resolve image/tag (handles CURRENT/ROLLBACK aliases)
+    image, tag = cfg.resolve_image_tag()
+    print(f"Image: {image}:{tag}")
+
     print(f"Reading config from {cfg.config_yaml}")
     print(f"Reading env template from {cfg.env_template}")
     assets.update(cfg, create_volume=force)
@@ -92,12 +126,35 @@ def redeploy(
         print(f"Writing {env_file}")
         write_env_file(cfg, port)
         unit = f"onetime@{port}"
-        if force or not systemd.unit_exists(unit):
-            print(f"Starting {unit}")
-            systemd.start(unit)
-        else:
-            print(f"Restarting {unit}")
-            systemd.restart(unit)
+        try:
+            if force or not systemd.unit_exists(unit):
+                print(f"Starting {unit}")
+                systemd.start(unit)
+            else:
+                print(f"Restarting {unit}")
+                systemd.restart(unit)
+            # Record successful redeploy
+            db.record_deployment(
+                cfg.db_path,
+                image=image,
+                tag=tag,
+                action="redeploy",
+                port=port,
+                success=True,
+                notes="force" if force else None,
+            )
+        except Exception as e:
+            # Record failed redeploy
+            db.record_deployment(
+                cfg.db_path,
+                image=image,
+                tag=tag,
+                action="redeploy",
+                port=port,
+                success=False,
+                notes=str(e),
+            )
+            raise
 
     verb = "Force redeploying" if force else "Redeploying"
     for_each(ports, delay, do_redeploy, verb)
@@ -108,19 +165,44 @@ def undeploy(ports: OptionalPorts = (), delay: Delay = 5):
     """Stop systemd service and delete .env-{port} config file.
 
     Stops systemd service and deletes .env-{port} config file.
+    Records action to timeline for audit.
     """
     ports = resolve_ports(ports)
     if not ports:
         return
     cfg = Config()
 
+    # Get current image/tag for recording
+    image, tag = cfg.resolve_image_tag()
+
     def do_undeploy(port: int) -> None:
         print(f"Stopping onetime@{port}")
-        systemd.stop(f"onetime@{port}")
-        env_file = cfg.env_file(port)
-        if env_file.exists():
-            print(f"Removing {env_file}")
-            env_file.unlink()
+        try:
+            systemd.stop(f"onetime@{port}")
+            env_file = cfg.env_file(port)
+            if env_file.exists():
+                print(f"Removing {env_file}")
+                env_file.unlink()
+            # Record successful undeploy
+            db.record_deployment(
+                cfg.db_path,
+                image=image,
+                tag=tag,
+                action="undeploy",
+                port=port,
+                success=True,
+            )
+        except Exception as e:
+            db.record_deployment(
+                cfg.db_path,
+                image=image,
+                tag=tag,
+                action="undeploy",
+                port=port,
+                success=False,
+                notes=str(e),
+            )
+            raise
 
     for_each(ports, delay, do_undeploy, "Undeploying")
 

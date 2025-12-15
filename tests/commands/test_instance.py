@@ -73,7 +73,7 @@ class TestDeployCommand:
 
         mock_validate.assert_called_once()
 
-    def test_deploy_calls_assets_update(self, mocker):
+    def test_deploy_calls_assets_update(self, mocker, tmp_path):
         """deploy should update assets."""
         mock_config = mocker.MagicMock()
         mock_config.config_dir = mocker.MagicMock()
@@ -81,10 +81,13 @@ class TestDeployCommand:
         mock_config.env_template = mocker.MagicMock()
         mock_config.var_dir = mocker.MagicMock()
         mock_config.template_path = mocker.MagicMock()
+        mock_config.db_path = tmp_path / "test.db"
+        mock_config.resolve_image_tag.return_value = ("ghcr.io/test/image", "v1.0.0")
         mocker.patch("ots_containers.commands.instance.app.Config", return_value=mock_config)
         mock_assets = mocker.patch("ots_containers.commands.instance.app.assets.update")
         mock_quadlet = mocker.patch("ots_containers.commands.instance.app.quadlet.write_template")
         _mock_systemd = mocker.patch("ots_containers.commands.instance.app.systemd.start")
+        mocker.patch("ots_containers.commands.instance.app.db.record_deployment")
         mock_config.env_file.return_value = mocker.MagicMock()
         mock_config.env_file.return_value.write_text = mocker.MagicMock()
 
@@ -122,6 +125,8 @@ class TestRedeployCommand:
         mock_config.env_template = mocker.MagicMock()
         mock_config.var_dir = mocker.MagicMock()
         mock_config.template_path = tmp_path / "template"
+        mock_config.db_path = tmp_path / "test.db"
+        mock_config.resolve_image_tag.return_value = ("ghcr.io/test/image", "v1.0.0")
         mocker.patch("ots_containers.commands.instance.app.Config", return_value=mock_config)
         mocker.patch(
             "ots_containers.commands.instance._helpers.systemd.discover_instances",
@@ -130,6 +135,7 @@ class TestRedeployCommand:
         mocker.patch("ots_containers.commands.instance.app.assets.update")
         mocker.patch("ots_containers.commands.instance.app.quadlet.write_template")
         mocker.patch("ots_containers.commands.instance.app.systemd.restart")
+        mocker.patch("ots_containers.commands.instance.app.db.record_deployment")
         mocker.patch(
             "ots_containers.commands.instance.app.systemd.unit_exists",
             return_value=True,
@@ -151,6 +157,8 @@ class TestRedeployCommand:
         mock_config.env_template = mocker.MagicMock()
         mock_config.var_dir = mocker.MagicMock()
         mock_config.template_path = tmp_path / "template"
+        mock_config.db_path = tmp_path / "test.db"
+        mock_config.resolve_image_tag.return_value = ("ghcr.io/test/image", "v1.0.0")
         mocker.patch("ots_containers.commands.instance.app.Config", return_value=mock_config)
         mocker.patch(
             "ots_containers.commands.instance._helpers.systemd.discover_instances",
@@ -160,6 +168,7 @@ class TestRedeployCommand:
         mocker.patch("ots_containers.commands.instance.app.quadlet.write_template")
         mock_start = mocker.patch("ots_containers.commands.instance.app.systemd.start")
         mock_restart = mocker.patch("ots_containers.commands.instance.app.systemd.restart")
+        mocker.patch("ots_containers.commands.instance.app.db.record_deployment")
         mocker.patch(
             "ots_containers.commands.instance.app.systemd.unit_exists",
             return_value=False,

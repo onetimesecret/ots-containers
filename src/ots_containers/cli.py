@@ -5,10 +5,12 @@ Manage OTS Podman containers via Quadlets.
 
 Usage:
 
+    ots-containers init
+    ots-containers image pull --tag v0.23.0 --current
     ots-containers instance deploy 7043
     ots-containers instance redeploy 7044
-    TAG=v0.19.0 ots-containers instance redeploy 7043
-    ots-containers instance undeploy 7043
+    ots-containers image rollback
+    ots-containers instance redeploy
     ots-containers assets sync
 
     # Or run directly without installing:
@@ -21,7 +23,7 @@ import cyclopts
 
 from . import __version__
 from .commands import assets as assets_cmd
-from .commands import instance
+from .commands import image, init, instance
 from .podman import podman
 
 app = cyclopts.App(
@@ -31,7 +33,9 @@ app = cyclopts.App(
 )
 
 # Register topic sub-apps
+app.command(init.app)
 app.command(instance.app)
+app.command(image.app)
 app.command(assets_cmd.app)
 
 
