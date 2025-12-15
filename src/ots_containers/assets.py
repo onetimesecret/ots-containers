@@ -1,5 +1,6 @@
 # src/ots_containers/assets.py
 
+import subprocess
 from pathlib import Path
 
 from .config import Config
@@ -10,9 +11,13 @@ def update(cfg: Config, create_volume: bool = True) -> None:
     if create_volume:
         podman.volume.create("static_assets", check=False)
 
-    result = podman.volume.mount(
-        "static_assets", capture_output=True, text=True, check=True
-    )
+    try:
+        result = podman.volume.mount(
+            "static_assets", capture_output=True, text=True, check=True
+        )
+    except subprocess.CalledProcessError as e:
+        stderr = e.stderr.strip() if e.stderr else "unknown error"
+        raise SystemExit(f"Failed to mount volume 'static_assets': {stderr}")
     assets_dir = Path(result.stdout.strip())
 
     result = podman.create(
