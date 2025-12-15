@@ -20,6 +20,7 @@ Usage:
 """
 
 # cli.py
+import subprocess
 import time
 from typing import Annotated
 
@@ -27,6 +28,51 @@ import cyclopts
 
 from . import __version__, assets, quadlet, systemd
 from .config import Config
+
+
+class Podman:
+    """Wrapper for podman CLI commands.
+
+    Usage:
+        podman = Podman()
+        podman.ps(filter="name=myapp", format="table {{.ID}}\t{{.Names}}")
+        podman.images()
+        podman.inspect("container_id")
+    """
+
+    def __init__(self, executable: str = "podman"):
+        self.executable = executable
+
+    def __call__(self, *args: str) -> subprocess.CompletedProcess:
+        """Run an arbitrary podman command."""
+        return subprocess.run([self.executable, *args])
+
+    def __getattr__(self, name: str):
+        """Dynamically create methods for any podman subcommand.
+
+        Converts underscores to hyphens for subcommand names.
+        """
+        subcommand = name.replace("_", "-")
+
+        def command(*args: str, **kwargs: str) -> subprocess.CompletedProcess:
+            cmd = [self.executable, subcommand]
+            for key, value in kwargs.items():
+                flag = f"--{key.replace('_', '-')}"
+                if isinstance(value, bool):
+                    if value:
+                        cmd.append(flag)
+                elif isinstance(value, (list, tuple)):
+                    for v in value:
+                        cmd.extend([flag, str(v)])
+                else:
+                    cmd.extend([flag, str(value)])
+            cmd.extend(args)
+            return subprocess.run(cmd)
+
+        return command
+
+
+podman = Podman()
 
 app = cyclopts.App(
     help="Manage OTS Podman containers via Quadlets",
@@ -173,17 +219,9 @@ def list_(ports: OptionalPorts = ()):
 @app.command
 def ps():
     """Show running OTS containers."""
-    import subprocess
-
-    subprocess.run(
-        [
-            "podman",
-            "ps",
-            "--filter",
-            "name=systemd-onetime",
-            "--format",
-            "table {{.ID}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}\t{{.Names}}",
-        ]
+    podman.ps(
+        filter="name=systemd-onetime",
+        format="table {{.ID}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}\t{{.Names}}",
     )
 
 
