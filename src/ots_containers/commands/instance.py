@@ -9,7 +9,9 @@ import cyclopts
 from .. import assets, quadlet, systemd
 from ..config import Config
 
-app = cyclopts.App(name="instance", help="Manage container instances")
+app = cyclopts.App(
+    name="instance", help="Manage instances (.env-{port}, quadlet, systemd)"
+)
 
 # Type aliases (defined here to avoid circular imports)
 Delay = Annotated[
@@ -77,7 +79,7 @@ def list_instances(ports: OptionalPorts = ()):
 
 @app.command
 def deploy(ports: Ports, delay: Delay = 5):
-    """Deploy new instance(s) on PORT(s).
+    """Write .env-{port} from config/.env template, update quadlet, start systemd.
 
     Creates .env-{port} from template, writes quadlet config, starts systemd service.
     """
@@ -105,9 +107,9 @@ def redeploy(
         ),
     ] = False,
 ):
-    """Redeploy instance(s) with config refresh.
+    """Refresh .env-{port} and quadlet from templates, restart systemd.
 
-    Rewrites .env-{port} from template, updates quadlet config, restarts service.
+    Rewrites .env-{port} from config/.env template, updates quadlet config, restarts service.
     Use --force to fully teardown and recreate.
     """
     ports = _resolve_ports(ports)
@@ -139,7 +141,7 @@ def redeploy(
 
 @app.command
 def undeploy(ports: OptionalPorts = (), delay: Delay = 5):
-    """Remove instance(s) completely.
+    """Stop systemd service and delete .env-{port} config file.
 
     Stops systemd service and deletes .env-{port} config file.
     """

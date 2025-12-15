@@ -8,7 +8,9 @@ import cyclopts
 from .. import assets as assets_module
 from ..config import Config
 
-app = cyclopts.App(name="assets", help="Manage static assets")
+app = cyclopts.App(
+    name="assets", help="Extract web assets from container image to volume"
+)
 
 
 @app.command
@@ -20,10 +22,11 @@ def sync(
         ),
     ] = False,
 ):
-    """Sync static assets from container image to volume.
+    """Copy /app/public from container image to static_assets podman volume.
 
-    Extracts /app/public from image to static_assets volume.
-    Use --create-volume on initial setup.
+    Extracts web assets (JS, CSS, images) from the OTS container image
+    to a shared volume that Caddy serves directly. Use --create-volume
+    on initial setup.
     """
     cfg = Config()
     cfg.validate()
