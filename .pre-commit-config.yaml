@@ -99,13 +99,22 @@ repos:
         args: [--fix]
       - id: ruff-format
 
-  # pytest - run tests with coverage before commit
+  # pytest - run tests before commit (fast, no coverage)
   - repo: local
     hooks:
       - id: pytest
         name: pytest
-        entry: pytest tests/ -x -q --cov=ots_containers --cov-report=term-missing --cov-fail-under=70
+        entry: pytest tests/ -x -q
         language: system
         pass_filenames: false
         always_run: true
         stages: [pre-commit]
+
+      # pytest with coverage - run before push
+      - id: pytest-cov
+        name: pytest-cov
+        entry: pytest tests/ -x -q --cov=ots_containers --cov-report=term-missing --cov-fail-under=70
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-push]
