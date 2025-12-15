@@ -1,4 +1,4 @@
-# src/ots_containers/commands/instance.py
+# src/ots_containers/commands/instance/__init__.py
 """Instance management commands for OTS containers."""
 
 import subprocess
@@ -7,8 +7,8 @@ from typing import Annotated
 
 import cyclopts
 
-from .. import assets, quadlet, systemd
-from ..config import Config
+from ots_containers import assets, quadlet, systemd
+from ots_containers.config import Config
 
 app = cyclopts.App(
     name=["instance", "instances"],
