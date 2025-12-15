@@ -164,7 +164,7 @@ podman ps --filter name=systemd-onetime \
 ### Execute Shell in Container
 
 ```bash
-podman exec -it systemd-onetime@7043 /bin/sh
+podman exec -it systemd-onetime_7043 /bin/sh
 ```
 
 ---

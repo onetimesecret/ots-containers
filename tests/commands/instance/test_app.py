@@ -261,7 +261,7 @@ class TestExecCommand:
         mock_run.assert_called_once()
         call_args = mock_run.call_args[0][0]
         assert call_args[:3] == ["podman", "exec", "-it"]
-        assert "systemd-onetime@7043" in call_args
+        assert "systemd-onetime_7043" in call_args
         assert "/bin/bash" in call_args
 
     def test_exec_uses_custom_command(self, mocker, capsys):

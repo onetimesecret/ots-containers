@@ -9,6 +9,10 @@ Description=OneTimeSecret Container %i
 After=local-fs.target network-online.target
 Wants=network-online.target
 
+[Service]
+Restart=on-failure
+RestartSec=5
+
 [Container]
 Image={image}
 Network=host
@@ -16,6 +20,10 @@ Environment=PORT=%i
 EnvironmentFile={var_dir}/.env-%i
 Volume={config_dir}/config.yaml:/app/etc/config.yaml:ro
 Volume=static_assets:/app/public:ro
+HealthCmd=curl -sf http://localhost:%i/health || exit 1
+HealthInterval=30s
+HealthRetries=3
+HealthStartPeriod=10s
 
 [Install]
 WantedBy=multi-user.target
