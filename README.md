@@ -124,6 +124,24 @@ cat /etc/containers/systemd/onetime@.container
 sudo systemctl daemon-reload
 ```
 
+## Development
+
+For an editable install (changes take effect immediately):
+
+```bash
+git clone https://github.com/onetimesecret/ots-containers.git /opt/ots-containers
+chown -R youruser:youruser /opt/ots-containers
+pipx install -e /opt/ots-containers
+```
+
+If running as root, use the full path or symlink:
+
+```bash
+sudo /home/youruser/.local/bin/ots-containers static
+# or
+sudo ln -s /home/youruser/.local/bin/ots-containers /usr/local/bin/ots-containers
+```
+
 ## License
 
 MIT
