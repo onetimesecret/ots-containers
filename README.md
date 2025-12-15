@@ -1,4 +1,4 @@
-# ots_containers
+# ots-containers
 
 Podman Quadlet container management CLI for [OneTimeSecret](https://github.com/onetimesecret/onetimesecret).
 
@@ -9,27 +9,27 @@ Manages containerized OTS instances using systemd Quadlets - the modern way to r
 ### With pipx (Recommended)
 
 ```bash
-pipx install git+https://github.com/onetimesecret/ots_containers.git
+pipx install git+https://github.com/onetimesecret/ots-containers.git
 ```
 
 ### With pip
 
 ```bash
-pip install git+https://github.com/onetimesecret/ots_containers.git
+pip install git+https://github.com/onetimesecret/ots-containers.git
 ```
 
 ### From source
 
 ```bash
-git clone https://github.com/onetimesecret/ots_containers.git
-cd ots_containers
+git clone https://github.com/onetimesecret/ots-containers.git
+cd ots-containers
 pipx install .
 ```
 
 ### Specific version
 
 ```bash
-pipx install git+https://github.com/onetimesecret/ots_containers.git@v0.1.0
+pipx install git+https://github.com/onetimesecret/ots-containers.git@v0.1.0
 ```
 
 ## Usage
