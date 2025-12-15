@@ -11,7 +11,7 @@ Wants=network-online.target
 
 [Container]
 Image={image}
-Network=host
+PublishPort=%i:3000
 EnvironmentFile={base_dir}/.env-%i
 Volume={base_dir}/config/config.yaml:/app/etc/config.yaml:ro
 Volume=static_assets:/app/public:ro
