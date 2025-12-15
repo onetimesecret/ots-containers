@@ -31,7 +31,7 @@ app = cyclopts.App(
 )
 
 # Register topic sub-apps
-app.command(instance.app, alias="instances")
+app.command(instance.app)
 app.command(assets_cmd.app)
 
 

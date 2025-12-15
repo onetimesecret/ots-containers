@@ -11,24 +11,19 @@ from .. import assets, quadlet, systemd
 from ..config import Config
 
 app = cyclopts.App(
-    name="instance", help="Manage instances (.env-{port}, quadlet, systemd)"
+    name=["instance", "instances"],
+    help="Manage instances (.env-{port}, quadlet, systemd)",
 )
 
 # Type aliases (defined here to avoid circular imports)
 Delay = Annotated[
     int,
-    cyclopts.Parameter(
-        name=["--delay", "-d"], help="Seconds between operations"
-    ),
+    cyclopts.Parameter(name=["--delay", "-d"], help="Seconds between operations"),
 ]
-Ports = Annotated[
-    tuple[int, ...], cyclopts.Parameter(help="Container ports to operate on")
-]
+Ports = Annotated[tuple[int, ...], cyclopts.Parameter(help="Container ports to operate on")]
 OptionalPorts = Annotated[
     tuple[int, ...],
-    cyclopts.Parameter(
-        help="Container ports (discovers running instances if omitted)"
-    ),
+    cyclopts.Parameter(help="Container ports (discovers running instances if omitted)"),
 ]
 
 
@@ -111,9 +106,7 @@ def redeploy(
     delay: Delay = 5,
     force: Annotated[
         bool,
-        cyclopts.Parameter(
-            help="Teardown and recreate (deletes .env, stops, redeploys)"
-        ),
+        cyclopts.Parameter(help="Teardown and recreate (deletes .env, stops, redeploys)"),
     ] = False,
 ):
     """Regenerate .env-{port} and quadlet from config.yaml/config/.env, restart.
@@ -242,9 +235,7 @@ def status(ports: OptionalPorts = ()):
 def logs(
     ports: OptionalPorts = (),
     lines: Annotated[int, cyclopts.Parameter(name=["--lines", "-n"])] = 50,
-    follow: Annotated[
-        bool, cyclopts.Parameter(name=["--follow", "-f"])
-    ] = False,
+    follow: Annotated[bool, cyclopts.Parameter(name=["--follow", "-f"])] = False,
 ):
     """Show logs for instance(s)."""
     ports = _resolve_ports(ports)
