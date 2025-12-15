@@ -1,6 +1,8 @@
-# deployment/>=v0.23/ots-containers/src/ots_containers/assets.py
+# src/ots_containers/assets.py
+
 
 import subprocess
+from pathlib import Path
 
 from .config import Config
 

@@ -1,4 +1,4 @@
-# deployment/>=v0.23/ots-containers/src/ots_containers/config.py
+# src/ots_containers/config.py
 
 import os
 from dataclasses import dataclass, field

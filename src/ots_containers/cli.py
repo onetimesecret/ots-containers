@@ -1,4 +1,4 @@
-# deployment/>=v0.23/ots-containers/src/ots_containers/cli.py
+# src/ots_containers/cli.py
 
 """
 

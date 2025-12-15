@@ -1,4 +1,4 @@
-# deployment/>=v0.23/ots-containers/src/ots_containers/quadlet.py
+# src/ots_containers/quadlet.py
 
 from . import systemd
 from .config import Config

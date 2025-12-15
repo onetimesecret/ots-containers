@@ -1,4 +1,4 @@
-# deployment/>=v0.23/ots-containers/src/ots_containers/systemd.py
+# src/ots_containers/systemd.py
 
 import subprocess
 
