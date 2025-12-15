@@ -6,6 +6,8 @@ from .annotations import Delay, OptionalPorts, Ports
 from .app import (
     app,
     deploy,
+    env,
+    exec_shell,
     list_instances,
     logs,
     redeploy,
@@ -22,6 +24,8 @@ __all__ = [
     "Ports",
     "app",
     "deploy",
+    "env",
+    "exec_shell",
     "list_instances",
     "logs",
     "redeploy",

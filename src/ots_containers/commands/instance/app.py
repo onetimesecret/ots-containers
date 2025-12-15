@@ -202,3 +202,56 @@ def logs(
     for unit in units:
         cmd.extend(["-u", unit])
     subprocess.run(cmd)
+
+
+@app.command
+def env(ports: OptionalPorts = ()):
+    """Show sorted environment variables for instance(s).
+
+    Reads and displays the .env-{port} file contents, sorted alphabetically.
+    """
+    ports = resolve_ports(ports)
+    if not ports:
+        return
+    cfg = Config()
+    for port in ports:
+        env_file = cfg.env_file(port)
+        print(f"=== {env_file} ===")
+        if env_file.exists():
+            lines = env_file.read_text().splitlines()
+            # Sort non-empty, non-comment lines
+            env_lines = [l for l in lines if l.strip() and not l.strip().startswith("#")]
+            for line in sorted(env_lines):
+                print(line)
+        else:
+            print("  (file not found)")
+        print()
+
+
+@app.command(name="exec")
+def exec_shell(
+    ports: OptionalPorts = (),
+    command: Annotated[
+        str,
+        cyclopts.Parameter(name=["--command", "-c"], help="Command to run (default: $SHELL)"),
+    ] = "",
+):
+    """Run interactive shell in container(s).
+
+    When no ports specified, iterates through all discovered instances sequentially.
+    Uses $SHELL environment variable or /bin/sh as fallback.
+    """
+    import os
+
+    ports = resolve_ports(ports)
+    if not ports:
+        return
+
+    shell = command or os.environ.get("SHELL", "/bin/sh")
+
+    for port in ports:
+        container = f"systemd-onetime@{port}"
+        print(f"=== Entering {container} ===")
+        # Interactive exec requires subprocess.run with no capture
+        subprocess.run(["podman", "exec", "-it", container, shell])
+        print()

@@ -184,3 +184,92 @@ class TestRedeployCommand:
         # Should call start, not restart
         mock_start.assert_called_once_with("onetime@7143")
         mock_restart.assert_not_called()
+
+
+class TestEnvCommand:
+    """Test env command."""
+
+    def test_env_function_exists(self):
+        """env command should be defined."""
+        assert hasattr(instance, "env")
+        assert callable(instance.env)
+
+    def test_env_with_no_instances(self, mocker, capsys):
+        """env with no running instances should report none found."""
+        mocker.patch(
+            "ots_containers.commands.instance._helpers.systemd.discover_instances",
+            return_value=[],
+        )
+        instance.env(ports=())
+        captured = capsys.readouterr()
+        assert "No running instances found" in captured.out
+
+    def test_env_displays_sorted_env_vars(self, mocker, capsys, tmp_path):
+        """env should display sorted environment variables."""
+        mock_config = mocker.MagicMock()
+        env_file = tmp_path / ".env-7043"
+        env_file.write_text("ZZZ_VAR=last\nAAA_VAR=first\n# comment\nMMM_VAR=middle\n")
+        mock_config.env_file.return_value = env_file
+        mocker.patch("ots_containers.commands.instance.app.Config", return_value=mock_config)
+
+        instance.env(ports=(7043,))
+
+        captured = capsys.readouterr()
+        lines = captured.out.strip().split("\n")
+        # Find the env var lines (skip header "=== ... ===" and empty lines)
+        env_lines = [l for l in lines if "=" in l and not l.startswith("===")]
+        assert env_lines == ["AAA_VAR=first", "MMM_VAR=middle", "ZZZ_VAR=last"]
+
+    def test_env_handles_missing_file(self, mocker, capsys, tmp_path):
+        """env should handle missing .env file gracefully."""
+        mock_config = mocker.MagicMock()
+        env_file = tmp_path / ".env-7043"  # Does not exist
+        mock_config.env_file.return_value = env_file
+        mocker.patch("ots_containers.commands.instance.app.Config", return_value=mock_config)
+
+        instance.env(ports=(7043,))
+
+        captured = capsys.readouterr()
+        assert "(file not found)" in captured.out
+
+
+class TestExecCommand:
+    """Test exec command."""
+
+    def test_exec_shell_function_exists(self):
+        """exec_shell command should be defined."""
+        assert hasattr(instance, "exec_shell")
+        assert callable(instance.exec_shell)
+
+    def test_exec_with_no_instances(self, mocker, capsys):
+        """exec with no running instances should report none found."""
+        mocker.patch(
+            "ots_containers.commands.instance._helpers.systemd.discover_instances",
+            return_value=[],
+        )
+        instance.exec_shell(ports=())
+        captured = capsys.readouterr()
+        assert "No running instances found" in captured.out
+
+    def test_exec_calls_podman_exec(self, mocker, capsys):
+        """exec should call podman exec with correct container name."""
+        mock_run = mocker.patch("ots_containers.commands.instance.app.subprocess.run")
+        mocker.patch.dict("os.environ", {"SHELL": "/bin/bash"})
+
+        instance.exec_shell(ports=(7043,))
+
+        mock_run.assert_called_once()
+        call_args = mock_run.call_args[0][0]
+        assert call_args[:3] == ["podman", "exec", "-it"]
+        assert "systemd-onetime@7043" in call_args
+        assert "/bin/bash" in call_args
+
+    def test_exec_uses_custom_command(self, mocker, capsys):
+        """exec should use custom command when provided."""
+        mock_run = mocker.patch("ots_containers.commands.instance.app.subprocess.run")
+
+        instance.exec_shell(ports=(7043,), command="/bin/sh")
+
+        mock_run.assert_called_once()
+        call_args = mock_run.call_args[0][0]
+        assert "/bin/sh" in call_args

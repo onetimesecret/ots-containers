@@ -63,3 +63,4 @@ line-length = 100
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP"]
+ignore = ["E741"]  # Ambiguous variable names (l, O, I) - clear in modern fonts
