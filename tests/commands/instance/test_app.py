@@ -1,4 +1,4 @@
-# tests/test_instance.py
+# tests/commands/instance/test_app.py
 """Tests for instance management commands.
 
 These tests verify that instance commands can be imported and invoked
