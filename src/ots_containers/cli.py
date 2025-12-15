@@ -126,8 +126,11 @@ def update(ports: OptionalPorts = (), delay: Delay = 5):
 
 
 @app.command
-def remove(ports: Ports, delay: Delay = 5):
+def remove(ports: OptionalPorts = (), delay: Delay = 5):
     """Remove instance(s) on PORT(s)."""
+    ports = _resolve_ports(ports)
+    if not ports:
+        return
     cfg = Config()
 
     def do_remove(port: int) -> None:
@@ -141,8 +144,11 @@ def remove(ports: Ports, delay: Delay = 5):
 
 
 @app.command
-def replace(ports: Ports, delay: Delay = 5):
+def replace(ports: OptionalPorts = (), delay: Delay = 5):
     """Replace instance(s): remove then setup, one at a time."""
+    ports = _resolve_ports(ports)
+    if not ports:
+        return
     cfg = Config()
     cfg.validate()
     assets.update(cfg, create_volume=True)
