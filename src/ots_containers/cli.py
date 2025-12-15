@@ -39,6 +39,23 @@ Delay = Annotated[
 Ports = Annotated[
     tuple[int, ...], cyclopts.Parameter(help="Container ports to operate on")
 ]
+OptionalPorts = Annotated[
+    tuple[int, ...],
+    cyclopts.Parameter(
+        help="Container ports (discovers running instances if omitted)"
+    ),
+]
+
+
+def _resolve_ports(ports: tuple[int, ...]) -> tuple[int, ...]:
+    """Return provided ports, or discover running instances if none given."""
+    if ports:
+        return ports
+    discovered = systemd.discover_instances()
+    if not discovered:
+        print("No running instances found")
+        return ()
+    return tuple(discovered)
 
 
 def _for_each(
@@ -86,8 +103,11 @@ def setup(ports: Ports, delay: Delay = 5):
 
 
 @app.command
-def update(ports: Ports, delay: Delay = 5):
-    """Update existing instance(s) on PORT(s)."""
+def update(ports: OptionalPorts = (), delay: Delay = 5):
+    """Update running instance(s) (or specified ports)."""
+    ports = _resolve_ports(ports)
+    if not ports:
+        return
     cfg = Config()
     cfg.validate()
     assets.update(cfg, create_volume=False)
@@ -139,8 +159,11 @@ def replace(ports: Ports, delay: Delay = 5):
 
 
 @app.command
-def list_(ports: Ports):
-    """List containers that would be processed."""
+def list_(ports: OptionalPorts = ()):
+    """List running containers (or specified ports)."""
+    ports = _resolve_ports(ports)
+    if not ports:
+        return
     print("Containers:")
     print("-" * 40)
     for port in ports:
@@ -165,9 +188,11 @@ def ps():
 
 
 @app.command
-def status(ports: Ports):
-    """Show systemd status for container(s) on PORT(s)."""
-    # systemctl list-units 'onetime@*'
+def status(ports: OptionalPorts = ()):
+    """Show systemd status for running containers (or specified ports)."""
+    ports = _resolve_ports(ports)
+    if not ports:
+        return
     for port in ports:
         systemd.status(f"onetime@{port}")
         print()
@@ -175,13 +200,16 @@ def status(ports: Ports):
 
 @app.command
 def logs(
-    ports: Ports,
+    ports: OptionalPorts = (),
     lines: Annotated[int, cyclopts.Parameter("--lines -n")] = 50,
     follow: Annotated[bool, cyclopts.Parameter("--follow -f")] = False,
 ):
-    """Show logs for container(s) on PORT(s)."""
+    """Show logs for running containers (or specified ports)."""
     import subprocess
 
+    ports = _resolve_ports(ports)
+    if not ports:
+        return
     units = [f"onetime@{port}" for port in ports]
     cmd = ["sudo", "journalctl", "--no-pager", f"-n{lines}"]
     if follow:

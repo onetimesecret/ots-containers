@@ -37,33 +37,61 @@ pipx install git+https://github.com/onetimesecret/ots-containers.git@v0.1.0
 ```bash
 ots-containers --help
 ots-containers --version
+```
 
+### Viewing running containers
+
+These commands auto-discover running instances - no need to specify ports:
+
+```bash
+# Show systemd status for all running instances
+ots-containers status
+
+# Show status for specific instance only
+ots-containers status 7043
+
+# View logs (last 50 lines by default)
+ots-containers logs
+
+# Follow logs in real-time
+ots-containers logs -f
+
+# View more log lines
+ots-containers logs -n 200
+
+# Show running containers (podman view)
+ots-containers ps
+
+# List running instances
+ots-containers list
+```
+
+### Managing containers
+
+```bash
 # Setup new instance on port 7043
 ots-containers setup 7043
 
 # Setup multiple instances
 ots-containers setup 7043 7044 7045
 
-# Update existing instance(s)
+# Update all running instances
+ots-containers update
+
+# Update specific instance(s)
 ots-containers update 7043
 
 # Update with custom delay between operations
 ots-containers update 7043 7044 --delay 10
 
-# Remove instance
+# Remove instance (requires explicit port)
 ots-containers remove 7043
 
-# Replace instance (remove + setup)
+# Replace instance: remove + setup (requires explicit port)
 ots-containers replace 7043
 
 # Update static assets only
 ots-containers static
-
-# Show running OTS containers
-ots-containers ps
-
-# List containers that would be processed
-ots-containers list 7043 7044 7045
 ```
 
 ## Environment Variables
@@ -111,11 +139,16 @@ The tool expects this directory structure on the target system:
 ## Troubleshooting
 
 ```bash
-# Check service status
+# Check service status (via CLI or systemctl)
+ots-containers status
 sudo systemctl status onetime@7043
 
-# View logs
+# View logs (via CLI or journalctl)
+ots-containers logs -f
 sudo journalctl -u onetime@7043 --since '5 minutes ago'
+
+# List all onetime systemd units
+systemctl list-units 'onetime@*'
 
 # Verify Quadlet template
 cat /etc/containers/systemd/onetime@.container
