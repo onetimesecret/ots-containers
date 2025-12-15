@@ -20,7 +20,6 @@ Usage:
 """
 
 # cli.py
-import subprocess
 import time
 from typing import Annotated
 
@@ -28,51 +27,7 @@ import cyclopts
 
 from . import __version__, assets, quadlet, systemd
 from .config import Config
-
-
-class Podman:
-    """Wrapper for podman CLI commands.
-
-    Usage:
-        podman = Podman()
-        podman.ps(filter="name=myapp", format="table {{.ID}}\t{{.Names}}")
-        podman.images()
-        podman.inspect("container_id")
-    """
-
-    def __init__(self, executable: str = "podman"):
-        self.executable = executable
-
-    def __call__(self, *args: str) -> subprocess.CompletedProcess:
-        """Run an arbitrary podman command."""
-        return subprocess.run([self.executable, *args])
-
-    def __getattr__(self, name: str):
-        """Dynamically create methods for any podman subcommand.
-
-        Converts underscores to hyphens for subcommand names.
-        """
-        subcommand = name.replace("_", "-")
-
-        def command(*args: str, **kwargs: str) -> subprocess.CompletedProcess:
-            cmd = [self.executable, subcommand]
-            for key, value in kwargs.items():
-                flag = f"--{key.replace('_', '-')}"
-                if isinstance(value, bool):
-                    if value:
-                        cmd.append(flag)
-                elif isinstance(value, (list, tuple)):
-                    for v in value:
-                        cmd.extend([flag, str(v)])
-                else:
-                    cmd.extend([flag, str(value)])
-            cmd.extend(args)
-            return subprocess.run(cmd)
-
-        return command
-
-
-podman = Podman()
+from .podman import podman
 
 app = cyclopts.App(
     help="Manage OTS Podman containers via Quadlets",
@@ -234,6 +189,33 @@ def status(ports: OptionalPorts = ()):
     for port in ports:
         systemd.status(f"onetime@{port}")
         print()
+
+
+@app.command
+def start(ports: Ports):
+    """Start systemd unit(s) for the given port(s)."""
+    for port in ports:
+        systemd.start(f"onetime@{port}")
+        print(f"Started onetime@{port}")
+
+
+@app.command
+def stop(ports: Ports):
+    """Stop systemd unit(s) for the given port(s)."""
+    for port in ports:
+        systemd.stop(f"onetime@{port}")
+        print(f"Stopped onetime@{port}")
+
+
+@app.command
+def restart(ports: OptionalPorts = ()):
+    """Restart systemd unit(s) for the given port(s)."""
+    ports = _resolve_ports(ports)
+    if not ports:
+        return
+    for port in ports:
+        systemd.restart(f"onetime@{port}")
+        print(f"Restarted onetime@{port}")
 
 
 @app.command
