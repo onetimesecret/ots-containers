@@ -52,7 +52,7 @@ class TestCreateDirectory:
 
         assert result is False
         captured = capsys.readouterr()
-        assert "[exists]" in captured.out
+        assert "[ok]" in captured.out
 
     def test_returns_none_on_permission_error(self, tmp_path, mocker, capsys):
         """Should return None and print denied message on PermissionError."""
@@ -141,7 +141,7 @@ class TestCopyTemplate:
         assert result is False
         assert dest.read_text() == "old content"  # unchanged
         captured = capsys.readouterr()
-        assert "[exists]" in captured.out
+        assert "[ok]" in captured.out
 
     def test_returns_false_when_source_missing(self, tmp_path, capsys):
         """Should return False when source doesn't exist."""
@@ -200,7 +200,7 @@ class TestInitCommand:
 
         assert result == 1  # Missing components
         captured = capsys.readouterr()
-        assert "[MISSING]" in captured.out
+        assert "[missing]" in captured.out
         assert "Missing components" in captured.out
         # Directories should NOT be created
         assert not mock_config.config_dir.exists()
@@ -236,7 +236,7 @@ class TestInitCommand:
 
         assert result == 0
         captured = capsys.readouterr()
-        assert "[OK]" in captured.out
+        assert "[ok]" in captured.out
         assert "All components present" in captured.out
 
     def test_handles_permission_errors_gracefully(self, tmp_path, mocker, capsys):

@@ -39,7 +39,7 @@ def _create_directory(path: Path, mode: int = 0o755, quiet: bool = False) -> boo
     """
     if path.exists():
         if not quiet:
-            print(f"  [exists] {path}")
+            print(f"  [ok] {path}")
         return False
 
     try:
@@ -63,7 +63,7 @@ def _copy_template(src: Path, dest: Path, quiet: bool = False) -> bool | None:
     """
     if dest.exists():
         if not quiet:
-            print(f"  [exists] {dest}")
+            print(f"  [ok] {dest}")
         return False
 
     if not src.exists():
@@ -121,27 +121,57 @@ def init(
         if not quiet:
             print("Initializing ots-containers...")
 
-    # 1. Create config directory
+    # 1. Create config directory and check/copy config files
     if not quiet or check:
         print("\nConfiguration directory:")
     if check:
         if cfg.config_dir.exists():
-            print(f"  [OK] {cfg.config_dir}")
+            print(f"  [ok] {cfg.config_dir}")
+            # Check config files within directory
+            if cfg.env_template.exists():
+                print(f"  [ok] {cfg.env_template}")
+            else:
+                print(f"  [missing] {cfg.env_template}")
+                all_ok = False
+            if cfg.config_yaml.exists():
+                print(f"  [ok] {cfg.config_yaml}")
+            else:
+                print(f"  [missing] {cfg.config_yaml}")
+                all_ok = False
         else:
-            print(f"  [MISSING] {cfg.config_dir}")
+            print(f"  [missing] {cfg.config_dir}")
             all_ok = False
     else:
-        if _create_directory(cfg.config_dir, mode=0o755, quiet=quiet) is None:
+        result = _create_directory(cfg.config_dir, mode=0o755, quiet=quiet)
+        if result is None:
             all_ok = False
+        else:
+            # Directory exists or was created - now handle config files
+            if source_dir:
+                src = Path(source_dir)
+                if _copy_template(src / ".env", cfg.env_template, quiet=quiet) is None:
+                    all_ok = False
+                if _copy_template(src / "config.yaml", cfg.config_yaml, quiet=quiet) is None:
+                    all_ok = False
+            elif not quiet:
+                # Report status of config files
+                if cfg.env_template.exists():
+                    print(f"  [ok] {cfg.env_template}")
+                else:
+                    print(f"  [missing] {cfg.env_template}")
+                if cfg.config_yaml.exists():
+                    print(f"  [ok] {cfg.config_yaml}")
+                else:
+                    print(f"  [missing] {cfg.config_yaml}")
 
     # 2. Create var directory
     if not quiet or check:
         print("\nVariable data directory:")
     if check:
         if cfg.var_dir.exists():
-            print(f"  [OK] {cfg.var_dir}")
+            print(f"  [ok] {cfg.var_dir}")
         else:
-            print(f"  [MISSING] {cfg.var_dir}")
+            print(f"  [missing] {cfg.var_dir}")
             all_ok = False
     else:
         if _create_directory(cfg.var_dir, mode=0o755, quiet=quiet) is None:
@@ -153,73 +183,27 @@ def init(
     quadlet_dir = cfg.template_path.parent
     if check:
         if quadlet_dir.exists():
-            print(f"  [OK] {quadlet_dir}")
+            print(f"  [ok] {quadlet_dir}")
         else:
-            print(f"  [MISSING] {quadlet_dir}")
+            print(f"  [missing] {quadlet_dir}")
             all_ok = False
     else:
         if _create_directory(quadlet_dir, mode=0o755, quiet=quiet) is None:
             all_ok = False
 
-    # 4. Copy templates if source provided
-    if source_dir:
-        source_dir = Path(source_dir)
-        if not quiet or check:
-            print(f"\nTemplate files (from {source_dir}):")
-
-        # Copy config.yaml
-        if check:
-            if cfg.config_yaml.exists():
-                print(f"  [OK] {cfg.config_yaml}")
-            else:
-                print(f"  [MISSING] {cfg.config_yaml}")
-                all_ok = False
-        else:
-            if _copy_template(source_dir / "config.yaml", cfg.config_yaml, quiet=quiet) is None:
-                all_ok = False
-
-        # Copy .env template
-        if check:
-            if cfg.env_template.exists():
-                print(f"  [OK] {cfg.env_template}")
-            else:
-                print(f"  [MISSING] {cfg.env_template}")
-                all_ok = False
-        else:
-            if _copy_template(source_dir / ".env", cfg.env_template, quiet=quiet) is None:
-                all_ok = False
-    else:
-        if not quiet or check:
-            print("\nTemplate files:")
-        if check:
-            if cfg.config_yaml.exists():
-                print(f"  [OK] {cfg.config_yaml}")
-            else:
-                print(f"  [MISSING] {cfg.config_yaml}")
-                all_ok = False
-
-            if cfg.env_template.exists():
-                print(f"  [OK] {cfg.env_template}")
-            else:
-                print(f"  [MISSING] {cfg.env_template}")
-                all_ok = False
-        else:
-            if not quiet:
-                print("  [info] Use --source DIR to copy templates")
-
-    # 5. Initialize database
+    # 4. Initialize database
     if not quiet or check:
         print("\nDeployment database:")
     if check:
         if cfg.db_path.exists():
-            print(f"  [OK] {cfg.db_path}")
+            print(f"  [ok] {cfg.db_path}")
         else:
-            print(f"  [MISSING] {cfg.db_path}")
+            print(f"  [missing] {cfg.db_path}")
             all_ok = False
     else:
         if cfg.db_path.exists():
             if not quiet:
-                print(f"  [exists] {cfg.db_path}")
+                print(f"  [ok] {cfg.db_path}")
         else:
             try:
                 db.init_db(cfg.db_path)
