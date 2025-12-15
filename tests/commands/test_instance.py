@@ -149,6 +149,10 @@ class TestRedeployCommand:
         mocker.patch("ots_containers.commands.instance.assets.update")
         mocker.patch("ots_containers.commands.instance.quadlet.write_all")
         mocker.patch("ots_containers.commands.instance.systemd.restart")
+        mocker.patch(
+            "ots_containers.commands.instance.systemd.unit_exists",
+            return_value=True,
+        )
 
         mock_env_template = mocker.MagicMock()
         mock_env_template.read_text.return_value = "PORT=${PORT}"
@@ -161,3 +165,43 @@ class TestRedeployCommand:
 
         # Should not raise AttributeError
         instance.redeploy(ports=())
+
+    def test_redeploy_starts_new_unit_if_not_exists(self, mocker, tmp_path):
+        """redeploy should start (not restart) if unit doesn't exist yet."""
+        mock_config = mocker.MagicMock()
+        mock_config.base_dir = mocker.MagicMock()
+        mock_config.template_path = tmp_path / "template"
+        mocker.patch(
+            "ots_containers.commands.instance.Config", return_value=mock_config
+        )
+        mocker.patch(
+            "ots_containers.commands.instance.systemd.discover_instances",
+            return_value=[7143],
+        )
+        mocker.patch("ots_containers.commands.instance.assets.update")
+        mocker.patch("ots_containers.commands.instance.quadlet.write_all")
+        mock_start = mocker.patch(
+            "ots_containers.commands.instance.systemd.start"
+        )
+        mock_restart = mocker.patch(
+            "ots_containers.commands.instance.systemd.restart"
+        )
+        mocker.patch(
+            "ots_containers.commands.instance.systemd.unit_exists",
+            return_value=False,
+        )
+
+        mock_env_template = mocker.MagicMock()
+        mock_env_template.read_text.return_value = "PORT=${PORT}"
+        mock_config.base_dir.__truediv__ = mocker.MagicMock(
+            return_value=mocker.MagicMock(
+                __truediv__=mocker.MagicMock(return_value=mock_env_template)
+            )
+        )
+        mock_config.env_file.return_value = mocker.MagicMock()
+
+        instance.redeploy(ports=())
+
+        # Should call start, not restart
+        mock_start.assert_called_once_with("onetime@7143")
+        mock_restart.assert_not_called()

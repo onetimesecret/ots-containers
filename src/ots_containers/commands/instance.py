@@ -144,12 +144,13 @@ def redeploy(
         # Deploy
         print(f"Writing {env_file}")
         _write_env_file(cfg, port)
-        if force:
-            print(f"Starting onetime@{port}")
-            systemd.start(f"onetime@{port}")
+        unit = f"onetime@{port}"
+        if force or not systemd.unit_exists(unit):
+            print(f"Starting {unit}")
+            systemd.start(unit)
         else:
-            print(f"Restarting onetime@{port}")
-            systemd.restart(f"onetime@{port}")
+            print(f"Restarting {unit}")
+            systemd.restart(unit)
 
     verb = "Force redeploying" if force else "Redeploying"
     _for_each(ports, delay, do_redeploy, verb)

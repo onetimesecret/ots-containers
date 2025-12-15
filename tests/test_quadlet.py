@@ -4,306 +4,222 @@
 from pathlib import Path
 
 
+class TestSudoWrite:
+    """Test _sudo_write helper function."""
+
+    def test_sudo_write_calls_mkdir(self, mocker):
+        """Should call sudo mkdir -p for parent directory."""
+        from ots_containers import quadlet
+
+        mock_run = mocker.patch("ots_containers.quadlet.subprocess.run")
+
+        quadlet._sudo_write(
+            Path("/etc/containers/systemd/test.network"), "content"
+        )
+
+        # First call should be mkdir
+        assert mock_run.call_args_list[0][0][0] == [
+            "sudo",
+            "mkdir",
+            "-p",
+            "/etc/containers/systemd",
+        ]
+
+    def test_sudo_write_calls_tee(self, mocker):
+        """Should call sudo tee with content."""
+        from ots_containers import quadlet
+
+        mock_run = mocker.patch("ots_containers.quadlet.subprocess.run")
+
+        quadlet._sudo_write(
+            Path("/etc/containers/systemd/test.network"), "content"
+        )
+
+        # Second call should be tee
+        call = mock_run.call_args_list[1]
+        assert call[0][0] == [
+            "sudo",
+            "tee",
+            "/etc/containers/systemd/test.network",
+        ]
+        assert call[1]["input"] == "content"
+
+
 class TestNetworkTemplate:
     """Test network quadlet template generation."""
 
-    def test_write_network_creates_file(self, mocker, tmp_path):
-        """write_network should create the network quadlet file."""
+    def test_write_network_generates_content(self, mocker):
+        """write_network should generate correct content."""
         from ots_containers import quadlet
         from ots_containers.config import Config
 
-        mocker.patch("ots_containers.quadlet.systemd.daemon_reload")
-
-        cfg = Config(network_path=tmp_path / "onetime.network")
-
-        quadlet.write_network(cfg)
-
-        assert cfg.network_path.exists()
-
-    def test_write_network_uses_macvlan_driver(self, mocker, tmp_path):
-        """Network quadlet should use macvlan driver."""
-        from ots_containers import quadlet
-        from ots_containers.config import Config
-
-        mocker.patch("ots_containers.quadlet.systemd.daemon_reload")
-
-        cfg = Config(network_path=tmp_path / "onetime.network")
-
-        quadlet.write_network(cfg)
-
-        content = cfg.network_path.read_text()
-        assert "Driver=macvlan" in content
-
-    def test_write_network_includes_interface_name(self, mocker, tmp_path):
-        """Network quadlet should include InterfaceName from config."""
-        from ots_containers import quadlet
-        from ots_containers.config import Config
-
-        mocker.patch("ots_containers.quadlet.systemd.daemon_reload")
+        mock_sudo_write = mocker.patch("ots_containers.quadlet._sudo_write")
 
         cfg = Config(
-            network_path=tmp_path / "onetime.network",
+            network_path=Path("/etc/containers/systemd/onetime.network"),
             parent_interface="ens192",
+            network_subnet="10.0.0.0/24",
+            network_gateway="10.0.0.1",
         )
 
         quadlet.write_network(cfg)
 
-        content = cfg.network_path.read_text()
+        mock_sudo_write.assert_called_once()
+        path, content = mock_sudo_write.call_args[0]
+        assert path == cfg.network_path
+        assert "Driver=macvlan" in content
         assert "InterfaceName=ens192" in content
-
-    def test_write_network_includes_subnet(self, mocker, tmp_path):
-        """Network quadlet should include Subnet from config."""
-        from ots_containers import quadlet
-        from ots_containers.config import Config
-
-        mocker.patch("ots_containers.quadlet.systemd.daemon_reload")
-
-        cfg = Config(
-            network_path=tmp_path / "onetime.network",
-            network_subnet="192.168.1.0/24",
-        )
-
-        quadlet.write_network(cfg)
-
-        content = cfg.network_path.read_text()
-        assert "Subnet=192.168.1.0/24" in content
-
-    def test_write_network_includes_gateway(self, mocker, tmp_path):
-        """Network quadlet should include Gateway from config."""
-        from ots_containers import quadlet
-        from ots_containers.config import Config
-
-        mocker.patch("ots_containers.quadlet.systemd.daemon_reload")
-
-        cfg = Config(
-            network_path=tmp_path / "onetime.network",
-            network_gateway="192.168.1.1",
-        )
-
-        quadlet.write_network(cfg)
-
-        content = cfg.network_path.read_text()
-        assert "Gateway=192.168.1.1" in content
-
-    def test_write_network_includes_dns(self, mocker, tmp_path):
-        """Network quadlet should include DNS setting."""
-        from ots_containers import quadlet
-        from ots_containers.config import Config
-
-        mocker.patch("ots_containers.quadlet.systemd.daemon_reload")
-
-        cfg = Config(network_path=tmp_path / "onetime.network")
-
-        quadlet.write_network(cfg)
-
-        content = cfg.network_path.read_text()
+        assert "Subnet=10.0.0.0/24" in content
+        assert "Gateway=10.0.0.1" in content
         assert "DNS=9.9.9.9" in content
 
-    def test_write_network_creates_parent_dirs(self, mocker, tmp_path):
-        """write_network should create parent directories if needed."""
+    def test_write_network_uses_config_values(self, mocker):
+        """write_network should use values from config."""
         from ots_containers import quadlet
         from ots_containers.config import Config
 
-        mocker.patch("ots_containers.quadlet.systemd.daemon_reload")
+        mock_sudo_write = mocker.patch("ots_containers.quadlet._sudo_write")
 
-        nested_path = tmp_path / "subdir" / "onetime.network"
-        cfg = Config(network_path=nested_path)
+        cfg = Config(
+            network_path=Path("/custom/path/mynet.network"),
+            parent_interface="eth0",
+            network_subnet="192.168.100.0/24",
+            network_gateway="192.168.100.1",
+        )
 
         quadlet.write_network(cfg)
 
-        assert nested_path.exists()
+        path, content = mock_sudo_write.call_args[0]
+        assert path == Path("/custom/path/mynet.network")
+        assert "InterfaceName=eth0" in content
+        assert "Subnet=192.168.100.0/24" in content
+        assert "Gateway=192.168.100.1" in content
 
 
 class TestContainerTemplate:
     """Test container quadlet template generation."""
 
-    def test_write_template_creates_file(self, mocker, tmp_path):
-        """write_template should create the container quadlet file."""
-        from ots_containers import quadlet
-        from ots_containers.config import Config
-
-        mocker.patch("ots_containers.quadlet.systemd.daemon_reload")
-
-        cfg = Config(template_path=tmp_path / "onetime@.container")
-
-        quadlet.write_template(cfg)
-
-        assert cfg.template_path.exists()
-
-    def test_write_template_includes_image(self, mocker, tmp_path, monkeypatch):
-        """Container quadlet should include Image from config."""
+    def test_write_template_generates_content(self, mocker, monkeypatch):
+        """write_template should generate correct content."""
         monkeypatch.setenv("IMAGE", "myregistry/myimage")
         monkeypatch.setenv("TAG", "v1.0.0")
 
         from ots_containers import quadlet
         from ots_containers.config import Config
 
-        mocker.patch("ots_containers.quadlet.systemd.daemon_reload")
-
-        cfg = Config(template_path=tmp_path / "onetime@.container")
-
-        quadlet.write_template(cfg)
-
-        content = cfg.template_path.read_text()
-        assert "Image=myregistry/myimage:v1.0.0" in content
-
-    def test_write_template_includes_network(self, mocker, tmp_path):
-        """Container quadlet should reference network quadlet."""
-        from ots_containers import quadlet
-        from ots_containers.config import Config
-
-        mocker.patch("ots_containers.quadlet.systemd.daemon_reload")
+        mock_sudo_write = mocker.patch("ots_containers.quadlet._sudo_write")
 
         cfg = Config(
-            template_path=tmp_path / "onetime@.container",
+            template_path=Path("/etc/containers/systemd/onetime@.container"),
+            base_dir=Path("/opt/ots"),
             network_name="onetime",
         )
 
         quadlet.write_template(cfg)
 
-        content = cfg.template_path.read_text()
+        mock_sudo_write.assert_called_once()
+        path, content = mock_sudo_write.call_args[0]
+        assert path == cfg.template_path
+        assert "Image=myregistry/myimage:v1.0.0" in content
         assert "Network=onetime.network" in content
-
-    def test_write_template_includes_publish_port(self, mocker, tmp_path):
-        """Container quadlet should include PublishPort with instance."""
-        from ots_containers import quadlet
-        from ots_containers.config import Config
-
-        mocker.patch("ots_containers.quadlet.systemd.daemon_reload")
-
-        cfg = Config(template_path=tmp_path / "onetime@.container")
-
-        quadlet.write_template(cfg)
-
-        content = cfg.template_path.read_text()
         assert "PublishPort=%i:3000" in content
-
-    def test_write_template_includes_environment_file(self, mocker, tmp_path):
-        """Container quadlet should reference environment file with instance."""
-        from ots_containers import quadlet
-        from ots_containers.config import Config
-
-        mocker.patch("ots_containers.quadlet.systemd.daemon_reload")
-
-        cfg = Config(
-            template_path=tmp_path / "onetime@.container",
-            base_dir=Path("/opt/ots"),
-        )
-
-        quadlet.write_template(cfg)
-
-        content = cfg.template_path.read_text()
         assert "EnvironmentFile=/opt/ots/.env-%i" in content
 
-    def test_write_template_includes_volumes(self, mocker, tmp_path):
+    def test_write_template_includes_volumes(self, mocker):
         """Container quadlet should mount config and static assets."""
         from ots_containers import quadlet
         from ots_containers.config import Config
 
-        mocker.patch("ots_containers.quadlet.systemd.daemon_reload")
+        mock_sudo_write = mocker.patch("ots_containers.quadlet._sudo_write")
 
         cfg = Config(
-            template_path=tmp_path / "onetime@.container",
+            template_path=Path("/etc/containers/systemd/onetime@.container"),
             base_dir=Path("/opt/ots"),
         )
 
         quadlet.write_template(cfg)
 
-        content = cfg.template_path.read_text()
+        _, content = mock_sudo_write.call_args[0]
         assert (
             "Volume=/opt/ots/config/config.yaml:/app/etc/config.yaml:ro"
             in content
         )
         assert "Volume=static_assets:/app/public:ro" in content
 
-    def test_write_template_includes_systemd_dependencies(
-        self, mocker, tmp_path
-    ):
+    def test_write_template_includes_systemd_dependencies(self, mocker):
         """Container quadlet should have proper systemd dependencies."""
         from ots_containers import quadlet
         from ots_containers.config import Config
 
-        mocker.patch("ots_containers.quadlet.systemd.daemon_reload")
+        mock_sudo_write = mocker.patch("ots_containers.quadlet._sudo_write")
 
-        cfg = Config(template_path=tmp_path / "onetime@.container")
+        cfg = Config(
+            template_path=Path("/etc/containers/systemd/onetime@.container"),
+        )
 
         quadlet.write_template(cfg)
 
-        content = cfg.template_path.read_text()
+        _, content = mock_sudo_write.call_args[0]
         assert "After=local-fs.target network-online.target" in content
         assert "Wants=network-online.target" in content
         assert "WantedBy=multi-user.target" in content
-
-    def test_write_template_creates_parent_dirs(self, mocker, tmp_path):
-        """write_template should create parent directories if needed."""
-        from ots_containers import quadlet
-        from ots_containers.config import Config
-
-        mocker.patch("ots_containers.quadlet.systemd.daemon_reload")
-
-        nested_path = tmp_path / "subdir" / "onetime@.container"
-        cfg = Config(template_path=nested_path)
-
-        quadlet.write_template(cfg)
-
-        assert nested_path.exists()
 
 
 class TestWriteAll:
     """Test write_all function."""
 
-    def test_write_all_creates_both_files(self, mocker, tmp_path):
-        """write_all should create both network and container quadlet files."""
+    def test_write_all_calls_both_writes(self, mocker):
+        """write_all should call both write_network and write_template."""
         from ots_containers import quadlet
         from ots_containers.config import Config
 
+        mock_write_network = mocker.patch(
+            "ots_containers.quadlet.write_network"
+        )
+        mock_write_template = mocker.patch(
+            "ots_containers.quadlet.write_template"
+        )
         mock_daemon_reload = mocker.patch(
             "ots_containers.quadlet.systemd.daemon_reload"
         )
 
-        cfg = Config(
-            template_path=tmp_path / "onetime@.container",
-            network_path=tmp_path / "onetime.network",
-        )
+        cfg = Config()
 
         quadlet.write_all(cfg)
 
-        assert cfg.template_path.exists()
-        assert cfg.network_path.exists()
+        mock_write_network.assert_called_once_with(cfg)
+        mock_write_template.assert_called_once_with(cfg)
         mock_daemon_reload.assert_called_once()
 
-    def test_write_all_network_content(self, mocker, tmp_path):
-        """write_all should generate correct network content."""
+    def test_write_all_reloads_daemon_after_writes(self, mocker):
+        """write_all should reload systemd after writing files."""
         from ots_containers import quadlet
         from ots_containers.config import Config
 
-        mocker.patch("ots_containers.quadlet.systemd.daemon_reload")
+        call_order = []
 
-        cfg = Config(
-            template_path=tmp_path / "onetime@.container",
-            network_path=tmp_path / "onetime.network",
+        def track_network(cfg):
+            call_order.append("network")
+
+        def track_template(cfg):
+            call_order.append("template")
+
+        def track_reload():
+            call_order.append("reload")
+
+        mocker.patch(
+            "ots_containers.quadlet.write_network", side_effect=track_network
         )
+        mocker.patch(
+            "ots_containers.quadlet.write_template", side_effect=track_template
+        )
+        mocker.patch(
+            "ots_containers.quadlet.systemd.daemon_reload",
+            side_effect=track_reload,
+        )
+
+        cfg = Config()
 
         quadlet.write_all(cfg)
 
-        network_content = cfg.network_path.read_text()
-        assert "Driver=macvlan" in network_content
-        assert f"InterfaceName={cfg.parent_interface}" in network_content
-
-    def test_write_all_container_content(self, mocker, tmp_path):
-        """write_all should generate correct container content."""
-        from ots_containers import quadlet
-        from ots_containers.config import Config
-
-        mocker.patch("ots_containers.quadlet.systemd.daemon_reload")
-
-        cfg = Config(
-            template_path=tmp_path / "onetime@.container",
-            network_path=tmp_path / "onetime.network",
-        )
-
-        quadlet.write_all(cfg)
-
-        container_content = cfg.template_path.read_text()
-        assert "Network=onetime.network" in container_content
-        assert "PublishPort=%i:3000" in container_content
+        assert call_order == ["network", "template", "reload"]

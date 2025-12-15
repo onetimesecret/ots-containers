@@ -41,3 +41,13 @@ def status(unit: str, lines: int = 25) -> None:
         ["sudo", "systemctl", "--no-pager", f"-n{lines}", "status", unit],
         check=False,  # status returns non-zero if not running
     )
+
+
+def unit_exists(unit: str) -> bool:
+    """Check if a systemd unit exists (loaded or not)."""
+    result = subprocess.run(
+        ["systemctl", "list-unit-files", unit, "--plain", "--no-legend"],
+        capture_output=True,
+        text=True,
+    )
+    return bool(result.stdout.strip())

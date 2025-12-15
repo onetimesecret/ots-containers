@@ -245,3 +245,49 @@ class TestStatus:
         systemd.status("onetime@7043")  # Should not raise
 
         mock_run.assert_called_once()
+
+
+class TestUnitExists:
+    """Test unit_exists function."""
+
+    def test_unit_exists_returns_true_when_found(self, mocker):
+        """Should return True when unit file exists."""
+        from ots_containers import systemd
+
+        mock_result = mocker.Mock()
+        mock_result.stdout = "onetime@.container enabled enabled"
+        mocker.patch("subprocess.run", return_value=mock_result)
+
+        assert systemd.unit_exists("onetime@7043") is True
+
+    def test_unit_exists_returns_false_when_not_found(self, mocker):
+        """Should return False when unit file doesn't exist."""
+        from ots_containers import systemd
+
+        mock_result = mocker.Mock()
+        mock_result.stdout = ""
+        mocker.patch("subprocess.run", return_value=mock_result)
+
+        assert systemd.unit_exists("onetime@7043") is False
+
+    def test_unit_exists_calls_systemctl_correctly(self, mocker):
+        """Should call systemctl list-unit-files with correct args."""
+        from ots_containers import systemd
+
+        mock_result = mocker.Mock()
+        mock_result.stdout = ""
+        mock_run = mocker.patch("subprocess.run", return_value=mock_result)
+
+        systemd.unit_exists("onetime@7043")
+
+        mock_run.assert_called_once_with(
+            [
+                "systemctl",
+                "list-unit-files",
+                "onetime@7043",
+                "--plain",
+                "--no-legend",
+            ],
+            capture_output=True,
+            text=True,
+        )
