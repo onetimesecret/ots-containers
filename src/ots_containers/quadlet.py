@@ -1,26 +1,7 @@
 # src/ots_containers/quadlet.py
 
-import subprocess
-from pathlib import Path
-
 from . import systemd
 from .config import Config
-
-
-def _sudo_write(path: Path, content: str) -> None:
-    """Write content to a file using sudo tee."""
-    subprocess.run(
-        ["sudo", "mkdir", "-p", str(path.parent)],
-        check=True,
-    )
-    subprocess.run(
-        ["sudo", "tee", str(path)],
-        input=content,
-        text=True,
-        check=True,
-        stdout=subprocess.DEVNULL,
-    )
-
 
 CONTAINER_TEMPLATE = """\
 [Unit]
@@ -57,7 +38,8 @@ def write_network(cfg: Config) -> None:
         network_subnet=cfg.network_subnet,
         network_gateway=cfg.network_gateway,
     )
-    _sudo_write(cfg.network_path, content)
+    cfg.network_path.parent.mkdir(parents=True, exist_ok=True)
+    cfg.network_path.write_text(content)
 
 
 def write_template(cfg: Config) -> None:
@@ -67,7 +49,8 @@ def write_template(cfg: Config) -> None:
         base_dir=cfg.base_dir,
         network_name=cfg.network_name,
     )
-    _sudo_write(cfg.template_path, content)
+    cfg.template_path.parent.mkdir(parents=True, exist_ok=True)
+    cfg.template_path.write_text(content)
 
 
 def write_all(cfg: Config) -> None:
