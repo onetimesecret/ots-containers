@@ -93,7 +93,7 @@ def deploy(ports: Ports, delay: Delay = 5):
     print(f"Updating assets from {cfg.base_dir / 'config'}")
     assets.update(cfg, create_volume=True)
     print(f"Writing quadlet files to {cfg.template_path.parent}")
-    quadlet.write_all(cfg)
+    quadlet.write_template(cfg)
 
     def do_deploy(port: int) -> None:
         env_file = cfg.env_file(port)
@@ -130,7 +130,7 @@ def redeploy(
     print(f"Updating assets from {cfg.base_dir / 'config'}")
     assets.update(cfg, create_volume=force)
     print(f"Writing quadlet files to {cfg.template_path.parent}")
-    quadlet.write_all(cfg)
+    quadlet.write_template(cfg)
 
     def do_redeploy(port: int) -> None:
         env_file = cfg.env_file(port)
@@ -218,8 +218,13 @@ def restart(ports: OptionalPorts = ()):
     if not ports:
         return
     for port in ports:
-        systemd.restart(f"onetime@{port}")
-        print(f"Restarted onetime@{port}")
+        unit = f"onetime@{port}"
+        if systemd.unit_exists(unit):
+            systemd.restart(unit)
+            print(f"Restarted {unit}")
+        else:
+            systemd.start(unit)
+            print(f"Started {unit} (unit was not loaded)")
 
 
 @app.command
