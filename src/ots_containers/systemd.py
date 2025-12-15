@@ -5,7 +5,10 @@ import subprocess
 
 
 def discover_instances() -> list[int]:
-    """Find all running onetime@* units and return their ports."""
+    """Find all running onetime@* units and return their ports.
+
+    Only returns units that are active and running, not failed or inactive.
+    """
     result = subprocess.run(
         ["systemctl", "list-units", "onetime@*", "--plain", "--no-legend"],
         capture_output=True,
@@ -13,8 +16,15 @@ def discover_instances() -> list[int]:
     )
     ports = []
     for line in result.stdout.strip().splitlines():
-        # Format: onetime@7043.service loaded active running ...
-        match = re.match(r"onetime@(\d+)\.service", line.split()[0])
+        # Format: onetime@7043.service loaded active running Description...
+        # Columns: UNIT LOAD ACTIVE SUB DESCRIPTION
+        parts = line.split()
+        if len(parts) < 4:
+            continue
+        unit, _load, active, sub = parts[:4]
+        if active != "active" or sub != "running":
+            continue
+        match = re.match(r"onetime@(\d+)\.service", unit)
         if match:
             ports.append(int(match.group(1)))
     return sorted(ports)
