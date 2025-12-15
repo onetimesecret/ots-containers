@@ -85,8 +85,8 @@ def deploy(ports: Ports, delay: Delay = 5):
     """
     cfg = Config()
     cfg.validate()
-    print(f"Reading config from {cfg.config_file}")
-    print(f"Updating assets from {cfg.assets_dir}")
+    print(f"Reading config from {cfg.base_dir / 'config' / 'config.yaml'}")
+    print(f"Updating assets from {cfg.base_dir / 'config'}")
     assets.update(cfg, create_volume=True)
     print(f"Writing quadlet template to {quadlet.template_path(cfg)}")
     quadlet.write_template(cfg)
@@ -122,8 +122,8 @@ def redeploy(
         return
     cfg = Config()
     cfg.validate()
-    print(f"Reading config from {cfg.config_file}")
-    print(f"Updating assets from {cfg.assets_dir}")
+    print(f"Reading config from {cfg.base_dir / 'config' / 'config.yaml'}")
+    print(f"Updating assets from {cfg.base_dir / 'config'}")
     assets.update(cfg, create_volume=force)
     print(f"Writing quadlet template to {quadlet.template_path(cfg)}")
     quadlet.write_template(cfg)
