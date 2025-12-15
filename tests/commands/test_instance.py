@@ -64,7 +64,7 @@ class TestDeployCommand:
     def test_deploy_validates_config(self, mocker):
         """deploy should validate config before proceeding."""
         mock_validate = mocker.patch(
-            "ots_containers.commands.instance.Config.validate",
+            "ots_containers.commands.instance.app.Config.validate",
             side_effect=SystemExit("Missing required files"),
         )
 
@@ -78,10 +78,10 @@ class TestDeployCommand:
         mock_config = mocker.MagicMock()
         mock_config.base_dir = mocker.MagicMock()
         mock_config.template_path = mocker.MagicMock()
-        mocker.patch("ots_containers.commands.instance.Config", return_value=mock_config)
-        mock_assets = mocker.patch("ots_containers.commands.instance.assets.update")
-        mock_quadlet = mocker.patch("ots_containers.commands.instance.quadlet.write_template")
-        _mock_systemd = mocker.patch("ots_containers.commands.instance.systemd.start")
+        mocker.patch("ots_containers.commands.instance.app.Config", return_value=mock_config)
+        mock_assets = mocker.patch("ots_containers.commands.instance.app.assets.update")
+        mock_quadlet = mocker.patch("ots_containers.commands.instance.app.quadlet.write_template")
+        _mock_systemd = mocker.patch("ots_containers.commands.instance.app.systemd.start")
         mock_config.env_file.return_value = mocker.MagicMock()
         mock_config.env_file.return_value.write_text = mocker.MagicMock()
         mocker.patch.object(
@@ -111,7 +111,7 @@ class TestRedeployCommand:
     def test_redeploy_with_no_instances_found(self, mocker, capsys):
         """redeploy with no ports should discover instances."""
         mocker.patch(
-            "ots_containers.commands.instance.systemd.discover_instances",
+            "ots_containers.commands.instance.app.systemd.discover_instances",
             return_value=[],
         )
 
@@ -126,16 +126,16 @@ class TestRedeployCommand:
         mock_config = mocker.MagicMock()
         mock_config.base_dir = mocker.MagicMock()
         mock_config.template_path = tmp_path / "template"
-        mocker.patch("ots_containers.commands.instance.Config", return_value=mock_config)
+        mocker.patch("ots_containers.commands.instance.app.Config", return_value=mock_config)
         mocker.patch(
-            "ots_containers.commands.instance.systemd.discover_instances",
+            "ots_containers.commands.instance.app.systemd.discover_instances",
             return_value=[7143],
         )
-        mocker.patch("ots_containers.commands.instance.assets.update")
-        mocker.patch("ots_containers.commands.instance.quadlet.write_template")
-        mocker.patch("ots_containers.commands.instance.systemd.restart")
+        mocker.patch("ots_containers.commands.instance.app.assets.update")
+        mocker.patch("ots_containers.commands.instance.app.quadlet.write_template")
+        mocker.patch("ots_containers.commands.instance.app.systemd.restart")
         mocker.patch(
-            "ots_containers.commands.instance.systemd.unit_exists",
+            "ots_containers.commands.instance.app.systemd.unit_exists",
             return_value=True,
         )
 
@@ -156,17 +156,17 @@ class TestRedeployCommand:
         mock_config = mocker.MagicMock()
         mock_config.base_dir = mocker.MagicMock()
         mock_config.template_path = tmp_path / "template"
-        mocker.patch("ots_containers.commands.instance.Config", return_value=mock_config)
+        mocker.patch("ots_containers.commands.instance.app.Config", return_value=mock_config)
         mocker.patch(
-            "ots_containers.commands.instance.systemd.discover_instances",
+            "ots_containers.commands.instance.app.systemd.discover_instances",
             return_value=[7143],
         )
-        mocker.patch("ots_containers.commands.instance.assets.update")
-        mocker.patch("ots_containers.commands.instance.quadlet.write_template")
-        mock_start = mocker.patch("ots_containers.commands.instance.systemd.start")
-        mock_restart = mocker.patch("ots_containers.commands.instance.systemd.restart")
+        mocker.patch("ots_containers.commands.instance.app.assets.update")
+        mocker.patch("ots_containers.commands.instance.app.quadlet.write_template")
+        mock_start = mocker.patch("ots_containers.commands.instance.app.systemd.start")
+        mock_restart = mocker.patch("ots_containers.commands.instance.app.systemd.restart")
         mocker.patch(
-            "ots_containers.commands.instance.systemd.unit_exists",
+            "ots_containers.commands.instance.app.systemd.unit_exists",
             return_value=False,
         )
 
