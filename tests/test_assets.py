@@ -12,9 +12,7 @@ from ots_containers.config import Config
 class TestAssetsUpdate:
     """Test the assets.update function."""
 
-    def test_update_raises_user_friendly_error_on_volume_mount_failure(
-        self, mocker
-    ):
+    def test_update_raises_user_friendly_error_on_volume_mount_failure(self, mocker):
         """Volume mount failure should raise SystemExit with helpful message.
 
         Currently broken: raises raw CalledProcessError with traceback.

@@ -14,9 +14,7 @@ class TestCLIStructure:
         import re
 
         assert app.version is not None
-        version = (
-            app.version if isinstance(app.version, str) else str(app.version)
-        )
+        version = app.version if isinstance(app.version, str) else str(app.version)
 
         assert re.match(r"^\d+\.\d+\.\d+$", version)
 
@@ -54,10 +52,7 @@ class TestCLISubcommands:
             app(["instance", "--help"])
         assert exc_info.value.code == 0
         captured = capsys.readouterr()
-        assert (
-            "instance" in captured.out.lower()
-            or "deploy" in captured.out.lower()
-        )
+        assert "instance" in captured.out.lower() or "deploy" in captured.out.lower()
 
     def test_assets_subcommand_exists(self, capsys):
         """assets subcommand should exist."""
@@ -65,9 +60,7 @@ class TestCLISubcommands:
             app(["assets", "--help"])
         assert exc_info.value.code == 0
         captured = capsys.readouterr()
-        assert (
-            "assets" in captured.out.lower() or "sync" in captured.out.lower()
-        )
+        assert "assets" in captured.out.lower() or "sync" in captured.out.lower()
 
     def test_invalid_subcommand_fails(self):
         """Invalid subcommand should fail."""
@@ -85,10 +78,7 @@ class TestAssetsSync:
             app(["assets", "sync", "--help"])
         assert exc_info.value.code == 0
         captured = capsys.readouterr()
-        assert (
-            "create-volume" in captured.out.lower()
-            or "volume" in captured.out.lower()
-        )
+        assert "create-volume" in captured.out.lower() or "volume" in captured.out.lower()
 
     def test_assets_sync_requires_valid_config(self, mocker, tmp_path):
         """assets sync should validate config before running."""

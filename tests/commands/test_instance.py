@@ -76,7 +76,10 @@ class TestDeployCommand:
     def test_deploy_calls_assets_update(self, mocker):
         """deploy should update assets."""
         mock_config = mocker.MagicMock()
-        mock_config.base_dir = mocker.MagicMock()
+        mock_config.config_dir = mocker.MagicMock()
+        mock_config.config_yaml = mocker.MagicMock()
+        mock_config.env_template = mocker.MagicMock()
+        mock_config.var_dir = mocker.MagicMock()
         mock_config.template_path = mocker.MagicMock()
         mocker.patch("ots_containers.commands.instance.app.Config", return_value=mock_config)
         mock_assets = mocker.patch("ots_containers.commands.instance.app.assets.update")
@@ -84,20 +87,10 @@ class TestDeployCommand:
         _mock_systemd = mocker.patch("ots_containers.commands.instance.app.systemd.start")
         mock_config.env_file.return_value = mocker.MagicMock()
         mock_config.env_file.return_value.write_text = mocker.MagicMock()
-        mocker.patch.object(
-            mock_config.base_dir / "config" / ".env",
-            "read_text",
-            return_value="PORT=${PORT}",
-        )
 
-        # Mock the path operations
-        mock_env_template = mocker.MagicMock()
-        mock_env_template.read_text.return_value = "PORT=${PORT}"
-        mock_config.base_dir.__truediv__ = mocker.MagicMock(
-            return_value=mocker.MagicMock(
-                __truediv__=mocker.MagicMock(return_value=mock_env_template)
-            )
-        )
+        # Mock the env_template read
+        mock_config.env_template.read_text.return_value = "PORT=${PORT}"
+        mock_config.var_dir.mkdir = mocker.MagicMock()
 
         instance.deploy(ports=(7143,))
 
@@ -124,7 +117,10 @@ class TestRedeployCommand:
         """redeploy should use cfg.template_path (not quadlet.template_path)."""
         # This test verifies the fix for the AttributeError
         mock_config = mocker.MagicMock()
-        mock_config.base_dir = mocker.MagicMock()
+        mock_config.config_dir = mocker.MagicMock()
+        mock_config.config_yaml = mocker.MagicMock()
+        mock_config.env_template = mocker.MagicMock()
+        mock_config.var_dir = mocker.MagicMock()
         mock_config.template_path = tmp_path / "template"
         mocker.patch("ots_containers.commands.instance.app.Config", return_value=mock_config)
         mocker.patch(
@@ -139,13 +135,9 @@ class TestRedeployCommand:
             return_value=True,
         )
 
-        mock_env_template = mocker.MagicMock()
-        mock_env_template.read_text.return_value = "PORT=${PORT}"
-        mock_config.base_dir.__truediv__ = mocker.MagicMock(
-            return_value=mocker.MagicMock(
-                __truediv__=mocker.MagicMock(return_value=mock_env_template)
-            )
-        )
+        # Mock the env_template read
+        mock_config.env_template.read_text.return_value = "PORT=${PORT}"
+        mock_config.var_dir.mkdir = mocker.MagicMock()
         mock_config.env_file.return_value = mocker.MagicMock()
 
         # Should not raise AttributeError
@@ -154,7 +146,10 @@ class TestRedeployCommand:
     def test_redeploy_starts_new_unit_if_not_exists(self, mocker, tmp_path):
         """redeploy should start (not restart) if unit doesn't exist yet."""
         mock_config = mocker.MagicMock()
-        mock_config.base_dir = mocker.MagicMock()
+        mock_config.config_dir = mocker.MagicMock()
+        mock_config.config_yaml = mocker.MagicMock()
+        mock_config.env_template = mocker.MagicMock()
+        mock_config.var_dir = mocker.MagicMock()
         mock_config.template_path = tmp_path / "template"
         mocker.patch("ots_containers.commands.instance.app.Config", return_value=mock_config)
         mocker.patch(
@@ -170,13 +165,9 @@ class TestRedeployCommand:
             return_value=False,
         )
 
-        mock_env_template = mocker.MagicMock()
-        mock_env_template.read_text.return_value = "PORT=${PORT}"
-        mock_config.base_dir.__truediv__ = mocker.MagicMock(
-            return_value=mocker.MagicMock(
-                __truediv__=mocker.MagicMock(return_value=mock_env_template)
-            )
-        )
+        # Mock the env_template read
+        mock_config.env_template.read_text.return_value = "PORT=${PORT}"
+        mock_config.var_dir.mkdir = mocker.MagicMock()
         mock_config.env_file.return_value = mocker.MagicMock()
 
         instance.redeploy(ports=())

@@ -43,12 +43,8 @@ class TestAssetsSyncCommand:
         from ots_containers.commands import assets
 
         mock_config = mocker.MagicMock()
-        mocker.patch(
-            "ots_containers.commands.assets.Config", return_value=mock_config
-        )
-        mock_update = mocker.patch(
-            "ots_containers.commands.assets.assets_module.update"
-        )
+        mocker.patch("ots_containers.commands.assets.Config", return_value=mock_config)
+        mock_update = mocker.patch("ots_containers.commands.assets.assets_module.update")
 
         assets.sync()
 
@@ -59,12 +55,8 @@ class TestAssetsSyncCommand:
         from ots_containers.commands import assets
 
         mock_config = mocker.MagicMock()
-        mocker.patch(
-            "ots_containers.commands.assets.Config", return_value=mock_config
-        )
-        mock_update = mocker.patch(
-            "ots_containers.commands.assets.assets_module.update"
-        )
+        mocker.patch("ots_containers.commands.assets.Config", return_value=mock_config)
+        mock_update = mocker.patch("ots_containers.commands.assets.assets_module.update")
 
         assets.sync(create_volume=True)
 
@@ -82,7 +74,4 @@ class TestAssetsSyncHelp:
             app(["assets", "sync", "--help"])
         assert exc_info.value.code == 0
         captured = capsys.readouterr()
-        assert (
-            "create-volume" in captured.out.lower()
-            or "sync" in captured.out.lower()
-        )
+        assert "create-volume" in captured.out.lower() or "sync" in captured.out.lower()

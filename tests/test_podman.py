@@ -88,9 +88,7 @@ class TestPodmanCommandBuilding:
         idx = call_args.index("--all")
         if idx < len(call_args) - 1:
             # Next item shouldn't be the value for this flag
-            assert (
-                call_args[idx + 1].startswith("-") or idx == len(call_args) - 1
-            )
+            assert call_args[idx + 1].startswith("-") or idx == len(call_args) - 1
 
     def test_boolean_flag_false(self, mocker):
         """Boolean False should not add flag."""

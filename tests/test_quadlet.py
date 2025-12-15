@@ -69,13 +69,13 @@ class TestContainerTemplate:
 
         cfg = Config(
             template_path=tmp_path / "onetime@.container",
-            base_dir=Path("/opt/ots"),
+            var_dir=Path("/var/opt/ots"),
         )
 
         quadlet.write_template(cfg)
 
         content = cfg.template_path.read_text()
-        assert "EnvironmentFile=/opt/ots/.env-%i" in content
+        assert "EnvironmentFile=/var/opt/ots/.env-%i" in content
 
     def test_write_template_includes_volumes(self, mocker, tmp_path):
         """Container quadlet should mount config and static assets."""
@@ -85,13 +85,13 @@ class TestContainerTemplate:
 
         cfg = Config(
             template_path=tmp_path / "onetime@.container",
-            base_dir=Path("/opt/ots"),
+            config_dir=Path("/etc/ots"),
         )
 
         quadlet.write_template(cfg)
 
         content = cfg.template_path.read_text()
-        assert "Volume=/opt/ots/config/config.yaml:/app/etc/config.yaml:ro" in content
+        assert "Volume=/etc/ots/config.yaml:/app/etc/config.yaml:ro" in content
         assert "Volume=static_assets:/app/public:ro" in content
 
     def test_write_template_includes_systemd_dependencies(self, mocker, tmp_path):

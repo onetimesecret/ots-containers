@@ -17,9 +17,7 @@ class Podman:
         podman.volume.mount("myvolume")
     """
 
-    def __init__(
-        self, executable: str = "podman", _subcommand: list[str] | None = None
-    ):
+    def __init__(self, executable: str = "podman", _subcommand: list[str] | None = None):
         self.executable = executable
         self._subcommand = _subcommand or []
 

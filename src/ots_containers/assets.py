@@ -12,17 +12,13 @@ def update(cfg: Config, create_volume: bool = True) -> None:
         podman.volume.create("static_assets", check=False)
 
     try:
-        result = podman.volume.mount(
-            "static_assets", capture_output=True, text=True, check=True
-        )
+        result = podman.volume.mount("static_assets", capture_output=True, text=True, check=True)
     except subprocess.CalledProcessError as e:
         stderr = e.stderr.strip() if e.stderr else "unknown error"
         raise SystemExit(f"Failed to mount volume 'static_assets': {stderr}")
     assets_dir = Path(result.stdout.strip())
 
-    result = podman.create(
-        cfg.image_with_tag, capture_output=True, text=True, check=True
-    )
+    result = podman.create(cfg.image_with_tag, capture_output=True, text=True, check=True)
     container_id = result.stdout.strip()
 
     try:

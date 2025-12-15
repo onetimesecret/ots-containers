@@ -32,14 +32,14 @@ def list_instances(ports: OptionalPorts = (), alias: str = "instances"):
 
 @app.command
 def deploy(ports: Ports, delay: Delay = 5):
-    """Deploy new instance(s) from config.yaml and config/.env template.
+    """Deploy new instance(s) from config.yaml and .env template.
 
     Creates .env-{port}, writes quadlet config, starts systemd service.
     """
     cfg = Config()
     cfg.validate()
-    print(f"Reading config from {cfg.base_dir / 'config' / 'config.yaml'}")
-    print(f"Updating assets from {cfg.base_dir / 'config'}")
+    print(f"Reading config from {cfg.config_yaml}")
+    print(f"Reading env template from {cfg.env_template}")
     assets.update(cfg, create_volume=True)
     print(f"Writing quadlet files to {cfg.template_path.parent}")
     quadlet.write_template(cfg)
@@ -63,9 +63,9 @@ def redeploy(
         cyclopts.Parameter(help="Teardown and recreate (deletes .env, stops, redeploys)"),
     ] = False,
 ):
-    """Regenerate .env-{port} and quadlet from config.yaml/config/.env, restart.
+    """Regenerate .env-{port} and quadlet from config.yaml/.env, restart.
 
-    Use after editing config.yaml or config/.env template.
+    Use after editing config.yaml or .env template.
     Use --force to fully teardown and recreate.
     """
     ports = resolve_ports(ports)
@@ -73,8 +73,8 @@ def redeploy(
         return
     cfg = Config()
     cfg.validate()
-    print(f"Reading config from {cfg.base_dir / 'config' / 'config.yaml'}")
-    print(f"Updating assets from {cfg.base_dir / 'config'}")
+    print(f"Reading config from {cfg.config_yaml}")
+    print(f"Reading env template from {cfg.env_template}")
     assets.update(cfg, create_volume=force)
     print(f"Writing quadlet files to {cfg.template_path.parent}")
     quadlet.write_template(cfg)
@@ -130,7 +130,7 @@ def start(ports: OptionalPorts = ()):
     """Start systemd unit(s) for instance(s).
 
     Picks up manual edits to .env-{port}. Does NOT regenerate from
-    config.yaml or config/.env - use 'redeploy' for that.
+    config.yaml or .env template - use 'redeploy' for that.
     """
     ports = resolve_ports(ports)
     if not ports:
@@ -159,7 +159,7 @@ def restart(ports: OptionalPorts = ()):
     """Restart systemd unit(s) for instance(s).
 
     Picks up manual edits to .env-{port}. Does NOT regenerate from
-    config.yaml or config/.env - use 'redeploy' for that.
+    config.yaml or .env template - use 'redeploy' for that.
     """
     ports = resolve_ports(ports)
     if not ports:

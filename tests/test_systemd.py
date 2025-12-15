@@ -82,9 +82,7 @@ class TestDaemonReload:
 
         systemd.daemon_reload()
 
-        mock_run.assert_called_once_with(
-            ["sudo", "systemctl", "daemon-reload"], check=True
-        )
+        mock_run.assert_called_once_with(["sudo", "systemctl", "daemon-reload"], check=True)
 
     def test_daemon_reload_raises_on_failure(self, mocker):
         """Should propagate CalledProcessError on failure."""
@@ -110,9 +108,7 @@ class TestStart:
 
         systemd.start("onetime@7043")
 
-        mock_run.assert_called_once_with(
-            ["sudo", "systemctl", "start", "onetime@7043"], check=True
-        )
+        mock_run.assert_called_once_with(["sudo", "systemctl", "start", "onetime@7043"], check=True)
 
     def test_start_raises_on_failure(self, mocker):
         """Should propagate CalledProcessError on failure."""
@@ -138,9 +134,7 @@ class TestStop:
 
         systemd.stop("onetime@7043")
 
-        mock_run.assert_called_once_with(
-            ["sudo", "systemctl", "stop", "onetime@7043"], check=True
-        )
+        mock_run.assert_called_once_with(["sudo", "systemctl", "stop", "onetime@7043"], check=True)
 
     def test_stop_raises_on_failure(self, mocker):
         """Should propagate CalledProcessError on failure."""

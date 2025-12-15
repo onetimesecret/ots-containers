@@ -39,6 +39,7 @@ def for_each(
 
 def write_env_file(cfg: Config, port: int) -> None:
     """Write .env-{port} from template with port substitution."""
-    template = (cfg.base_dir / "config" / ".env").read_text()
+    template = cfg.env_template.read_text()
     content = template.replace("${PORT}", str(port)).replace("$PORT", str(port))
+    cfg.var_dir.mkdir(parents=True, exist_ok=True)
     cfg.env_file(port).write_text(content)

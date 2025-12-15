@@ -114,26 +114,27 @@ IMAGE=ghcr.io/onetimesecret/onetimesecret TAG=latest ots-containers setup 7044
 
 ## Server Setup
 
-The tool expects this directory structure on the target system:
+The tool uses an FHS-compliant directory structure:
 
 ```
-/opt/onetimesecret/
-├── config/
-│   ├── .env          # Template env file (PORT gets substituted per instance)
-│   └── config.yaml   # Application configuration
-├── .env-7043         # Generated: instance-specific env for port 7043
-├── .env-7044         # Generated: instance-specific env for port 7044
+/etc/onetimesecret/           # System configuration (must exist)
+├── .env                      # Template env file (PORT gets substituted per instance)
+└── config.yaml               # Application configuration
+
+/var/opt/onetimesecret/       # Variable runtime data (created by tool)
+├── .env-7043                 # Generated: instance-specific env for port 7043
+├── .env-7044                 # Generated: instance-specific env for port 7044
 └── ...
 
 /etc/containers/systemd/
-└── onetime@.container  # Quadlet template (managed by this tool)
+└── onetime@.container        # Quadlet template (managed by this tool)
 ```
 
 ## How It Works
 
 1. **Static assets**: Extracts `/app/public` from the container image into a shared Podman volume
 2. **Quadlet template**: Writes a systemd unit template to `/etc/containers/systemd/onetime@.container`
-3. **Instance env files**: Creates `/opt/onetimesecret/.env-{port}` from the template with PORT substituted
+3. **Instance env files**: Creates `/var/opt/onetimesecret/.env-{port}` from the template with PORT substituted
 4. **systemd**: Starts/restarts `onetime@{port}` service
 
 ## Troubleshooting

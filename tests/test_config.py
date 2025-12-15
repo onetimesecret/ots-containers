@@ -9,12 +9,19 @@ import pytest
 class TestConfigDefaults:
     """Test Config dataclass default values."""
 
-    def test_default_base_dir(self):
-        """Should default to /opt/onetimesecret."""
+    def test_default_config_dir(self):
+        """Should default to /etc/onetimesecret."""
         from ots_containers.config import Config
 
         cfg = Config()
-        assert cfg.base_dir == Path("/opt/onetimesecret")
+        assert cfg.config_dir == Path("/etc/onetimesecret")
+
+    def test_default_var_dir(self):
+        """Should default to /var/opt/onetimesecret."""
+        from ots_containers.config import Config
+
+        cfg = Config()
+        assert cfg.var_dir == Path("/var/opt/onetimesecret")
 
     def test_default_template_path(self):
         """Should default to systemd quadlet location."""
@@ -69,15 +76,29 @@ class TestConfigImageSettings:
         assert cfg.image_with_tag == "myregistry/myimage:latest"
 
 
-class TestConfigEnvFile:
-    """Test Config.env_file method."""
+class TestConfigPaths:
+    """Test Config path properties and methods."""
 
-    def test_env_file_path(self):
-        """Should return correct path for given port."""
+    def test_config_yaml_path(self):
+        """Should return correct path for config.yaml."""
         from ots_containers.config import Config
 
-        cfg = Config(base_dir=Path("/opt/ots"))
-        assert cfg.env_file(7043) == Path("/opt/ots/.env-7043")
+        cfg = Config(config_dir=Path("/etc/ots"))
+        assert cfg.config_yaml == Path("/etc/ots/config.yaml")
+
+    def test_env_template_path(self):
+        """Should return correct path for .env template."""
+        from ots_containers.config import Config
+
+        cfg = Config(config_dir=Path("/etc/ots"))
+        assert cfg.env_template == Path("/etc/ots/.env")
+
+    def test_env_file_path(self):
+        """Should return correct path for given port in var_dir."""
+        from ots_containers.config import Config
+
+        cfg = Config(var_dir=Path("/var/opt/ots"))
+        assert cfg.env_file(7043) == Path("/var/opt/ots/.env-7043")
 
     def test_env_file_different_ports(self):
         """Should return different paths for different ports."""
@@ -94,7 +115,7 @@ class TestConfigValidate:
         """Should raise SystemExit when required files missing."""
         from ots_containers.config import Config
 
-        cfg = Config(base_dir=tmp_path)
+        cfg = Config(config_dir=tmp_path)
 
         with pytest.raises(SystemExit) as exc_info:
             cfg.validate()
@@ -105,10 +126,8 @@ class TestConfigValidate:
         """Should not raise when all required files exist."""
         from ots_containers.config import Config
 
-        config_dir = tmp_path / "config"
-        config_dir.mkdir()
-        (config_dir / ".env").touch()
-        (config_dir / "config.yaml").touch()
+        (tmp_path / ".env").touch()
+        (tmp_path / "config.yaml").touch()
 
-        cfg = Config(base_dir=tmp_path)
+        cfg = Config(config_dir=tmp_path)
         cfg.validate()  # Should not raise

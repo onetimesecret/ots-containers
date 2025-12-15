@@ -8,18 +8,14 @@ import cyclopts
 from .. import assets as assets_module
 from ..config import Config
 
-app = cyclopts.App(
-    name="assets", help="Extract web assets from container image to volume"
-)
+app = cyclopts.App(name="assets", help="Extract web assets from container image to volume")
 
 
 @app.command
 def sync(
     create_volume: Annotated[
         bool,
-        cyclopts.Parameter(
-            help="Create volume if it doesn't exist (use on first deploy)"
-        ),
+        cyclopts.Parameter(help="Create volume if it doesn't exist (use on first deploy)"),
     ] = False,
 ):
     """Copy /app/public from container image to static_assets podman volume.
