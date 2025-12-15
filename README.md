@@ -167,12 +167,21 @@ chown -R youruser:youruser /opt/ots-containers
 pipx install -e /opt/ots-containers
 ```
 
-If running as root, use the full path or symlink:
+The `-e` flag is important: without it, pipx copies the package into its venv and source changes won't be reflected until you reinstall.
+
+### Running as root
+
+When running as root (e.g., via sudo), the user's PATH doesn't include `~/.local/bin`. Use the full path:
 
 ```bash
-sudo /home/youruser/.local/bin/ots-containers static
-# or
+sudo /home/youruser/.local/bin/ots-containers ps
+```
+
+Or create a symlink for convenience:
+
+```bash
 sudo ln -s /home/youruser/.local/bin/ots-containers /usr/local/bin/ots-containers
+sudo ots-containers ps
 ```
 
 ## License

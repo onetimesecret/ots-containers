@@ -171,8 +171,8 @@ def list_(ports: OptionalPorts = ()):
 
 
 @app.command
-def podman_ps():
-    """Show running podman containers (subprocess)."""
+def ps():
+    """Show running OTS containers."""
     import subprocess
 
     subprocess.run(
@@ -185,54 +185,6 @@ def podman_ps():
             "table {{.ID}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}\t{{.Names}}",
         ]
     )
-
-
-@app.command
-def ps():
-    """Show running OTS containers (podman view)."""
-    from podman import PodmanClient
-
-    with PodmanClient() as client:
-        containers = client.containers.list(filters={"name": "systemd-onetime"})
-        if not containers:
-            print("No OTS containers running")
-            return
-
-        # Print header
-        print(
-            f"{'ID':<12}  {'IMAGE':<40}  {'STATUS':<15}  {'PORTS':<20}  {'NAMES'}"
-        )
-        print("-" * 100)
-
-        for c in containers:
-            c.reload()  # Fetch full container details
-            attrs = c.attrs
-
-            container_id = c.short_id
-            image = attrs.get("ImageName", attrs.get("Image", ""))[:40]
-            status = attrs.get("State", {}).get("Status", c.status or "")
-            name = c.name
-
-            # Format ports
-            ports_list = attrs.get("Ports", []) or []
-            if ports_list:
-                port_strs = []
-                for p in ports_list:
-                    host_ip = p.get("hostIP", "0.0.0.0")
-                    host_port = p.get("hostPort", "")
-                    container_port = p.get("containerPort", "")
-                    protocol = p.get("protocol", "tcp")
-                    if host_port:
-                        port_strs.append(
-                            f"{host_ip}:{host_port}->{container_port}/{protocol}"
-                        )
-                ports = ", ".join(port_strs)[:20]
-            else:
-                ports = ""
-
-            print(
-                f"{container_id:<12}  {image:<40}  {status:<15}  {ports:<20}  {name}"
-            )
 
 
 @app.command
