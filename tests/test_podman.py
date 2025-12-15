@@ -3,8 +3,6 @@
 
 import subprocess
 
-import pytest
-
 from ots_containers.podman import Podman, podman
 
 

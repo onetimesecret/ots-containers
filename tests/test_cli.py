@@ -74,7 +74,9 @@ class TestAssetsSync:
             app(["assets", "sync", "--help"])
         assert exc_info.value.code == 0
         captured = capsys.readouterr()
-        assert "create-volume" in captured.out.lower() or "volume" in captured.out.lower()
+        assert (
+            "create-volume" in captured.out.lower() or "volume" in captured.out.lower()
+        )
 
     def test_assets_sync_requires_valid_config(self, mocker, tmp_path):
         """assets sync should validate config before running."""

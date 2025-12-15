@@ -33,7 +33,7 @@ class Podman:
             if isinstance(value, bool):
                 if value:
                     cmd.append(flag)
-            elif isinstance(value, (list, tuple)):
+            elif isinstance(value, list | tuple):
                 for v in value:
                     cmd.extend([flag, str(v)])
             else:

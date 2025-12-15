@@ -2,6 +2,7 @@
 """Instance management commands for OTS containers."""
 
 import subprocess
+from collections.abc import Callable
 from typing import Annotated
 
 import cyclopts
@@ -16,18 +17,14 @@ app = cyclopts.App(
 # Type aliases (defined here to avoid circular imports)
 Delay = Annotated[
     int,
-    cyclopts.Parameter(
-        name=["--delay", "-d"], help="Seconds between operations"
-    ),
+    cyclopts.Parameter(name=["--delay", "-d"], help="Seconds between operations"),
 ]
 Ports = Annotated[
     tuple[int, ...], cyclopts.Parameter(help="Container ports to operate on")
 ]
 OptionalPorts = Annotated[
     tuple[int, ...],
-    cyclopts.Parameter(
-        help="Container ports (discovers running instances if omitted)"
-    ),
+    cyclopts.Parameter(help="Container ports (discovers running instances if omitted)"),
 ]
 
 
@@ -43,7 +40,7 @@ def _resolve_ports(ports: tuple[int, ...]) -> tuple[int, ...]:
 
 
 def _for_each(
-    ports: tuple[int, ...], delay: int, action: callable, verb: str
+    ports: tuple[int, ...], delay: int, action: "Callable[[int], None]", verb: str
 ) -> None:
     """Run action for each port with delay between."""
     import time
@@ -88,7 +85,7 @@ def deploy(ports: Ports, delay: Delay = 5):
     print(f"Reading config from {cfg.base_dir / 'config' / 'config.yaml'}")
     print(f"Updating assets from {cfg.base_dir / 'config'}")
     assets.update(cfg, create_volume=True)
-    print(f"Writing quadlet template to {quadlet.template_path(cfg)}")
+    print(f"Writing quadlet template to {cfg.template_path}")
     quadlet.write_template(cfg)
 
     def do_deploy(port: int) -> None:
@@ -125,7 +122,7 @@ def redeploy(
     print(f"Reading config from {cfg.base_dir / 'config' / 'config.yaml'}")
     print(f"Updating assets from {cfg.base_dir / 'config'}")
     assets.update(cfg, create_volume=force)
-    print(f"Writing quadlet template to {quadlet.template_path(cfg)}")
+    print(f"Writing quadlet template to {cfg.template_path}")
     quadlet.write_template(cfg)
 
     def do_redeploy(port: int) -> None:
@@ -232,9 +229,7 @@ def status(ports: OptionalPorts = ()):
 def logs(
     ports: OptionalPorts = (),
     lines: Annotated[int, cyclopts.Parameter(name=["--lines", "-n"])] = 50,
-    follow: Annotated[
-        bool, cyclopts.Parameter(name=["--follow", "-f"])
-    ] = False,
+    follow: Annotated[bool, cyclopts.Parameter(name=["--follow", "-f"])] = False,
 ):
     """Show logs for instance(s)."""
     ports = _resolve_ports(ports)

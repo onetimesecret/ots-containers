@@ -33,6 +33,7 @@ classifiers = [
 dependencies = ["cyclopts>=3.9", "podman>=5.0"]
 
 [project.optional-dependencies]
+dev = ["pre-commit>=3.0", "pyright>=1.1.390"]
 test = ["pytest>=8.0", "pytest-mock>=3.14"]
 
 [project.scripts]
@@ -49,3 +50,15 @@ pythonpath = ["src"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/ots_containers"]
+
+[tool.pyright]
+pythonVersion = "3.11"
+typeCheckingMode = "basic"
+include = ["src"]
+
+[tool.ruff]
+target-version = "py311"
+src = ["src"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]
