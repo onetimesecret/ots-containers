@@ -7,13 +7,23 @@ from ots_containers import systemd
 from ots_containers.config import Config
 
 
-def resolve_ports(ports: tuple[int, ...]) -> tuple[int, ...]:
-    """Return provided ports, or discover running instances if none given."""
+def resolve_ports(
+    ports: tuple[int, ...],
+    running_only: bool = False,
+) -> tuple[int, ...]:
+    """Return provided ports, or discover instances if none given.
+
+    Args:
+        ports: Explicitly provided ports. If non-empty, returned as-is.
+        running_only: If True, only discover running instances.
+                      If False (default), discover all loaded units.
+    """
     if ports:
         return ports
-    discovered = systemd.discover_instances()
+    discovered = systemd.discover_instances(running_only=running_only)
     if not discovered:
-        print("No running instances found")
+        msg = "No running instances found" if running_only else "No configured instances found"
+        print(msg)
         return ()
     return tuple(discovered)
 

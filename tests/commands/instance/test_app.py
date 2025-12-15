@@ -105,7 +105,7 @@ class TestRedeployCommand:
     """Test redeploy command execution with mocked dependencies."""
 
     def test_redeploy_with_no_instances_found(self, mocker, capsys):
-        """redeploy with no ports should discover instances."""
+        """redeploy with no ports should discover all configured instances."""
         mocker.patch(
             "ots_containers.commands.instance._helpers.systemd.discover_instances",
             return_value=[],
@@ -114,7 +114,7 @@ class TestRedeployCommand:
         instance.redeploy(ports=())
 
         captured = capsys.readouterr()
-        assert "No running instances found" in captured.out
+        assert "No configured instances found" in captured.out
 
     def test_redeploy_uses_cfg_template_path(self, mocker, tmp_path):
         """redeploy should use cfg.template_path (not quadlet.template_path)."""
@@ -195,14 +195,14 @@ class TestEnvCommand:
         assert callable(instance.env)
 
     def test_env_with_no_instances(self, mocker, capsys):
-        """env with no running instances should report none found."""
+        """env with no configured instances should report none found."""
         mocker.patch(
             "ots_containers.commands.instance._helpers.systemd.discover_instances",
             return_value=[],
         )
         instance.env(ports=())
         captured = capsys.readouterr()
-        assert "No running instances found" in captured.out
+        assert "No configured instances found" in captured.out
 
     def test_env_displays_sorted_env_vars(self, mocker, capsys, tmp_path):
         """env should display sorted environment variables."""

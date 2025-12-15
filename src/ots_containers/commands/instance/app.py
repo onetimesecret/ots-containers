@@ -320,12 +320,12 @@ def exec_shell(
 ):
     """Run interactive shell in container(s).
 
-    When no ports specified, iterates through all discovered instances sequentially.
+    When no ports specified, iterates through all running instances sequentially.
     Uses $SHELL environment variable or /bin/sh as fallback.
     """
     import os
 
-    ports = resolve_ports(ports)
+    ports = resolve_ports(ports, running_only=True)
     if not ports:
         return
 

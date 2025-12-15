@@ -54,11 +54,26 @@ class TestDiscoverInstances:
 
         assert ports == [7043, 7044]
 
-    def test_discover_instances_filters_out_failed_units(self, mocker):
-        """Should only return running units, not failed ones."""
+    def test_discover_instances_returns_all_loaded_by_default(self, mocker):
+        """Should return all loaded units regardless of state by default."""
         from ots_containers import systemd
 
-        # Real output from: systemctl list-units onetime@* --plain --no-legend
+        mock_result = mocker.Mock()
+        mock_result.stdout = (
+            "onetime@7042.service loaded active running OneTimeSecret Container 7042\n"
+            "onetime@7043.service loaded failed failed OneTimeSecret Container 7043\n"
+            "onetime@7044.service loaded inactive dead OneTimeSecret Container 7044\n"
+        )
+        mocker.patch("subprocess.run", return_value=mock_result)
+
+        ports = systemd.discover_instances()
+
+        assert ports == [7042, 7043, 7044]
+
+    def test_discover_instances_running_only_filters_failed(self, mocker):
+        """With running_only=True, should exclude failed units."""
+        from ots_containers import systemd
+
         mock_result = mocker.Mock()
         mock_result.stdout = (
             "onetime@7043.service loaded failed failed OneTimeSecret Container 7043\n"
@@ -66,12 +81,12 @@ class TestDiscoverInstances:
         )
         mocker.patch("subprocess.run", return_value=mock_result)
 
-        ports = systemd.discover_instances()
+        ports = systemd.discover_instances(running_only=True)
 
         assert ports == []
 
-    def test_discover_instances_mixed_running_and_failed(self, mocker):
-        """Should return only running units when mixed with failed."""
+    def test_discover_instances_running_only_mixed(self, mocker):
+        """With running_only=True, should return only running units."""
         from ots_containers import systemd
 
         mock_result = mocker.Mock()
@@ -82,12 +97,12 @@ class TestDiscoverInstances:
         )
         mocker.patch("subprocess.run", return_value=mock_result)
 
-        ports = systemd.discover_instances()
+        ports = systemd.discover_instances(running_only=True)
 
         assert ports == [7042, 7044]
 
     def test_discover_instances_calls_systemctl_correctly(self, mocker):
-        """Should call systemctl with correct arguments."""
+        """Should call systemctl with --all flag to show all units."""
         from ots_containers import systemd
 
         mock_result = mocker.Mock()
@@ -97,7 +112,7 @@ class TestDiscoverInstances:
         systemd.discover_instances()
 
         mock_run.assert_called_once_with(
-            ["systemctl", "list-units", "onetime@*", "--plain", "--no-legend"],
+            ["systemctl", "list-units", "onetime@*", "--plain", "--no-legend", "--all"],
             capture_output=True,
             text=True,
         )
