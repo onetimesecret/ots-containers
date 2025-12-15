@@ -169,6 +169,29 @@ pipx install -e /opt/ots-containers
 
 The `-e` flag is important: without it, pipx copies the package into its venv and source changes won't be reflected until you reinstall.
 
+### Running Tests
+
+```bash
+# Create and activate virtual environment
+python -m venv .venv
+source .venv/bin/activate
+
+# Install with dev and test dependencies
+pip install -e ".[dev,test]"
+
+# Run tests
+pytest tests/
+
+# Run with coverage (CI threshold: 70%)
+pytest tests/ --cov=ots_containers --cov-report=term-missing --cov-fail-under=70
+```
+
+Pre-commit hooks run automatically on `git commit`. Install them with:
+
+```bash
+pre-commit install
+```
+
 ### Running as root
 
 When running as root (e.g., via sudo), the user's PATH doesn't include `~/.local/bin`. Use the full path:
