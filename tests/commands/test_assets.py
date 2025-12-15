@@ -1,0 +1,88 @@
+# tests/commands/test_assets.py
+"""Tests for assets command."""
+
+import pytest
+
+
+class TestAssetsCommandImports:
+    """Verify assets command module imports correctly."""
+
+    def test_assets_app_exists(self):
+        """Assets app should be importable."""
+        from ots_containers.commands import assets
+
+        assert assets.app is not None
+
+    def test_sync_function_exists(self):
+        """sync command should be defined."""
+        from ots_containers.commands import assets
+
+        assert hasattr(assets, "sync")
+        assert callable(assets.sync)
+
+
+class TestAssetsSyncCommand:
+    """Test assets sync command execution."""
+
+    def test_sync_validates_config(self, mocker):
+        """sync should validate config before proceeding."""
+        from ots_containers.commands import assets
+
+        mock_validate = mocker.patch(
+            "ots_containers.commands.assets.Config.validate",
+            side_effect=SystemExit("Missing required files"),
+        )
+
+        with pytest.raises(SystemExit):
+            assets.sync()
+
+        mock_validate.assert_called_once()
+
+    def test_sync_calls_assets_update(self, mocker):
+        """sync should call assets_module.update."""
+        from ots_containers.commands import assets
+
+        mock_config = mocker.MagicMock()
+        mocker.patch(
+            "ots_containers.commands.assets.Config", return_value=mock_config
+        )
+        mock_update = mocker.patch(
+            "ots_containers.commands.assets.assets_module.update"
+        )
+
+        assets.sync()
+
+        mock_update.assert_called_once_with(mock_config, create_volume=False)
+
+    def test_sync_with_create_volume(self, mocker):
+        """sync --create-volume should pass flag to update."""
+        from ots_containers.commands import assets
+
+        mock_config = mocker.MagicMock()
+        mocker.patch(
+            "ots_containers.commands.assets.Config", return_value=mock_config
+        )
+        mock_update = mocker.patch(
+            "ots_containers.commands.assets.assets_module.update"
+        )
+
+        assets.sync(create_volume=True)
+
+        mock_update.assert_called_once_with(mock_config, create_volume=True)
+
+
+class TestAssetsSyncHelp:
+    """Test assets sync help output."""
+
+    def test_assets_sync_help(self, capsys):
+        """assets sync --help should work."""
+        from ots_containers.cli import app
+
+        with pytest.raises(SystemExit) as exc_info:
+            app(["assets", "sync", "--help"])
+        assert exc_info.value.code == 0
+        captured = capsys.readouterr()
+        assert (
+            "create-volume" in captured.out.lower()
+            or "sync" in captured.out.lower()
+        )

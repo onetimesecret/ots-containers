@@ -99,12 +99,12 @@ repos:
         args: [--fix]
       - id: ruff-format
 
-  # pytest - run tests before commit
+  # pytest - run tests with coverage before commit
   - repo: local
     hooks:
       - id: pytest
         name: pytest
-        entry: pytest tests/ -x -q
+        entry: pytest tests/ -x -q --cov=ots_containers --cov-report=term-missing --cov-fail-under=70
         language: system
         pass_filenames: false
         always_run: true
