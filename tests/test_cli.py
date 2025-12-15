@@ -11,8 +11,14 @@ class TestCLIStructure:
 
     def test_app_has_version(self):
         """App should expose version."""
+        import re
+
         assert app.version is not None
-        assert app.version == "0.1.0"
+        version = (
+            app.version if isinstance(app.version, str) else str(app.version)
+        )
+
+        assert re.match(r"^\d+\.\d+\.\d+$", version)
 
     def test_app_has_help(self):
         """App should have help text."""
@@ -36,7 +42,7 @@ class TestCLIStructure:
         with pytest.raises(SystemExit):
             app(["--version"])
         captured = capsys.readouterr()
-        assert "0.1.0" in captured.out
+        assert "0.2.0" in captured.out
 
 
 class TestCLISubcommands:
