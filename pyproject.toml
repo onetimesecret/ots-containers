@@ -30,7 +30,7 @@ classifiers = [
     "Programming Language :: Python :: 3.12",
     "Topic :: System :: Systems Administration",
 ]
-dependencies = ["cyclopts>=3.9"]
+dependencies = ["cyclopts>=3.9", "podman>=5.0"]
 
 [project.scripts]
 ots-containers = "ots_containers.cli:app"
