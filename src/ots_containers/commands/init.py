@@ -106,7 +106,7 @@ def init(
 
     Creates FHS-compliant directory structure:
       /etc/onetimesecret/          - System configuration
-      /var/opt/onetimesecret/      - Variable runtime data
+      /var/lib/onetimesecret/      - Variable runtime data
 
     Initializes the SQLite deployment database for tracking.
 
@@ -115,34 +115,32 @@ def init(
     cfg = Config()
     all_ok = True
 
+    # Detect re-initialization (like git init)
+    is_reinit = cfg.db_path.exists() or cfg.var_dir.exists()
+
     if check:
         print("Checking ots-containers setup...")
     else:
         if not quiet:
-            print("Initializing ots-containers...")
+            prefix = "Re-initializing" if is_reinit else "Initializing"
+            print(f"{prefix} ots-containers...")
 
-    # 1. Create config directory and check/copy config files
+    # 1. App Configuration - user-managed config files
     if not quiet or check:
-        print("\nConfiguration directory:")
+        print("\nApp Configuration:")
     if check:
-        if cfg.config_dir.exists():
-            print(f"  [ok] {cfg.config_dir}")
-            # Check config files within directory
-            if cfg.env_template.exists():
-                print(f"  [ok] {cfg.env_template}")
-            else:
-                print(f"  [missing] {cfg.env_template}")
-                all_ok = False
-            if cfg.config_yaml.exists():
-                print(f"  [ok] {cfg.config_yaml}")
-            else:
-                print(f"  [missing] {cfg.config_yaml}")
-                all_ok = False
+        if cfg.env_template.exists():
+            print(f"  [ok] {cfg.env_template}")
         else:
-            print(f"  [missing] {cfg.config_dir}")
+            print(f"  [missing] {cfg.env_template}")
+            all_ok = False
+        if cfg.config_yaml.exists():
+            print(f"  [ok] {cfg.config_yaml}")
+        else:
+            print(f"  [missing] {cfg.config_yaml}")
             all_ok = False
     else:
-        result = _create_directory(cfg.config_dir, mode=0o755, quiet=quiet)
+        result = _create_directory(cfg.config_dir, mode=0o755, quiet=True)
         if result is None:
             all_ok = False
         else:
@@ -164,56 +162,77 @@ def init(
                 else:
                     print(f"  [missing] {cfg.config_yaml}")
 
-    # 2. Create var directory
+    # 2. System Configuration - quadlet files
     if not quiet or check:
-        print("\nVariable data directory:")
+        print("\nSystem Configuration:")
+    quadlet_dir = cfg.template_path.parent
+    users_dir = quadlet_dir / "users"
+    if check:
+        if cfg.template_path.exists():
+            print(f"  [ok] {cfg.template_path}")
+        else:
+            print(f"  [missing] {cfg.template_path}")
+            all_ok = False
+        if users_dir.exists():
+            if any(users_dir.iterdir()):
+                print(f"  [ok] {users_dir}")
+            else:
+                print(f"  [empty] {users_dir}")
+        else:
+            print(f"  [missing] {users_dir}")
+    else:
+        if _create_directory(quadlet_dir, mode=0o755, quiet=True) is None:
+            all_ok = False
+        if not quiet:
+            if cfg.template_path.exists():
+                print(f"  [ok] {cfg.template_path}")
+            else:
+                print(f"  [missing] {cfg.template_path}")
+            if users_dir.exists():
+                if any(users_dir.iterdir()):
+                    print(f"  [ok] {users_dir}")
+                else:
+                    print(f"  [empty] {users_dir}")
+
+    # 3. Variable data - runtime files
+    if not quiet or check:
+        print("\nVariable Data:")
     if check:
         if cfg.var_dir.exists():
-            print(f"  [ok] {cfg.var_dir}")
+            # List env files
+            env_files = sorted(cfg.var_dir.glob(".env-*"))
+            for env_file in env_files:
+                print(f"  [ok] {env_file}")
+            if cfg.db_path.exists():
+                print(f"  [ok] {cfg.db_path}")
+            else:
+                print(f"  [missing] {cfg.db_path}")
+                all_ok = False
+            if not env_files and not cfg.db_path.exists():
+                print(f"  [empty] {cfg.var_dir}")
         else:
             print(f"  [missing] {cfg.var_dir}")
             all_ok = False
     else:
-        if _create_directory(cfg.var_dir, mode=0o755, quiet=quiet) is None:
+        if _create_directory(cfg.var_dir, mode=0o755, quiet=True) is None:
             all_ok = False
-
-    # 3. Create quadlet parent directory
-    if not quiet or check:
-        print("\nQuadlet directory:")
-    quadlet_dir = cfg.template_path.parent
-    if check:
-        if quadlet_dir.exists():
-            print(f"  [ok] {quadlet_dir}")
-        else:
-            print(f"  [missing] {quadlet_dir}")
-            all_ok = False
-    else:
-        if _create_directory(quadlet_dir, mode=0o755, quiet=quiet) is None:
-            all_ok = False
-
-    # 4. Initialize database
-    if not quiet or check:
-        print("\nDeployment database:")
-    if check:
-        if cfg.db_path.exists():
-            print(f"  [ok] {cfg.db_path}")
-        else:
-            print(f"  [missing] {cfg.db_path}")
-            all_ok = False
-    else:
-        if cfg.db_path.exists():
-            if not quiet:
+        elif not quiet:
+            # List existing env files
+            env_files = sorted(cfg.var_dir.glob(".env-*"))
+            for env_file in env_files:
+                print(f"  [ok] {env_file}")
+            # Handle database
+            if cfg.db_path.exists():
                 print(f"  [ok] {cfg.db_path}")
-        else:
-            try:
-                db.init_db(cfg.db_path)
-                uid, gid = _get_owner_group()
-                os.chown(cfg.db_path, uid, gid)
-                if not quiet:
+            else:
+                try:
+                    db.init_db(cfg.db_path)
+                    uid, gid = _get_owner_group()
+                    os.chown(cfg.db_path, uid, gid)
                     print(f"  [created] {cfg.db_path}")
-            except PermissionError:
-                print(f"  [denied] {cfg.db_path} - permission denied (run with sudo?)")
-                all_ok = False
+                except PermissionError:
+                    print(f"  [denied] {cfg.db_path} - permission denied (run with sudo?)")
+                    all_ok = False
 
     # Summary
     if check:

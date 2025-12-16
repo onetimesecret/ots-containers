@@ -15,12 +15,12 @@ class Config:
 
     Directory layout:
         /etc/onetimesecret/          - System configuration (config.yaml, .env template)
-        /var/opt/onetimesecret/      - Variable runtime data (.env-{port} files, deployments.db)
+        /var/lib/onetimesecret/      - Variable runtime data (.env-{port} files, deployments.db)
         /etc/containers/systemd/     - Quadlet unit files
     """
 
     config_dir: Path = Path("/etc/onetimesecret")
-    var_dir: Path = Path("/var/opt/onetimesecret")
+    var_dir: Path = Path("/var/lib/onetimesecret")
     image: str = field(default_factory=lambda: os.environ.get("IMAGE", DEFAULT_IMAGE))
     tag: str = field(default_factory=lambda: os.environ.get("TAG", DEFAULT_TAG))
     template_path: Path = Path("/etc/containers/systemd/onetime@.container")

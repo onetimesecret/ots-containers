@@ -69,13 +69,13 @@ class TestContainerTemplate:
 
         cfg = Config(
             template_path=tmp_path / "onetime@.container",
-            var_dir=Path("/var/opt/ots"),
+            var_dir=Path("/var/lib/ots"),
         )
 
         quadlet.write_template(cfg)
 
         content = cfg.template_path.read_text()
-        assert "EnvironmentFile=/var/opt/ots/.env-%i" in content
+        assert "EnvironmentFile=/var/lib/ots/.env-%i" in content
 
     def test_write_template_includes_volumes(self, mocker, tmp_path):
         """Container quadlet should mount config and static assets."""
