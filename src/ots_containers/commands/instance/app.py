@@ -314,7 +314,7 @@ def env(ports: OptionalPorts = ()):
                     key, _, value = line.partition("=")
                     key = key.strip()
                     # Valid env var: letter/underscore start, alnum/underscore chars
-                    if key and key[0].isalpha() or key.startswith("_"):
+                    if key and (key[0].isalpha() or key.startswith("_")):
                         if all(c.isalnum() or c == "_" for c in key):
                             env_vars[key] = value
             for key in sorted(env_vars.keys()):
