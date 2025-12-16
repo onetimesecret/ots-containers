@@ -64,6 +64,36 @@ CREATE TABLE IF NOT EXISTS image_aliases (
 CREATE INDEX IF NOT EXISTS idx_deployments_timestamp ON deployments(timestamp DESC);
 CREATE INDEX IF NOT EXISTS idx_deployments_port ON deployments(port);
 CREATE INDEX IF NOT EXISTS idx_deployments_tag ON deployments(tag);
+
+-- Service instances (systemd template services like valkey-server@)
+CREATE TABLE IF NOT EXISTS service_instances (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    package TEXT NOT NULL,          -- e.g., "valkey", "redis"
+    instance TEXT NOT NULL,         -- e.g., "6379" (port-based)
+    config_file TEXT NOT NULL,      -- /etc/valkey/instances/6379.conf
+    data_dir TEXT NOT NULL,         -- /var/lib/valkey/6379
+    port INTEGER,                   -- Actual port number
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    notes TEXT,
+    UNIQUE(package, instance)
+);
+
+-- Service action audit trail
+CREATE TABLE IF NOT EXISTS service_actions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp TEXT NOT NULL DEFAULT (datetime('now')),
+    package TEXT NOT NULL,
+    instance TEXT NOT NULL,
+    action TEXT NOT NULL,           -- init, enable, disable, start, stop, restart, secret-set, etc.
+    success INTEGER NOT NULL DEFAULT 1,
+    notes TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_service_instances_package ON service_instances(package);
+CREATE INDEX IF NOT EXISTS idx_service_actions_timestamp ON service_actions(timestamp DESC);
+CREATE INDEX IF NOT EXISTS idx_service_actions_pkg_inst
+    ON service_actions(package, instance);
 """
 
 
@@ -325,3 +355,228 @@ def get_previous_tags(db_path: Path, limit: int = 10) -> list[tuple[str, str, st
         ).fetchall()
 
     return [(row["image"], row["tag"], row["last_used"]) for row in rows]
+
+
+# =============================================================================
+# Service Instance Management
+# =============================================================================
+
+
+@dataclass
+class ServiceInstance:
+    """A managed service instance record."""
+
+    id: int
+    package: str
+    instance: str
+    config_file: str
+    data_dir: str
+    port: int | None
+    created_at: str
+    updated_at: str
+    notes: str | None = None
+
+
+@dataclass
+class ServiceAction:
+    """A service action audit record."""
+
+    id: int
+    timestamp: str
+    package: str
+    instance: str
+    action: str
+    success: bool
+    notes: str | None = None
+
+
+def record_service_instance(
+    db_path: Path,
+    package: str,
+    instance: str,
+    config_file: str,
+    data_dir: str,
+    port: int | None = None,
+    notes: str | None = None,
+) -> int:
+    """Record a new service instance. Returns the instance ID."""
+    with get_connection(db_path) as conn:
+        cursor = conn.execute(
+            """
+            INSERT INTO service_instances (package, instance, config_file, data_dir, port, notes)
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(package, instance) DO UPDATE SET
+                config_file = excluded.config_file,
+                data_dir = excluded.data_dir,
+                port = excluded.port,
+                notes = excluded.notes,
+                updated_at = datetime('now')
+            """,
+            (package, instance, config_file, data_dir, port, notes),
+        )
+        conn.commit()
+        return cursor.lastrowid or 0
+
+
+def get_service_instance(
+    db_path: Path,
+    package: str,
+    instance: str,
+) -> ServiceInstance | None:
+    """Get a service instance by package and instance name."""
+    with get_connection(db_path) as conn:
+        row = conn.execute(
+            """
+            SELECT id, package, instance, config_file, data_dir, port, created_at, updated_at, notes
+            FROM service_instances
+            WHERE package = ? AND instance = ?
+            """,
+            (package, instance),
+        ).fetchone()
+        if row:
+            return ServiceInstance(
+                id=row["id"],
+                package=row["package"],
+                instance=row["instance"],
+                config_file=row["config_file"],
+                data_dir=row["data_dir"],
+                port=row["port"],
+                created_at=row["created_at"],
+                updated_at=row["updated_at"],
+                notes=row["notes"],
+            )
+        return None
+
+
+def get_service_instances(
+    db_path: Path,
+    package: str | None = None,
+) -> list[ServiceInstance]:
+    """Get all service instances, optionally filtered by package."""
+    with get_connection(db_path) as conn:
+        if package:
+            rows = conn.execute(
+                """
+                SELECT id, package, instance, config_file, data_dir, port,
+                       created_at, updated_at, notes
+                FROM service_instances
+                WHERE package = ?
+                ORDER BY package, instance
+                """,
+                (package,),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                """
+                SELECT id, package, instance, config_file, data_dir, port,
+                       created_at, updated_at, notes
+                FROM service_instances
+                ORDER BY package, instance
+                """,
+            ).fetchall()
+
+        return [
+            ServiceInstance(
+                id=row["id"],
+                package=row["package"],
+                instance=row["instance"],
+                config_file=row["config_file"],
+                data_dir=row["data_dir"],
+                port=row["port"],
+                created_at=row["created_at"],
+                updated_at=row["updated_at"],
+                notes=row["notes"],
+            )
+            for row in rows
+        ]
+
+
+def delete_service_instance(
+    db_path: Path,
+    package: str,
+    instance: str,
+) -> bool:
+    """Delete a service instance record. Returns True if deleted."""
+    with get_connection(db_path) as conn:
+        cursor = conn.execute(
+            "DELETE FROM service_instances WHERE package = ? AND instance = ?",
+            (package, instance),
+        )
+        conn.commit()
+        return cursor.rowcount > 0
+
+
+def record_service_action(
+    db_path: Path,
+    package: str,
+    instance: str,
+    action: str,
+    success: bool = True,
+    notes: str | None = None,
+) -> int:
+    """Record a service action to the audit trail. Returns the action ID."""
+    with get_connection(db_path) as conn:
+        cursor = conn.execute(
+            """
+            INSERT INTO service_actions (package, instance, action, success, notes)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (package, instance, action, 1 if success else 0, notes),
+        )
+        conn.commit()
+        return cursor.lastrowid or 0
+
+
+def get_service_actions(
+    db_path: Path,
+    package: str | None = None,
+    instance: str | None = None,
+    limit: int = 50,
+) -> list[ServiceAction]:
+    """Get service action history, optionally filtered."""
+    with get_connection(db_path) as conn:
+        if package and instance:
+            rows = conn.execute(
+                """
+                SELECT id, timestamp, package, instance, action, success, notes
+                FROM service_actions
+                WHERE package = ? AND instance = ?
+                ORDER BY timestamp DESC
+                LIMIT ?
+                """,
+                (package, instance, limit),
+            ).fetchall()
+        elif package:
+            rows = conn.execute(
+                """
+                SELECT id, timestamp, package, instance, action, success, notes
+                FROM service_actions
+                WHERE package = ?
+                ORDER BY timestamp DESC
+                LIMIT ?
+                """,
+                (package, limit),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                """
+                SELECT id, timestamp, package, instance, action, success, notes
+                FROM service_actions
+                ORDER BY timestamp DESC
+                LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+
+        return [
+            ServiceAction(
+                id=row["id"],
+                timestamp=row["timestamp"],
+                package=row["package"],
+                instance=row["instance"],
+                action=row["action"],
+                success=bool(row["success"]),
+                notes=row["notes"],
+            )
+            for row in rows
+        ]
