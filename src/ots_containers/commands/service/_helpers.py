@@ -44,7 +44,7 @@ def copy_default_config(pkg: ServicePackage, instance: str) -> Path:
     """
     if not pkg.default_config or not pkg.default_config.exists():
         raise FileNotFoundError(
-            f"Default config not found: {pkg.default_config}. " f"Is {pkg.name} package installed?"
+            f"Default config not found: {pkg.default_config}. Is {pkg.name} package installed?"
         )
 
     ensure_instances_dir(pkg)
