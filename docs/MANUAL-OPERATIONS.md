@@ -254,6 +254,109 @@ rm /var/lib/onetimesecret/.env-7043
 
 ---
 
+## Image Management
+
+### Pull Latest Image
+
+```bash
+podman pull ghcr.io/onetimesecret/onetimesecret:current
+```
+
+### List Local Images
+
+```bash
+podman image ls --filter reference='*onetimesecret*'
+```
+
+### Inspect Image Metadata
+
+```bash
+podman image inspect ghcr.io/onetimesecret/onetimesecret:current \
+    --format '{{.Created}} {{.Size}}'
+```
+
+### Remove Old Images
+
+```bash
+# Remove specific image
+podman image rm ghcr.io/onetimesecret/onetimesecret:v0.19.0
+
+# Prune unused images
+podman image prune -f
+```
+
+---
+
+## Reverse Proxy Configuration (Caddy)
+
+The `ots proxy` commands manage Caddy reverse proxy configuration using HOST environment variables.
+
+### Template Rendering with envsubst
+
+**Prerequisite**: Install `gettext` package for `envsubst`:
+
+```bash
+# RHEL/Fedora
+sudo dnf install gettext
+
+# Debian/Ubuntu
+sudo apt install gettext-base
+```
+
+**Render template manually**:
+
+```bash
+# Set required environment variables
+export OTS_HOST=secrets.example.com
+export OTS_PORT=7043
+
+# Render template to stdout
+envsubst < /etc/onetimesecret/Caddyfile.template
+
+# Render to output file
+envsubst < /etc/onetimesecret/Caddyfile.template > /etc/caddy/Caddyfile
+```
+
+This is equivalent to `ots proxy render --dry-run` and `ots proxy render`.
+
+### Validate Caddy Configuration
+
+```bash
+caddy validate --config /etc/caddy/Caddyfile
+```
+
+### Reload Caddy
+
+```bash
+sudo systemctl reload caddy
+```
+
+This is equivalent to `ots proxy reload`.
+
+### Complete Proxy Workflow
+
+This is `ots proxy render` followed by `ots proxy reload`:
+
+```bash
+# 1. Set HOST environment variables
+export OTS_HOST=secrets.example.com
+export OTS_PORT=7043
+
+# 2. Render template
+envsubst < /etc/onetimesecret/Caddyfile.template > /tmp/Caddyfile.new
+
+# 3. Validate before applying
+caddy validate --config /tmp/Caddyfile.new
+
+# 4. Apply if valid
+sudo mv /tmp/Caddyfile.new /etc/caddy/Caddyfile
+
+# 5. Reload Caddy
+sudo systemctl reload caddy
+```
+
+---
+
 ## Network Configuration
 
 The tool uses **host networking mode**:
@@ -273,6 +376,7 @@ This is functionally equivalent to running the app directly on the host.
 |------|---------|------------|
 | `/etc/containers/systemd/onetime@.container` | Systemd quadlet template | `ots instance deploy` |
 | `/var/lib/onetimesecret/.env-{port}` | Per-instance environment | `ots instance deploy` |
+| `/etc/caddy/Caddyfile` | Rendered proxy config | `ots proxy render` |
 
 ## Summary of Files Required
 
@@ -280,6 +384,7 @@ This is functionally equivalent to running the app directly on the host.
 |------|---------|
 | `/etc/onetimesecret/.env` | Environment template |
 | `/etc/onetimesecret/config.yaml` | Application configuration |
+| `/etc/onetimesecret/Caddyfile.template` | Proxy config template (optional) |
 
 ## Summary of Commands Used
 
@@ -291,6 +396,14 @@ This is functionally equivalent to running the app directly on the host.
 | `podman cp` | Copy assets from container to volume |
 | `podman rm` | Remove temp container |
 | `podman exec -it` | Interactive shell in running container |
+| `podman pull` | Pull container image from registry |
+| `podman image ls` | List local container images |
+| `podman image inspect` | View image metadata |
+| `podman image rm` | Remove specific image |
+| `podman image prune` | Remove unused images |
+| `envsubst` | Substitute environment variables in templates |
+| `caddy validate` | Validate Caddyfile syntax |
+| `systemctl reload caddy` | Apply Caddy config changes |
 | `systemctl daemon-reload` | Reload after quadlet changes |
 | `systemctl start/stop/restart` | Service lifecycle |
 | `systemctl list-units` | Discover running instances |
