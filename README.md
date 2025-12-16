@@ -121,7 +121,7 @@ The tool uses an FHS-compliant directory structure:
 ├── .env                      # Template env file (PORT gets substituted per instance)
 └── config.yaml               # Application configuration
 
-/var/opt/onetimesecret/       # Variable runtime data (created by tool)
+/var/lib/onetimesecret/       # Variable runtime data (created by tool)
 ├── .env-7043                 # Generated: instance-specific env for port 7043
 ├── .env-7044                 # Generated: instance-specific env for port 7044
 └── ...
@@ -134,7 +134,7 @@ The tool uses an FHS-compliant directory structure:
 
 1. **Static assets**: Extracts `/app/public` from the container image into a shared Podman volume
 2. **Quadlet template**: Writes a systemd unit template to `/etc/containers/systemd/onetime@.container`
-3. **Instance env files**: Creates `/var/opt/onetimesecret/.env-{port}` from the template with PORT substituted
+3. **Instance env files**: Creates `/var/lib/onetimesecret/.env-{port}` from the template with PORT substituted
 4. **systemd**: Starts/restarts `onetime@{port}` service
 
 ## Troubleshooting

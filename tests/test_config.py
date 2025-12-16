@@ -17,11 +17,11 @@ class TestConfigDefaults:
         assert cfg.config_dir == Path("/etc/onetimesecret")
 
     def test_default_var_dir(self):
-        """Should default to /var/opt/onetimesecret."""
+        """Should default to /var/lib/onetimesecret."""
         from ots_containers.config import Config
 
         cfg = Config()
-        assert cfg.var_dir == Path("/var/opt/onetimesecret")
+        assert cfg.var_dir == Path("/var/lib/onetimesecret")
 
     def test_default_template_path(self):
         """Should default to systemd quadlet location."""
@@ -97,8 +97,8 @@ class TestConfigPaths:
         """Should return correct path for given port in var_dir."""
         from ots_containers.config import Config
 
-        cfg = Config(var_dir=Path("/var/opt/ots"))
-        assert cfg.env_file(7043) == Path("/var/opt/ots/.env-7043")
+        cfg = Config(var_dir=Path("/var/lib/ots"))
+        assert cfg.env_file(7043) == Path("/var/lib/ots/.env-7043")
 
     def test_env_file_different_ports(self):
         """Should return different paths for different ports."""

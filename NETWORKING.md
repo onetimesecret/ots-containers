@@ -20,7 +20,7 @@ The quadlet template passes the instance number as the PORT:
 Image=ghcr.io/onetimesecret/onetimesecret:current
 Network=host
 Environment=PORT=%i
-EnvironmentFile=/var/opt/onetimesecret/.env-%i
+EnvironmentFile=/var/lib/onetimesecret/.env-%i
 ...
 ```
 
