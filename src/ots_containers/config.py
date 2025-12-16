@@ -25,6 +25,10 @@ class Config:
     tag: str = field(default_factory=lambda: os.environ.get("TAG", DEFAULT_TAG))
     template_path: Path = Path("/etc/containers/systemd/onetime@.container")
 
+    # Proxy (Caddy) configuration - uses HOST environment, not container .env
+    proxy_template: Path = Path("/etc/onetimesecret/Caddyfile.template")
+    proxy_config: Path = Path("/etc/caddy/Caddyfile")
+
     @property
     def image_with_tag(self) -> str:
         return f"{self.image}:{self.tag}"
