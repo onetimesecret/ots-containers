@@ -1,8 +1,10 @@
 # ots-containers
 
-Podman Quadlet container management CLI for [OneTimeSecret](https://github.com/onetimesecret/onetimesecret).
+Service orchestration CLI for [OneTimeSecret](https://github.com/onetimesecret/onetimesecret) infrastructure.
 
-Manages containerized OTS instances using systemd Quadlets - the modern way to run Podman containers as services.
+**Dual-purpose management tool:**
+- **Container orchestration**: Containerized OTS deployments via Podman Quadlets (systemd integration)
+- **Service management**: Native systemd services for dependencies (Valkey, Redis)
 
 ## Installation
 
@@ -66,7 +68,7 @@ ots-containers ps
 ots-containers list
 ```
 
-### Managing containers
+### Managing OTS containers
 
 ```bash
 # Setup new instance on port 7043
@@ -94,6 +96,35 @@ ots-containers replace 7043
 ots-containers static
 ```
 
+### Managing systemd services (Valkey, Redis)
+
+```bash
+# Initialize new Valkey instance on port 6379
+ots-containers service init valkey 6379
+
+# Initialize Redis instance with custom bind address
+ots-containers service init redis 6380 --bind 0.0.0.0
+
+# Start/stop/restart service instances
+ots-containers service start valkey 6379
+ots-containers service stop redis 6380
+ots-containers service restart valkey 6379
+
+# Check service status
+ots-containers service status valkey 6379
+
+# View service logs
+ots-containers service logs valkey 6379
+ots-containers service logs redis 6380 --follow
+
+# Enable/disable at boot
+ots-containers service enable valkey 6379
+ots-containers service disable redis 6380
+
+# List available service packages
+ots-containers service
+```
+
 ## Environment Variables
 
 Override defaults:
@@ -116,6 +147,8 @@ IMAGE=ghcr.io/onetimesecret/onetimesecret TAG=latest ots-containers setup 7044
 
 The tool uses an FHS-compliant directory structure:
 
+### OTS Container Configuration
+
 ```
 /etc/onetimesecret/           # System configuration (must exist)
 ├── .env                      # Template env file (PORT gets substituted per instance)
@@ -130,12 +163,45 @@ The tool uses an FHS-compliant directory structure:
 └── onetime@.container        # Quadlet template (managed by this tool)
 ```
 
+### Service Configuration (Valkey/Redis)
+
+Uses package-provided systemd templates with instance-specific configs:
+
+```
+/etc/valkey/                  # Valkey system configuration (from package)
+├── valkey.conf               # Default config template
+└── instances/                # Instance configs (created by tool)
+    ├── 6379.conf             # Instance-specific config
+    ├── 6379-secrets.conf     # Secrets file (mode 0640)
+    └── 6380.conf
+
+/var/lib/valkey/              # Variable runtime data (created by tool)
+├── 6379/                     # Instance data directory
+│   └── dump.rdb
+└── 6380/
+
+/usr/lib/systemd/system/
+└── valkey-server@.service    # Template from package (not modified)
+```
+
+Similar structure for Redis (`/etc/redis/`, `/var/lib/redis/`).
+
 ## How It Works
+
+### Container Management (OTS instances)
 
 1. **Static assets**: Extracts `/app/public` from the container image into a shared Podman volume
 2. **Quadlet template**: Writes a systemd unit template to `/etc/containers/systemd/onetime@.container`
 3. **Instance env files**: Creates `/var/lib/onetimesecret/.env-{port}` from the template with PORT substituted
 4. **systemd**: Starts/restarts `onetime@{port}` service
+
+### Service Management (Valkey, Redis)
+
+1. **Config files**: Copies package defaults to `/etc/{package}/instances/{instance}.conf`
+2. **Port configuration**: Updates `port` and `bind` settings in instance config
+3. **Secrets**: Optionally creates `/etc/{package}/instances/{instance}-secrets.conf` with restricted permissions
+4. **Data directories**: Creates `/var/lib/{package}/{instance}/` with correct ownership
+5. **systemd**: Manages `{package}-server@{instance}` services using package-provided templates
 
 ## Troubleshooting
 

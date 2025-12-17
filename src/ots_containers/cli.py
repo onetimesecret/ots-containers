@@ -28,7 +28,7 @@ from .podman import podman
 
 app = cyclopts.App(
     name="ots-containers",
-    help="Manage OTS Podman containers via Quadlets",
+    help="Service orchestration for OTS: Podman Quadlets and systemd services",
     version=__version__,
 )
 

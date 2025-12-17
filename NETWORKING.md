@@ -1,6 +1,8 @@
-# Networking Configuration
+# Container Networking Configuration
 
-This document explains how container networking is configured.
+This document explains how networking is configured for **OTS container instances** (Podman Quadlets).
+
+**Note**: This does not apply to service management (Valkey/Redis). Those services bind to ports configured in their instance config files (`/etc/valkey/instances/{port}.conf`).
 
 ## Current Setup: Host Networking with PORT
 
