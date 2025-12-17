@@ -23,7 +23,7 @@ import cyclopts
 
 from . import __version__
 from .commands import assets as assets_cmd
-from .commands import image, init, instance, proxy, service
+from .commands import cloudinit, image, init, instance, proxy, service
 from .podman import podman
 
 app = cyclopts.App(
@@ -39,6 +39,7 @@ app.command(image.app)
 app.command(assets_cmd.app)
 app.command(proxy.app)
 app.command(service.app)
+app.command(cloudinit.app)
 
 
 @app.default

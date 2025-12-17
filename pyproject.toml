@@ -31,7 +31,7 @@ classifiers = [
     "Programming Language :: Python :: 3.13",
     "Topic :: System :: Systems Administration",
 ]
-dependencies = ["cyclopts>=3.9", "podman>=5.0"]
+dependencies = ["cyclopts>=3.9", "podman>=5.0", "pyyaml>=6.0"]
 
 [project.optional-dependencies]
 dev = ["pre-commit>=3.0", "pyright>=1.1.390"]

@@ -125,6 +125,25 @@ ots-containers service disable redis 6380
 ots-containers service
 ```
 
+### Generating cloud-init configurations
+
+```bash
+# Generate basic cloud-init config with Debian 13 apt sources
+ots-containers cloudinit generate > user-data.yaml
+
+# Save to specific file
+ots-containers cloudinit generate --output /tmp/cloud-init.yaml
+
+# Include PostgreSQL repository
+ots-containers cloudinit generate --include-postgresql --postgresql-key /path/to/pgdg.asc
+
+# Include Valkey repository
+ots-containers cloudinit generate --include-valkey --valkey-key /path/to/valkey.gpg
+
+# Validate a cloud-init configuration
+ots-containers cloudinit validate user-data.yaml
+```
+
 ## Environment Variables
 
 Override defaults:
@@ -202,6 +221,14 @@ Similar structure for Redis (`/etc/redis/`, `/var/lib/redis/`).
 3. **Secrets**: Optionally creates `/etc/{package}/instances/{instance}-secrets.conf` with restricted permissions
 4. **Data directories**: Creates `/var/lib/{package}/{instance}/` with correct ownership
 5. **systemd**: Manages `{package}-server@{instance}` services using package-provided templates
+
+### Cloud-Init Generation
+
+1. **DEB822 format**: Uses modern Debian 13 (Trixie) DEB822-style apt sources
+2. **Base repositories**: Includes main, backports, and security repositories
+3. **Third-party repos**: Optionally adds PostgreSQL and Valkey repositories with GPG keys
+4. **Package selection**: Includes common packages (podman, git, systemd-container, etc.)
+5. **Validation**: Built-in YAML syntax and format validation
 
 ## Troubleshooting
 
