@@ -62,7 +62,7 @@ Tests run as your user. Production runs as root or a service user.
 |------|-------------|------------|
 | `/var/lib/containers/...` | Doesn't exist | Exists, root-owned |
 | `/etc/onetimesecret/...` | Doesn't exist | Exists, maybe root-owned |
-| `/var/opt/onetimesecret/...` | Doesn't exist | Created by tool |
+| `/var/lib/onetimesecret/...` | Doesn't exist | Created by tool |
 | `tmp_path` | Exists, user-owned | Exists, user-owned |
 
 ### 4. Real-world error scenarios to test
@@ -82,7 +82,7 @@ def test_handles_missing_config_directory(self, tmp_path):
     """Should fail gracefully if /etc/onetimesecret doesn't exist."""
 
 def test_handles_env_file_permission_denied(self, mocker, tmp_path):
-    """Should report clear error if can't write to /var/opt/..."""
+    """Should report clear error if can't write to /var/lib/..."""
 ```
 
 ## Patterns

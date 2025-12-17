@@ -290,7 +290,8 @@ def logs(
 def env(ports: OptionalPorts = ()):
     """Show sorted environment variables for instance(s).
 
-    Reads and displays the .env-{port} file contents, sorted alphabetically.
+    Sources the .env-{port} file and displays the resulting environment,
+    sorted alphabetically. Only shows valid KEY=VALUE pairs.
     """
     ports = resolve_ports(ports)
     if not ports:
@@ -301,10 +302,23 @@ def env(ports: OptionalPorts = ()):
         print(f"=== {env_file} ===")
         if env_file.exists():
             lines = env_file.read_text().splitlines()
-            # Sort non-empty, non-comment lines
-            env_lines = [l for l in lines if l.strip() and not l.strip().startswith("#")]
-            for line in sorted(env_lines):
-                print(line)
+            # Parse only valid KEY=VALUE lines (key must be valid shell identifier)
+            env_vars = {}
+            for line in lines:
+                line = line.strip()
+                # Skip empty lines, comments, and shell commands
+                if not line or line.startswith("#"):
+                    continue
+                # Must contain = and start with a valid identifier char
+                if "=" in line:
+                    key, _, value = line.partition("=")
+                    key = key.strip()
+                    # Valid env var: letter/underscore start, alnum/underscore chars
+                    if key and (key[0].isalpha() or key.startswith("_")):
+                        if all(c.isalnum() or c == "_" for c in key):
+                            env_vars[key] = value
+            for key in sorted(env_vars.keys()):
+                print(f"{key}={env_vars[key]}")
         else:
             print("  (file not found)")
         print()

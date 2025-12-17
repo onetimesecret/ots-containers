@@ -62,7 +62,7 @@ This is a CLI tool for managing OneTimeSecret containers via Podman Quadlets (sy
 - Uses **cyclopts** for CLI framework (decorators like `@app.command()`)
 - Port-based instance identification: each instance runs on a specific port (e.g., 7043)
 - Auto-discovery via `systemd.discover_instances()` - finds running `onetime@*` services
-- Env file templating: `/etc/onetimesecret/.env` → `/var/opt/onetimesecret/.env-{port}` (FHS-compliant)
+- Env file templating: `/etc/onetimesecret/.env` → `/var/lib/onetimesecret/.env-{port}` (FHS-compliant)
 - ## Verification
 Don't invent technical rationales. When working with runtime behavior, get or
 ask for actual output (podman ps, systemctl status, etc.) before changing code.

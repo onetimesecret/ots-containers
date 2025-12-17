@@ -186,7 +186,7 @@ class TestInitCommand:
         # Create a mock config pointing to tmp_path subdirs
         mock_config = mocker.MagicMock()
         mock_config.config_dir = tmp_path / "etc" / "onetimesecret"
-        mock_config.var_dir = tmp_path / "var" / "opt" / "onetimesecret"
+        mock_config.var_dir = tmp_path / "var" / "lib" / "onetimesecret"
         mock_config.template_path = (
             tmp_path / "etc" / "containers" / "systemd" / "onetime@.container"
         )
@@ -211,16 +211,19 @@ class TestInitCommand:
 
         # Create directory structure
         config_dir = tmp_path / "etc" / "onetimesecret"
-        var_dir = tmp_path / "var" / "opt" / "onetimesecret"
+        var_dir = tmp_path / "var" / "lib" / "onetimesecret"
         quadlet_dir = tmp_path / "etc" / "containers" / "systemd"
+        users_dir = quadlet_dir / "users"
 
         config_dir.mkdir(parents=True)
         var_dir.mkdir(parents=True)
         quadlet_dir.mkdir(parents=True)
+        users_dir.mkdir(parents=True)
 
         (config_dir / "config.yaml").touch()
         (config_dir / ".env").touch()
         (var_dir / "deployments.db").touch()
+        (quadlet_dir / "onetime@.container").touch()
 
         mock_config = mocker.MagicMock()
         mock_config.config_dir = config_dir
@@ -245,7 +248,7 @@ class TestInitCommand:
 
         mock_config = mocker.MagicMock()
         mock_config.config_dir = tmp_path / "etc" / "onetimesecret"
-        mock_config.var_dir = tmp_path / "var" / "opt" / "onetimesecret"
+        mock_config.var_dir = tmp_path / "var" / "lib" / "onetimesecret"
         mock_config.template_path = (
             tmp_path / "etc" / "containers" / "systemd" / "onetime@.container"
         )
@@ -271,7 +274,7 @@ class TestInitCommand:
         from ots_containers.commands.init import init
 
         config_dir = tmp_path / "etc" / "onetimesecret"
-        var_dir = tmp_path / "var" / "opt" / "onetimesecret"
+        var_dir = tmp_path / "var" / "lib" / "onetimesecret"
         quadlet_dir = tmp_path / "etc" / "containers" / "systemd"
 
         mock_config = mocker.MagicMock()
@@ -307,7 +310,7 @@ class TestInitCommand:
 
         # Create target structure
         config_dir = tmp_path / "etc" / "onetimesecret"
-        var_dir = tmp_path / "var" / "opt" / "onetimesecret"
+        var_dir = tmp_path / "var" / "lib" / "onetimesecret"
         quadlet_dir = tmp_path / "etc" / "containers" / "systemd"
 
         mock_config = mocker.MagicMock()
@@ -337,7 +340,7 @@ class TestInitCommand:
         from ots_containers.commands.init import init
 
         config_dir = tmp_path / "etc" / "onetimesecret"
-        var_dir = tmp_path / "var" / "opt" / "onetimesecret"
+        var_dir = tmp_path / "var" / "lib" / "onetimesecret"
         quadlet_dir = tmp_path / "etc" / "containers" / "systemd"
 
         # Pre-create directories so we get past dir creation
