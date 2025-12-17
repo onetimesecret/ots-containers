@@ -2,6 +2,32 @@
 """Cloud-init configuration templates with Debian 13 DEB822 apt sources."""
 
 
+def get_debian13_sources_list() -> str:
+    """Get just the Debian 13 DEB822 sources.list content.
+
+    Returns:
+        DEB822-formatted sources.list content
+    """
+    return """Types: deb
+URIs: http://deb.debian.org/debian
+Suites: trixie trixie-updates
+Components: main contrib non-free non-free-firmware
+Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg
+
+Types: deb
+URIs: http://deb.debian.org/debian
+Suites: trixie-backports
+Components: main contrib non-free non-free-firmware
+Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg
+
+Types: deb
+URIs: http://security.debian.org/debian-security
+Suites: trixie-security
+Components: main contrib non-free non-free-firmware
+Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg
+"""
+
+
 def generate_cloudinit_config(
     *,
     include_postgresql: bool = False,
@@ -21,6 +47,10 @@ def generate_cloudinit_config(
         Complete cloud-init YAML configuration as string
     """
     # Base configuration with Debian 13 main repositories
+    # Get the sources list and indent it for YAML
+    sources_list = get_debian13_sources_list().rstrip("\n")
+    indented_sources = "\n".join(f"    {line}" for line in sources_list.split("\n"))
+
     config_parts = [
         "#cloud-config",
         "# Generated cloud-init configuration for OTS infrastructure",
@@ -32,23 +62,7 @@ def generate_cloudinit_config(
         "",
         "apt:",
         "  sources_list: |",
-        "    Types: deb",
-        "    URIs: http://deb.debian.org/debian",
-        "    Suites: trixie trixie-updates",
-        "    Components: main contrib non-free non-free-firmware",
-        "    Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg",
-        "",
-        "    Types: deb",
-        "    URIs: http://deb.debian.org/debian",
-        "    Suites: trixie-backports",
-        "    Components: main contrib non-free non-free-firmware",
-        "    Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg",
-        "",
-        "    Types: deb",
-        "    URIs: http://security.debian.org/debian-security",
-        "    Suites: trixie-security",
-        "    Components: main contrib non-free non-free-firmware",
-        "    Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg",
+        indented_sources,
     ]
 
     # Add third-party repositories if requested
@@ -111,29 +125,3 @@ def generate_cloudinit_config(
         config_parts.append("  - valkey")
 
     return "\n".join(config_parts) + "\n"
-
-
-def get_debian13_sources_list() -> str:
-    """Get just the Debian 13 DEB822 sources.list content.
-
-    Returns:
-        DEB822-formatted sources.list content
-    """
-    return """Types: deb
-URIs: http://deb.debian.org/debian
-Suites: trixie trixie-updates
-Components: main contrib non-free non-free-firmware
-Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg
-
-Types: deb
-URIs: http://deb.debian.org/debian
-Suites: trixie-backports
-Components: main contrib non-free non-free-firmware
-Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg
-
-Types: deb
-URIs: http://security.debian.org/debian-security
-Suites: trixie-security
-Components: main contrib non-free non-free-firmware
-Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg
-"""
