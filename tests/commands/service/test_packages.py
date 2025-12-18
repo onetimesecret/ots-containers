@@ -91,12 +91,12 @@ class TestServicePackage:
 
     def test_config_file(self):
         """Test config_file method."""
-        assert VALKEY.config_file("6379") == Path("/etc/valkey/instances/6379.conf")
+        assert VALKEY.config_file("6379") == Path("/etc/valkey/valkey-6379.conf")
         assert REDIS.config_file("6380") == Path("/etc/redis/instances/6380.conf")
 
     def test_secrets_file(self):
         """Test secrets_file method."""
-        assert VALKEY.secrets_file("6379") == Path("/etc/valkey/instances/6379.secrets")
+        assert VALKEY.secrets_file("6379") == Path("/etc/valkey/valkey-6379.secrets")
         assert REDIS.secrets_file("6380") == Path("/etc/redis/instances/6380.secrets")
 
     def test_secrets_file_returns_none_without_secrets(self):

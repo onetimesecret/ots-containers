@@ -78,13 +78,22 @@ class TestDefaultCommand:
 class TestInitCommand:
     """Tests for init command."""
 
+    @patch("ots_containers.commands.service.app.check_default_service_conflict")
     @patch("ots_containers.commands.service.app.systemctl")
     @patch("ots_containers.commands.service.app.create_secrets_file")
     @patch("ots_containers.commands.service.app.ensure_data_dir")
     @patch("ots_containers.commands.service.app.update_config_value")
     @patch("ots_containers.commands.service.app.copy_default_config")
     def test_init_calls_copy_default_config(
-        self, mock_copy, mock_update, mock_data, mock_secrets, mock_systemctl, capsys, tmp_path
+        self,
+        mock_copy,
+        mock_update,
+        mock_data,
+        mock_secrets,
+        mock_systemctl,
+        mock_check_conflict,
+        capsys,
+        tmp_path,
     ):
         """Test init copies default config."""
         mock_copy.return_value = tmp_path / "test.conf"
@@ -98,13 +107,21 @@ class TestInitCommand:
         assert call_args[0][0].name == "valkey"
         assert call_args[0][1] == "6379"
 
+    @patch("ots_containers.commands.service.app.check_default_service_conflict")
     @patch("ots_containers.commands.service.app.systemctl")
     @patch("ots_containers.commands.service.app.create_secrets_file")
     @patch("ots_containers.commands.service.app.ensure_data_dir")
     @patch("ots_containers.commands.service.app.update_config_value")
     @patch("ots_containers.commands.service.app.copy_default_config")
     def test_init_updates_port_and_bind(
-        self, mock_copy, mock_update, mock_data, mock_secrets, mock_systemctl, tmp_path
+        self,
+        mock_copy,
+        mock_update,
+        mock_data,
+        mock_secrets,
+        mock_systemctl,
+        mock_check_conflict,
+        tmp_path,
     ):
         """Test init updates port and bind in config."""
         mock_copy.return_value = tmp_path / "test.conf"
@@ -118,6 +135,7 @@ class TestInitCommand:
         assert "port" in call_keys
         assert "bind" in call_keys
 
+    @patch("ots_containers.commands.service.app.check_default_service_conflict")
     @patch("ots_containers.commands.service.app.systemctl")
     @patch("ots_containers.commands.service.app.create_secrets_file")
     @patch("ots_containers.commands.service.app.add_secrets_include")
@@ -132,6 +150,7 @@ class TestInitCommand:
         mock_add_include,
         mock_secrets,
         mock_systemctl,
+        mock_check_conflict,
         tmp_path,
     ):
         """Test init creates secrets file when not skipped."""
@@ -143,13 +162,21 @@ class TestInitCommand:
 
         mock_secrets.assert_called_once()
 
+    @patch("ots_containers.commands.service.app.check_default_service_conflict")
     @patch("ots_containers.commands.service.app.systemctl")
     @patch("ots_containers.commands.service.app.create_secrets_file")
     @patch("ots_containers.commands.service.app.ensure_data_dir")
     @patch("ots_containers.commands.service.app.update_config_value")
     @patch("ots_containers.commands.service.app.copy_default_config")
     def test_init_skips_secrets_with_no_secrets(
-        self, mock_copy, mock_update, mock_data, mock_secrets, mock_systemctl, tmp_path
+        self,
+        mock_copy,
+        mock_update,
+        mock_data,
+        mock_secrets,
+        mock_systemctl,
+        mock_check_conflict,
+        tmp_path,
     ):
         """Test init skips secrets file with --no-secrets."""
         mock_copy.return_value = tmp_path / "test.conf"
@@ -159,13 +186,21 @@ class TestInitCommand:
 
         mock_secrets.assert_not_called()
 
+    @patch("ots_containers.commands.service.app.check_default_service_conflict")
     @patch("ots_containers.commands.service.app.systemctl")
     @patch("ots_containers.commands.service.app.create_secrets_file")
     @patch("ots_containers.commands.service.app.ensure_data_dir")
     @patch("ots_containers.commands.service.app.update_config_value")
     @patch("ots_containers.commands.service.app.copy_default_config")
     def test_init_enables_service(
-        self, mock_copy, mock_update, mock_data, mock_secrets, mock_systemctl, tmp_path
+        self,
+        mock_copy,
+        mock_update,
+        mock_data,
+        mock_secrets,
+        mock_systemctl,
+        mock_check_conflict,
+        tmp_path,
     ):
         """Test init enables service when enable=True."""
         mock_copy.return_value = tmp_path / "test.conf"
@@ -178,13 +213,21 @@ class TestInitCommand:
         calls = [str(call) for call in mock_systemctl.call_args_list]
         assert any("enable" in call for call in calls)
 
+    @patch("ots_containers.commands.service.app.check_default_service_conflict")
     @patch("ots_containers.commands.service.app.systemctl")
     @patch("ots_containers.commands.service.app.create_secrets_file")
     @patch("ots_containers.commands.service.app.ensure_data_dir")
     @patch("ots_containers.commands.service.app.update_config_value")
     @patch("ots_containers.commands.service.app.copy_default_config")
     def test_init_starts_service(
-        self, mock_copy, mock_update, mock_data, mock_secrets, mock_systemctl, tmp_path
+        self,
+        mock_copy,
+        mock_update,
+        mock_data,
+        mock_secrets,
+        mock_systemctl,
+        mock_check_conflict,
+        tmp_path,
     ):
         """Test init starts service when start=True."""
         mock_copy.return_value = tmp_path / "test.conf"
