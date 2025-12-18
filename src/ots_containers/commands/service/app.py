@@ -13,6 +13,7 @@ import cyclopts
 
 from ._helpers import (
     add_secrets_include,
+    check_default_service_conflict,
     copy_default_config,
     create_secrets_file,
     ensure_data_dir,
@@ -75,6 +76,9 @@ def init(
     print(f"  Port: {port_num}")
     print(f"  Bind: {bind}")
     print()
+
+    # Check for default service conflict
+    check_default_service_conflict(pkg)
 
     # Step 1: Copy default config
     print(f"Creating config from {pkg.default_config}...")
@@ -325,11 +329,21 @@ def list_instances(package: Package):
                         print(f"  {instance:10} {active:10} {enabled:10} {config_status}")
 
     # Also check for config files that might not have running services
-    if pkg.instances_dir.exists():
+    config_dir = pkg.instances_dir if pkg.use_instances_subdir else pkg.config_dir
+    if config_dir.exists():
         print()
-        print("Config files in instances directory:")
-        for conf in pkg.instances_dir.glob("*.conf"):
-            instance = conf.stem
+        print("Config files in config directory:")
+        for conf in config_dir.glob("*.conf"):
+            # Extract instance from filename based on pattern
+            # For instances subdir: "6380.conf" -> "6380"
+            # For direct configs: "valkey-6380.conf" -> "6380"
+            if pkg.use_instances_subdir:
+                instance = conf.stem
+            else:
+                # Remove package-specific prefix to get instance
+                # e.g., "valkey-6380.conf" -> "6380"
+                instance = conf.stem.replace(f"{pkg.name}-", "")
+
             unit = pkg.instance_unit(instance)
             active = "active" if is_service_active(unit) else "inactive"
             print(f"  {conf.name:30} -> {active}")
