@@ -133,6 +133,9 @@ def redeploy(
     Use after editing config.yaml or .env template.
     Use --force to fully teardown and recreate.
     Records deployment to timeline for audit and rollback support.
+
+    Note: Always recreates containers (stop+start) to ensure quadlet changes
+    (volume mounts, image, etc.) are applied.
     """
     ports = resolve_ports(ports)
     if not ports:
@@ -152,24 +155,30 @@ def redeploy(
 
     def do_redeploy(port: int) -> None:
         env_file = cfg.env_file(port)
+        unit = f"onetime@{port}"
+
         if force:
-            # Teardown first
-            print(f"Stopping onetime@{port}")
-            systemd.stop(f"onetime@{port}")
+            # Teardown: stop and remove .env
+            print(f"Stopping {unit}")
+            systemd.stop(unit)
             if env_file.exists():
                 print(f"Removing {env_file}")
                 env_file.unlink()
-        # Deploy
+
+        # Write env file
         print(f"Writing {env_file}")
         write_env_file(cfg, port)
-        unit = f"onetime@{port}"
+
         try:
             if force or not systemd.unit_exists(unit):
+                # Fresh deployment
                 print(f"Starting {unit}")
                 systemd.start(unit)
             else:
-                print(f"Restarting {unit}")
-                systemd.restart(unit)
+                # Recreate existing container (stop+start to apply quadlet changes)
+                print(f"Recreating {unit}")
+                systemd.recreate(unit)
+
             # Record successful redeploy
             db.record_deployment(
                 cfg.db_path,

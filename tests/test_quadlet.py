@@ -104,7 +104,7 @@ class TestContainerTemplate:
         quadlet.write_template(cfg)
 
         content = cfg.template_path.read_text()
-        assert f"Volume={config_dir}/config.yaml:/app/etc/config.yaml:ro,Z" in content
+        assert f"Volume={config_dir}/config.yaml:/app/etc/config.yaml:ro" in content
         assert "Volume=static_assets:/app/public:ro" in content
 
     def test_write_template_includes_systemd_dependencies(self, mocker, tmp_path):

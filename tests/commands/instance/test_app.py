@@ -134,7 +134,7 @@ class TestRedeployCommand:
         )
         mocker.patch("ots_containers.commands.instance.app.assets.update")
         mocker.patch("ots_containers.commands.instance.app.quadlet.write_template")
-        mocker.patch("ots_containers.commands.instance.app.systemd.restart")
+        mocker.patch("ots_containers.commands.instance.app.systemd.recreate")
         mocker.patch("ots_containers.commands.instance.app.db.record_deployment")
         mocker.patch(
             "ots_containers.commands.instance.app.systemd.unit_exists",
@@ -167,7 +167,7 @@ class TestRedeployCommand:
         mocker.patch("ots_containers.commands.instance.app.assets.update")
         mocker.patch("ots_containers.commands.instance.app.quadlet.write_template")
         mock_start = mocker.patch("ots_containers.commands.instance.app.systemd.start")
-        mock_restart = mocker.patch("ots_containers.commands.instance.app.systemd.restart")
+        mock_recreate = mocker.patch("ots_containers.commands.instance.app.systemd.recreate")
         mocker.patch("ots_containers.commands.instance.app.db.record_deployment")
         mocker.patch(
             "ots_containers.commands.instance.app.systemd.unit_exists",
@@ -181,9 +181,9 @@ class TestRedeployCommand:
 
         instance.redeploy(ports=())
 
-        # Should call start, not restart
+        # Should call start, not recreate
         mock_start.assert_called_once_with("onetime@7143")
-        mock_restart.assert_not_called()
+        mock_recreate.assert_not_called()
 
 
 class TestEnvCommand:

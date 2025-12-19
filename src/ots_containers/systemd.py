@@ -37,24 +37,50 @@ def discover_instances(running_only: bool = False) -> list[int]:
 
 
 def daemon_reload() -> None:
-    subprocess.run(["sudo", "systemctl", "daemon-reload"], check=True)
+    cmd = ["sudo", "systemctl", "daemon-reload"]
+    print(f"  $ {' '.join(cmd)}")
+    subprocess.run(cmd, check=True)
 
 
 def start(unit: str) -> None:
-    subprocess.run(["sudo", "systemctl", "start", unit], check=True)
+    cmd = ["sudo", "systemctl", "start", unit]
+    print(f"  $ {' '.join(cmd)}")
+    subprocess.run(cmd, check=True)
 
 
 def stop(unit: str) -> None:
-    subprocess.run(["sudo", "systemctl", "stop", unit], check=True)
+    cmd = ["sudo", "systemctl", "stop", unit]
+    print(f"  $ {' '.join(cmd)}")
+    subprocess.run(cmd, check=True)
 
 
 def restart(unit: str) -> None:
-    subprocess.run(["sudo", "systemctl", "restart", unit], check=True)
+    cmd = ["sudo", "systemctl", "restart", unit]
+    print(f"  $ {' '.join(cmd)}")
+    subprocess.run(cmd, check=True)
+
+
+def recreate(unit: str) -> None:
+    """Stop and start a Quadlet service to force container recreation.
+
+    Use this instead of restart() when the Quadlet .container file has
+    been modified and you need to ensure the container is recreated
+    with the new configuration (e.g., new volume mounts, environment, etc.).
+    """
+    stop_cmd = ["sudo", "systemctl", "stop", unit]
+    print(f"  $ {' '.join(stop_cmd)}")
+    subprocess.run(stop_cmd, check=True)
+
+    start_cmd = ["sudo", "systemctl", "start", unit]
+    print(f"  $ {' '.join(start_cmd)}")
+    subprocess.run(start_cmd, check=True)
 
 
 def status(unit: str, lines: int = 25) -> None:
+    cmd = ["sudo", "systemctl", "--no-pager", f"-n{lines}", "status", unit]
+    print(f"  $ {' '.join(cmd)}")
     subprocess.run(
-        ["sudo", "systemctl", "--no-pager", f"-n{lines}", "status", unit],
+        cmd,
         check=False,  # status returns non-zero if not running
     )
 
