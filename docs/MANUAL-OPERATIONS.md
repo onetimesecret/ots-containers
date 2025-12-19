@@ -49,7 +49,7 @@ Image=ghcr.io/onetimesecret/onetimesecret:current
 Network=host
 Environment=PORT=%i
 EnvironmentFile=/var/lib/onetimesecret/.env-%i
-Volume=/etc/onetimesecret/config.yaml:/app/etc/config.yaml:ro
+Volume=/etc/onetimesecret/config.yaml:/app/etc/config.yaml:ro,Z
 Volume=static_assets:/app/public:ro
 
 [Install]
@@ -206,7 +206,7 @@ Image=ghcr.io/onetimesecret/onetimesecret:current
 Network=host
 Environment=PORT=%i
 EnvironmentFile=/var/lib/onetimesecret/.env-%i
-Volume=/etc/onetimesecret/config.yaml:/app/etc/config.yaml:ro
+Volume=/etc/onetimesecret/config.yaml:/app/etc/config.yaml:ro,Z
 Volume=static_assets:/app/public:ro
 
 [Install]

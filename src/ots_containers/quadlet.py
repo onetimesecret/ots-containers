@@ -18,7 +18,7 @@ Image={image}
 Network=host
 Environment=PORT=%i
 EnvironmentFile={var_dir}/.env-%i
-Volume={config_dir}/config.yaml:/app/etc/config.yaml:ro
+Volume={config_dir}/config.yaml:/app/etc/config.yaml:ro,Z
 Volume=static_assets:/app/public:ro
 HealthCmd=curl -sf http://localhost:%i/health || exit 1
 HealthInterval=30s
