@@ -1,8 +1,6 @@
 # tests/test_quadlet.py
 """Tests for quadlet module - Podman quadlet file generation."""
 
-from pathlib import Path
-
 
 class TestContainerTemplate:
     """Test container quadlet template generation."""
@@ -13,7 +11,10 @@ class TestContainerTemplate:
         from ots_containers import quadlet
         from ots_containers.config import Config
 
-        cfg = Config(template_path=tmp_path / "onetime@.container")
+        cfg = Config(
+            template_path=tmp_path / "onetime@.container",
+            var_dir=tmp_path / "var",
+        )
 
         quadlet.write_template(cfg)
 
@@ -28,7 +29,10 @@ class TestContainerTemplate:
         from ots_containers import quadlet
         from ots_containers.config import Config
 
-        cfg = Config(template_path=tmp_path / "onetime@.container")
+        cfg = Config(
+            template_path=tmp_path / "onetime@.container",
+            var_dir=tmp_path / "var",
+        )
 
         quadlet.write_template(cfg)
 
@@ -41,7 +45,10 @@ class TestContainerTemplate:
         from ots_containers import quadlet
         from ots_containers.config import Config
 
-        cfg = Config(template_path=tmp_path / "onetime@.container")
+        cfg = Config(
+            template_path=tmp_path / "onetime@.container",
+            var_dir=tmp_path / "var",
+        )
 
         quadlet.write_template(cfg)
 
@@ -54,7 +61,10 @@ class TestContainerTemplate:
         from ots_containers import quadlet
         from ots_containers.config import Config
 
-        cfg = Config(template_path=tmp_path / "onetime@.container")
+        cfg = Config(
+            template_path=tmp_path / "onetime@.container",
+            var_dir=tmp_path / "var",
+        )
 
         quadlet.write_template(cfg)
 
@@ -67,15 +77,16 @@ class TestContainerTemplate:
         from ots_containers import quadlet
         from ots_containers.config import Config
 
+        var_dir = tmp_path / "var"
         cfg = Config(
             template_path=tmp_path / "onetime@.container",
-            var_dir=Path("/var/lib/ots"),
+            var_dir=var_dir,
         )
 
         quadlet.write_template(cfg)
 
         content = cfg.template_path.read_text()
-        assert "EnvironmentFile=/var/lib/ots/.env-%i" in content
+        assert f"EnvironmentFile={var_dir}/.env-%i" in content
 
     def test_write_template_includes_volumes(self, mocker, tmp_path):
         """Container quadlet should mount config and static assets."""
@@ -83,15 +94,17 @@ class TestContainerTemplate:
         from ots_containers import quadlet
         from ots_containers.config import Config
 
+        config_dir = tmp_path / "etc"
         cfg = Config(
             template_path=tmp_path / "onetime@.container",
-            config_dir=Path("/etc/ots"),
+            config_dir=config_dir,
+            var_dir=tmp_path / "var",
         )
 
         quadlet.write_template(cfg)
 
         content = cfg.template_path.read_text()
-        assert "Volume=/etc/ots/config.yaml:/app/etc/config.yaml:ro" in content
+        assert f"Volume={config_dir}/config.yaml:/app/etc/config.yaml:ro" in content
         assert "Volume=static_assets:/app/public:ro" in content
 
     def test_write_template_includes_systemd_dependencies(self, mocker, tmp_path):
@@ -100,7 +113,10 @@ class TestContainerTemplate:
         from ots_containers import quadlet
         from ots_containers.config import Config
 
-        cfg = Config(template_path=tmp_path / "onetime@.container")
+        cfg = Config(
+            template_path=tmp_path / "onetime@.container",
+            var_dir=tmp_path / "var",
+        )
 
         quadlet.write_template(cfg)
 
@@ -116,7 +132,10 @@ class TestContainerTemplate:
         from ots_containers.config import Config
 
         nested_path = tmp_path / "subdir" / "onetime@.container"
-        cfg = Config(template_path=nested_path)
+        cfg = Config(
+            template_path=nested_path,
+            var_dir=tmp_path / "var",
+        )
 
         quadlet.write_template(cfg)
 
@@ -128,7 +147,10 @@ class TestContainerTemplate:
         from ots_containers import quadlet
         from ots_containers.config import Config
 
-        cfg = Config(template_path=tmp_path / "onetime@.container")
+        cfg = Config(
+            template_path=tmp_path / "onetime@.container",
+            var_dir=tmp_path / "var",
+        )
 
         quadlet.write_template(cfg)
 

@@ -33,7 +33,7 @@ WantedBy=multi-user.target
 def write_template(cfg: Config) -> None:
     """Write the container quadlet template."""
     content = CONTAINER_TEMPLATE.format(
-        image=cfg.image_with_tag,
+        image=cfg.resolved_image_with_tag,
         config_dir=cfg.config_dir,
         var_dir=cfg.var_dir,
     )
