@@ -20,14 +20,51 @@ app = cyclopts.App(
 
 @app.default
 def list_instances(ports: OptionalPorts = (), alias: str = "instances"):
-    """List running instances (auto-discovers if no ports given)."""
+    """List instances with status, image, and deployment info (auto-discovers if no ports given)."""
     ports = resolve_ports(ports)
     if not ports:
         return
-    print("Instances:")
-    print("-" * 40)
+
+    cfg = Config()
+
+    # Header
+    header = (
+        f"{'PORT':<6} {'SERVICE':<22} {'CONTAINER':<16} "
+        f"{'STATUS':<12} {'IMAGE:TAG':<38} {'DEPLOYED':<20} {'ACTION':<10}"
+    )
+    print(header)
+    print("-" * 130)
+
     for port in ports:
-        print(f"  onetime@{port}")
+        service = f"onetime@{port}.service"
+        container = f"onetime@{port}"
+
+        # Get systemd status
+        result = subprocess.run(
+            ["systemctl", "is-active", service],
+            capture_output=True,
+            text=True,
+        )
+        status = result.stdout.strip()
+
+        # Get last deployment from database
+        deployments = db.get_deployments(cfg.db_path, limit=1, port=port)
+        if deployments:
+            dep = deployments[0]
+            image_tag = f"{dep.image}:{dep.tag}"
+            # Format timestamp - strip microseconds and 'T'
+            deployed = dep.timestamp.split(".")[0].replace("T", " ")
+            action = dep.action
+        else:
+            image_tag = "unknown"
+            deployed = "n/a"
+            action = "n/a"
+
+        row = (
+            f"{port:<6} {service:<22} {container:<16} "
+            f"{status:<12} {image_tag:<38} {deployed:<20} {action:<10}"
+        )
+        print(row)
 
 
 @app.command

@@ -273,3 +273,140 @@ class TestExecCommand:
         mock_run.assert_called_once()
         call_args = mock_run.call_args[0][0]
         assert "/bin/sh" in call_args
+
+
+class TestListInstancesCommand:
+    """Tests for list_instances command."""
+
+    def test_list_instances_function_exists(self):
+        """list_instances function should exist."""
+        assert instance.list_instances is not None
+
+    def test_list_with_no_instances(self, mocker, capsys):
+        """list should print message when no instances found."""
+        mocker.patch(
+            "ots_containers.commands.instance.app.systemd.discover_instances",
+            return_value=[],
+        )
+
+        instance.list_instances()
+
+        captured = capsys.readouterr()
+        assert "No configured instances found" in captured.out
+
+    def test_list_displays_header(self, mocker, capsys, tmp_path):
+        """list should display table header."""
+        mocker.patch(
+            "ots_containers.commands.instance.app.systemd.discover_instances",
+            return_value=[7043],
+        )
+        mocker.patch(
+            "ots_containers.commands.instance.app.subprocess.run",
+            return_value=mocker.Mock(stdout="active\n", stderr=""),
+        )
+
+        # Mock Config and db
+        mock_config = mocker.Mock()
+        mock_config.db_path = tmp_path / "test.db"
+        mocker.patch(
+            "ots_containers.commands.instance.app.Config",
+            return_value=mock_config,
+        )
+        mocker.patch(
+            "ots_containers.commands.instance.app.db.get_deployments",
+            return_value=[],
+        )
+
+        instance.list_instances()
+
+        captured = capsys.readouterr()
+        assert "PORT" in captured.out
+        assert "SERVICE" in captured.out
+        assert "CONTAINER" in captured.out
+        assert "STATUS" in captured.out
+        assert "IMAGE:TAG" in captured.out
+        assert "DEPLOYED" in captured.out
+        assert "ACTION" in captured.out
+
+    def test_list_shows_instance_details(self, mocker, capsys, tmp_path):
+        """list should show instance details from systemd and database."""
+        mocker.patch(
+            "ots_containers.commands.instance.app.systemd.discover_instances",
+            return_value=[7043],
+        )
+        mocker.patch(
+            "ots_containers.commands.instance.app.subprocess.run",
+            return_value=mocker.Mock(stdout="active\n", stderr=""),
+        )
+
+        # Mock Config
+        mock_config = mocker.Mock()
+        mock_config.db_path = tmp_path / "test.db"
+        mocker.patch(
+            "ots_containers.commands.instance.app.Config",
+            return_value=mock_config,
+        )
+
+        # Mock deployment data
+        from ots_containers.db import Deployment
+
+        mock_deployment = Deployment(
+            id=1,
+            timestamp="2025-12-19T03:00:00.123456",
+            port=7043,
+            image="ghcr.io/onetimesecret/onetimesecret",
+            tag="v0.24.0-rc0",
+            action="deploy",
+            success=True,
+            notes=None,
+        )
+        mocker.patch(
+            "ots_containers.commands.instance.app.db.get_deployments",
+            return_value=[mock_deployment],
+        )
+
+        instance.list_instances()
+
+        captured = capsys.readouterr()
+        assert "7043" in captured.out
+        assert "onetime@7043.service" in captured.out
+        assert "onetime@7043" in captured.out
+        assert "active" in captured.out
+        assert "ghcr.io/onetimesecret/onetimesecret:v0.24.0-rc0" in captured.out
+        assert "2025-12-19 03:00:00" in captured.out
+        assert "deploy" in captured.out
+
+    def test_list_handles_missing_deployment_data(self, mocker, capsys, tmp_path):
+        """list should handle instances without deployment data."""
+        mocker.patch(
+            "ots_containers.commands.instance.app.systemd.discover_instances",
+            return_value=[7043],
+        )
+        mocker.patch(
+            "ots_containers.commands.instance.app.subprocess.run",
+            return_value=mocker.Mock(stdout="inactive\n", stderr=""),
+        )
+
+        # Mock Config
+        mock_config = mocker.Mock()
+        mock_config.db_path = tmp_path / "test.db"
+        mocker.patch(
+            "ots_containers.commands.instance.app.Config",
+            return_value=mock_config,
+        )
+
+        # No deployments found
+        mocker.patch(
+            "ots_containers.commands.instance.app.db.get_deployments",
+            return_value=[],
+        )
+
+        instance.list_instances()
+
+        captured = capsys.readouterr()
+        assert "7043" in captured.out
+        assert "onetime@7043.service" in captured.out
+        assert "onetime@7043" in captured.out
+        assert "inactive" in captured.out
+        assert "unknown" in captured.out
+        assert "n/a" in captured.out
