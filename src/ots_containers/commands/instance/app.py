@@ -9,12 +9,12 @@ import cyclopts
 from ots_containers import assets, db, quadlet, systemd
 from ots_containers.config import Config
 
-from ._helpers import for_each, resolve_ports, write_env_file
+from ._helpers import for_each, resolve_ports
 from .annotations import Delay, OptionalPorts, Ports
 
 app = cyclopts.App(
     name=["instance", "instances"],
-    help="Manage instances (.env-{port}, quadlet, systemd)",
+    help="Manage OTS container instances (quadlet, systemd)",
 )
 
 
@@ -69,9 +69,10 @@ def list_instances(ports: OptionalPorts = (), alias: str = "instances"):
 
 @app.command
 def deploy(ports: Ports, delay: Delay = 5):
-    """Deploy new instance(s) from config.yaml and .env template.
+    """Deploy new instance(s) using quadlet and Podman secrets.
 
-    Creates .env-{port}, writes quadlet config, starts systemd service.
+    Writes quadlet config and starts systemd service.
+    Requires /etc/default/onetimesecret and Podman secrets to be configured.
     Records deployment to timeline for audit and rollback support.
     """
     cfg = Config()
@@ -82,15 +83,11 @@ def deploy(ports: Ports, delay: Delay = 5):
     print(f"Image: {image}:{tag}")
 
     print(f"Reading config from {cfg.config_yaml}")
-    print(f"Reading env template from {cfg.env_template}")
     assets.update(cfg, create_volume=True)
     print(f"Writing quadlet files to {cfg.template_path.parent}")
     quadlet.write_template(cfg)
 
     def do_deploy(port: int) -> None:
-        env_file = cfg.env_file(port)
-        print(f"Writing {env_file}")
-        write_env_file(cfg, port)
         print(f"Starting onetime@{port}")
         try:
             systemd.start(f"onetime@{port}")
@@ -125,12 +122,12 @@ def redeploy(
     delay: Delay = 5,
     force: Annotated[
         bool,
-        cyclopts.Parameter(help="Teardown and recreate (deletes .env, stops, redeploys)"),
+        cyclopts.Parameter(help="Teardown and recreate (stops, redeploys)"),
     ] = False,
 ):
-    """Regenerate .env-{port} and quadlet from config.yaml/.env, restart.
+    """Regenerate quadlet and restart containers.
 
-    Use after editing config.yaml or .env template.
+    Use after editing config.yaml or /etc/default/onetimesecret.
     Use --force to fully teardown and recreate.
     Records deployment to timeline for audit and rollback support.
 
@@ -148,26 +145,17 @@ def redeploy(
     print(f"Image: {image}:{tag}")
 
     print(f"Reading config from {cfg.config_yaml}")
-    print(f"Reading env template from {cfg.env_template}")
     assets.update(cfg, create_volume=force)
     print(f"Writing quadlet files to {cfg.template_path.parent}")
     quadlet.write_template(cfg)
 
     def do_redeploy(port: int) -> None:
-        env_file = cfg.env_file(port)
         unit = f"onetime@{port}"
 
         if force:
-            # Teardown: stop and remove .env
+            # Teardown: stop container
             print(f"Stopping {unit}")
             systemd.stop(unit)
-            if env_file.exists():
-                print(f"Removing {env_file}")
-                env_file.unlink()
-
-        # Write env file
-        print(f"Writing {env_file}")
-        write_env_file(cfg, port)
 
         try:
             if force or not systemd.container_exists(unit):
@@ -208,10 +196,9 @@ def redeploy(
 
 @app.command
 def undeploy(ports: OptionalPorts = (), delay: Delay = 5):
-    """Stop systemd service and delete .env-{port} config file.
+    """Stop systemd service for instance(s).
 
-    Stops systemd service and deletes .env-{port} config file.
-    Records action to timeline for audit.
+    Stops systemd service. Records action to timeline for audit.
     """
     ports = resolve_ports(ports)
     if not ports:
@@ -225,10 +212,6 @@ def undeploy(ports: OptionalPorts = (), delay: Delay = 5):
         print(f"Stopping onetime@{port}")
         try:
             systemd.stop(f"onetime@{port}")
-            env_file = cfg.env_file(port)
-            if env_file.exists():
-                print(f"Removing {env_file}")
-                env_file.unlink()
             # Record successful undeploy
             db.record_deployment(
                 cfg.db_path,
@@ -257,8 +240,7 @@ def undeploy(ports: OptionalPorts = (), delay: Delay = 5):
 def start(ports: OptionalPorts = ()):
     """Start systemd unit(s) for instance(s).
 
-    Picks up manual edits to .env-{port}. Does NOT regenerate from
-    config.yaml or .env template - use 'redeploy' for that.
+    Does NOT regenerate quadlet - use 'redeploy' for that.
     """
     ports = resolve_ports(ports)
     if not ports:
@@ -272,7 +254,7 @@ def start(ports: OptionalPorts = ()):
 def stop(ports: OptionalPorts = ()):
     """Stop systemd unit(s) for instance(s).
 
-    Does NOT affect .env or quadlet config.
+    Does NOT affect quadlet config.
     """
     ports = resolve_ports(ports)
     if not ports:
@@ -286,8 +268,7 @@ def stop(ports: OptionalPorts = ()):
 def restart(ports: OptionalPorts = ()):
     """Restart systemd unit(s) for instance(s).
 
-    Picks up manual edits to .env-{port}. Does NOT regenerate from
-    config.yaml or .env template - use 'redeploy' for that.
+    Does NOT regenerate quadlet - use 'redeploy' for that.
     """
     ports = resolve_ports(ports)
     if not ports:
@@ -333,41 +314,38 @@ def logs(
 
 
 @app.command
-def env(ports: OptionalPorts = ()):
-    """Show sorted environment variables for instance(s).
+def env():
+    """Show infrastructure environment variables.
 
-    Sources the .env-{port} file and displays the resulting environment,
-    sorted alphabetically. Only shows valid KEY=VALUE pairs.
+    Displays the contents of /etc/default/onetimesecret (shared by all instances).
+    Only shows valid KEY=VALUE pairs, sorted alphabetically.
     """
-    ports = resolve_ports(ports)
-    if not ports:
-        return
-    cfg = Config()
-    for port in ports:
-        env_file = cfg.env_file(port)
-        print(f"=== {env_file} ===")
-        if env_file.exists():
-            lines = env_file.read_text().splitlines()
-            # Parse only valid KEY=VALUE lines (key must be valid shell identifier)
-            env_vars = {}
-            for line in lines:
-                line = line.strip()
-                # Skip empty lines, comments, and shell commands
-                if not line or line.startswith("#"):
-                    continue
-                # Must contain = and start with a valid identifier char
-                if "=" in line:
-                    key, _, value = line.partition("=")
-                    key = key.strip()
-                    # Valid env var: letter/underscore start, alnum/underscore chars
-                    if key and (key[0].isalpha() or key.startswith("_")):
-                        if all(c.isalnum() or c == "_" for c in key):
-                            env_vars[key] = value
-            for key in sorted(env_vars.keys()):
-                print(f"{key}={env_vars[key]}")
-        else:
-            print("  (file not found)")
-        print()
+    from pathlib import Path
+
+    env_file = Path("/etc/default/onetimesecret")
+    print(f"=== {env_file} ===")
+    if env_file.exists():
+        lines = env_file.read_text().splitlines()
+        # Parse only valid KEY=VALUE lines (key must be valid shell identifier)
+        env_vars = {}
+        for line in lines:
+            line = line.strip()
+            # Skip empty lines, comments, and shell commands
+            if not line or line.startswith("#"):
+                continue
+            # Must contain = and start with a valid identifier char
+            if "=" in line:
+                key, _, value = line.partition("=")
+                key = key.strip()
+                # Valid env var: letter/underscore start, alnum/underscore chars
+                if key and (key[0].isalpha() or key.startswith("_")):
+                    if all(c.isalnum() or c == "_" for c in key):
+                        env_vars[key] = value
+        for key in sorted(env_vars.keys()):
+            print(f"{key}={env_vars[key]}")
+    else:
+        print("  (file not found)")
+    print()
 
 
 @app.command(name="exec")

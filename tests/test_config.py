@@ -86,26 +86,12 @@ class TestConfigPaths:
         cfg = Config(config_dir=Path("/etc/ots"))
         assert cfg.config_yaml == Path("/etc/ots/config.yaml")
 
-    def test_env_template_path(self):
-        """Should return correct path for .env template."""
-        from ots_containers.config import Config
-
-        cfg = Config(config_dir=Path("/etc/ots"))
-        assert cfg.env_template == Path("/etc/ots/.env")
-
-    def test_env_file_path(self):
-        """Should return correct path for given port in var_dir."""
+    def test_db_path(self):
+        """Should return correct path for deployments database."""
         from ots_containers.config import Config
 
         cfg = Config(var_dir=Path("/var/lib/ots"))
-        assert cfg.env_file(7043) == Path("/var/lib/ots/.env-7043")
-
-    def test_env_file_different_ports(self):
-        """Should return different paths for different ports."""
-        from ots_containers.config import Config
-
-        cfg = Config()
-        assert cfg.env_file(7043) != cfg.env_file(7044)
+        assert cfg.db_path == Path("/var/lib/ots/deployments.db")
 
 
 class TestConfigValidate:
@@ -126,7 +112,7 @@ class TestConfigValidate:
         """Should not raise when all required files exist."""
         from ots_containers.config import Config
 
-        (tmp_path / ".env").touch()
+        # Only config.yaml is required now (secrets via Podman, infra env in /etc/default)
         (tmp_path / "config.yaml").touch()
 
         cfg = Config(config_dir=tmp_path)

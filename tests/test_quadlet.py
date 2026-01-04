@@ -72,24 +72,24 @@ class TestContainerTemplate:
         assert "Environment=PORT=%i" in content
 
     def test_write_template_includes_environment_file(self, mocker, tmp_path):
-        """Container quadlet should reference environment file with instance."""
+        """Container quadlet should reference shared environment file."""
         mocker.patch("ots_containers.quadlet.systemd.daemon_reload")
         from ots_containers import quadlet
         from ots_containers.config import Config
 
-        var_dir = tmp_path / "var"
         cfg = Config(
             template_path=tmp_path / "onetime@.container",
-            var_dir=var_dir,
+            var_dir=tmp_path / "var",
         )
 
         quadlet.write_template(cfg)
 
         content = cfg.template_path.read_text()
-        assert f"EnvironmentFile={var_dir}/.env-%i" in content
+        # Uses fixed path for infrastructure config (not per-instance)
+        assert "EnvironmentFile=/etc/default/onetimesecret" in content
 
     def test_write_template_includes_volumes(self, mocker, tmp_path):
-        """Container quadlet should mount config and static assets."""
+        """Container quadlet should mount config directory and static assets."""
         mocker.patch("ots_containers.quadlet.systemd.daemon_reload")
         from ots_containers import quadlet
         from ots_containers.config import Config
@@ -104,8 +104,28 @@ class TestContainerTemplate:
         quadlet.write_template(cfg)
 
         content = cfg.template_path.read_text()
-        assert f"Volume={config_dir}/config.yaml:/app/etc/config.yaml:ro" in content
+        # Mounts entire config directory (not just config.yaml)
+        assert f"Volume={config_dir}:/app/etc:ro" in content
         assert "Volume=static_assets:/app/public:ro" in content
+
+    def test_write_template_includes_podman_secrets(self, mocker, tmp_path):
+        """Container quadlet should include Podman secret directives."""
+        mocker.patch("ots_containers.quadlet.systemd.daemon_reload")
+        from ots_containers import quadlet
+        from ots_containers.config import Config
+
+        cfg = Config(
+            template_path=tmp_path / "onetime@.container",
+            var_dir=tmp_path / "var",
+        )
+
+        quadlet.write_template(cfg)
+
+        content = cfg.template_path.read_text()
+        # Secrets are injected as environment variables via Podman
+        assert "Secret=ots_hmac_secret,type=env,target=HMAC_SECRET" in content
+        assert "Secret=ots_secret,type=env,target=SECRET" in content
+        assert "Secret=ots_session_secret,type=env,target=SESSION_SECRET" in content
 
     def test_write_template_includes_systemd_dependencies(self, mocker, tmp_path):
         """Container quadlet should have proper systemd dependencies."""

@@ -187,47 +187,55 @@ class TestRedeployCommand:
 
 
 class TestEnvCommand:
-    """Test env command."""
+    """Test env command - displays shared /etc/default/onetimesecret."""
 
     def test_env_function_exists(self):
         """env command should be defined."""
         assert hasattr(instance, "env")
         assert callable(instance.env)
 
-    def test_env_with_no_instances(self, mocker, capsys):
-        """env with no configured instances should report none found."""
-        mocker.patch(
-            "ots_containers.commands.instance._helpers.systemd.discover_instances",
-            return_value=[],
-        )
-        instance.env(ports=())
-        captured = capsys.readouterr()
-        assert "No configured instances found" in captured.out
+    def test_env_displays_shared_env_file(self, mocker, capsys, tmp_path):
+        """env should display the shared /etc/default/onetimesecret file."""
+        from pathlib import Path
 
-    def test_env_displays_sorted_env_vars(self, mocker, capsys, tmp_path):
-        """env should display sorted environment variables."""
-        mock_config = mocker.MagicMock()
-        env_file = tmp_path / ".env-7043"
+        # Create test env file
+        env_file = tmp_path / "onetimesecret"
         env_file.write_text("ZZZ_VAR=last\nAAA_VAR=first\n# comment\nMMM_VAR=middle\n")
-        mock_config.env_file.return_value = env_file
-        mocker.patch("ots_containers.commands.instance.app.Config", return_value=mock_config)
 
-        instance.env(ports=(7043,))
+        # Patch Path to return our test file
+        original_path = Path
+
+        def mock_path(path_str):
+            if path_str == "/etc/default/onetimesecret":
+                return env_file
+            return original_path(path_str)
+
+        mocker.patch("pathlib.Path", side_effect=mock_path)
+
+        instance.env()
 
         captured = capsys.readouterr()
         lines = captured.out.strip().split("\n")
         # Find the env var lines (skip header "=== ... ===" and empty lines)
-        env_lines = [l for l in lines if "=" in l and not l.startswith("===")]
+        env_lines = [line for line in lines if "=" in line and not line.startswith("===")]
         assert env_lines == ["AAA_VAR=first", "MMM_VAR=middle", "ZZZ_VAR=last"]
 
     def test_env_handles_missing_file(self, mocker, capsys, tmp_path):
-        """env should handle missing .env file gracefully."""
-        mock_config = mocker.MagicMock()
-        env_file = tmp_path / ".env-7043"  # Does not exist
-        mock_config.env_file.return_value = env_file
-        mocker.patch("ots_containers.commands.instance.app.Config", return_value=mock_config)
+        """env should handle missing env file gracefully."""
+        from pathlib import Path
 
-        instance.env(ports=(7043,))
+        # Point to non-existent file
+        env_file = tmp_path / "nonexistent"
+        original_path = Path
+
+        def mock_path(path_str):
+            if path_str == "/etc/default/onetimesecret":
+                return env_file
+            return original_path(path_str)
+
+        mocker.patch("pathlib.Path", side_effect=mock_path)
+
+        instance.env()
 
         captured = capsys.readouterr()
         assert "(file not found)" in captured.out

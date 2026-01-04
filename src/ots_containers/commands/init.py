@@ -126,14 +126,10 @@ def init(
             print(f"{prefix} ots-containers...")
 
     # 1. App Configuration - user-managed config files
+    # Note: /etc/default/onetimesecret and Podman secrets are managed separately
     if not quiet or check:
         print("\nApp Configuration:")
     if check:
-        if cfg.env_template.exists():
-            print(f"  [ok] {cfg.env_template}")
-        else:
-            print(f"  [missing] {cfg.env_template}")
-            all_ok = False
         if cfg.config_yaml.exists():
             print(f"  [ok] {cfg.config_yaml}")
         else:
@@ -147,16 +143,10 @@ def init(
             # Directory exists or was created - now handle config files
             if source_dir:
                 src = Path(source_dir)
-                if _copy_template(src / ".env", cfg.env_template, quiet=quiet) is None:
-                    all_ok = False
                 if _copy_template(src / "config.yaml", cfg.config_yaml, quiet=quiet) is None:
                     all_ok = False
             elif not quiet:
                 # Report status of config files
-                if cfg.env_template.exists():
-                    print(f"  [ok] {cfg.env_template}")
-                else:
-                    print(f"  [missing] {cfg.env_template}")
                 if cfg.config_yaml.exists():
                     print(f"  [ok] {cfg.config_yaml}")
                 else:
@@ -252,9 +242,9 @@ def init(
         print("\nNext steps:")
         if not cfg.config_yaml.exists():
             print(f"  1. Create {cfg.config_yaml}")
-        if not cfg.env_template.exists():
-            print(f"  2. Create {cfg.env_template}")
-        print("  3. Run 'ots image pull --tag <version>' to pull an image")
-        print("  4. Run 'ots instance deploy <port>' to start an instance")
+        print("  2. Create /etc/default/onetimesecret with infrastructure env vars")
+        print("  3. Create Podman secrets: ots_hmac_secret, ots_secret, ots_session_secret")
+        print("  4. Run 'ots image pull --tag <version>' to pull an image")
+        print("  5. Run 'ots instance deploy <port>' to start an instance")
 
     return 0 if all_ok else 1

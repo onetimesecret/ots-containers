@@ -4,7 +4,6 @@
 from collections.abc import Callable
 
 from ots_containers import systemd
-from ots_containers.config import Config
 
 
 def resolve_ports(
@@ -45,11 +44,3 @@ def for_each(
             print(f"Waiting {delay}s...")
             time.sleep(delay)
     print(f"Processed {total} container(s)")
-
-
-def write_env_file(cfg: Config, port: int) -> None:
-    """Write .env-{port} from template with port substitution."""
-    template = cfg.env_template.read_text()
-    content = template.replace("${PORT}", str(port)).replace("$PORT", str(port))
-    cfg.var_dir.mkdir(parents=True, exist_ok=True)
-    cfg.env_file(port).write_text(content)

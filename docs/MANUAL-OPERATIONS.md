@@ -15,17 +15,36 @@ The tool has two operational modes:
 The container management commands use this layout:
 
 ```
-/etc/onetimesecret/           # System configuration
-├── .env                      # Environment template (must exist)
-└── config.yaml               # Application config (must exist)
+/etc/onetimesecret/           # YAML configs mounted as /app/etc:ro
+├── config.yaml               # Application config (must exist)
+├── auth.yaml                 # Auth configuration
+├── logging.yaml              # Logging configuration
+└── billing.yaml              # Billing configuration
+
+/etc/default/onetimesecret    # Infrastructure env vars (shared by all instances)
 
 /var/lib/onetimesecret/       # Variable runtime data
-├── .env-7043                 # Generated per-instance
-├── .env-7044                 # Generated per-instance
-└── ...
+└── deployments.db            # Deployment tracking database
 
 /etc/containers/systemd/
 └── onetime@.container        # Generated quadlet template
+```
+
+## Podman Secrets
+
+Cryptographic secrets are managed via Podman secrets (not environment files):
+
+```bash
+# Create secrets (one-time setup)
+echo "your-hmac-secret" | podman secret create ots_hmac_secret -
+echo "your-app-secret" | podman secret create ots_secret -
+echo "your-session-secret" | podman secret create ots_session_secret -
+
+# List secrets
+podman secret ls
+
+# Remove a secret (to recreate)
+podman secret rm ots_hmac_secret
 ```
 
 ---
@@ -44,13 +63,24 @@ Description=OneTimeSecret Container %i
 After=local-fs.target network-online.target
 Wants=network-online.target
 
+[Service]
+Restart=on-failure
+RestartSec=5
+
 [Container]
 Image=ghcr.io/onetimesecret/onetimesecret:current
 Network=host
 Environment=PORT=%i
-EnvironmentFile=/var/lib/onetimesecret/.env-%i
-Volume=/etc/onetimesecret/config.yaml:/app/etc/config.yaml:ro
+EnvironmentFile=/etc/default/onetimesecret
+Secret=ots_hmac_secret,type=env,target=HMAC_SECRET
+Secret=ots_secret,type=env,target=SECRET
+Secret=ots_session_secret,type=env,target=SESSION_SECRET
+Volume=/etc/onetimesecret:/app/etc:ro
 Volume=static_assets:/app/public:ro
+HealthCmd=curl -sf http://localhost:%i/health || exit 1
+HealthInterval=30s
+HealthRetries=3
+HealthStartPeriod=10s
 
 [Install]
 WantedBy=multi-user.target
@@ -65,16 +95,19 @@ sudo systemctl daemon-reload
 
 ---
 
-## Instance Environment Files
+## Infrastructure Environment File
 
-Each instance gets its own `.env` file with the port substituted.
+All instances share a single environment file for infrastructure configuration:
 
-**Create .env for port 7043**:
+**Create /etc/default/onetimesecret**:
 
 ```bash
-sudo mkdir -p /var/lib/onetimesecret
-sed 's/${PORT}/7043/g; s/$PORT/7043/g' \
-    /etc/onetimesecret/.env > /var/lib/onetimesecret/.env-7043
+sudo tee /etc/default/onetimesecret << 'EOF'
+REDIS_URL=redis://localhost:6379
+DATABASE_URL=postgres://localhost:5432/onetimesecret
+RABBITMQ_URL=amqp://localhost:5672
+LOG_LEVEL=info
+EOF
 ```
 
 ---
@@ -179,6 +212,29 @@ podman exec -it onetime@7043 /bin/sh
 
 ## Complete Workflows
 
+### Prerequisites (One-Time Setup)
+
+Before deploying instances, ensure Podman secrets and infrastructure config exist:
+
+```bash
+# 1. Create Podman secrets
+echo "your-hmac-secret" | podman secret create ots_hmac_secret -
+echo "your-app-secret" | podman secret create ots_secret -
+echo "your-session-secret" | podman secret create ots_session_secret -
+
+# 2. Create infrastructure environment file
+sudo tee /etc/default/onetimesecret << 'EOF'
+REDIS_URL=redis://localhost:6379
+DATABASE_URL=postgres://localhost:5432/onetimesecret
+RABBITMQ_URL=amqp://localhost:5672
+LOG_LEVEL=info
+EOF
+
+# 3. Create config directory with YAML configs
+sudo mkdir -p /etc/onetimesecret
+# Copy config.yaml, auth.yaml, etc. to /etc/onetimesecret/
+```
+
 ### Deploy New Instance (port 7043)
 
 This is the full sequence for `ots instance deploy 7043`:
@@ -193,7 +249,7 @@ CONTAINER_ID=$(podman create ghcr.io/onetimesecret/onetimesecret:current)
 podman cp "$CONTAINER_ID:/app/public/." "$MOUNT_PATH"
 podman rm "$CONTAINER_ID"
 
-# 3. Write quadlet template (if not exists)
+# 3. Write quadlet template
 sudo mkdir -p /etc/containers/systemd
 sudo tee /etc/containers/systemd/onetime@.container << 'EOF'
 [Unit]
@@ -201,13 +257,24 @@ Description=OneTimeSecret Container %i
 After=local-fs.target network-online.target
 Wants=network-online.target
 
+[Service]
+Restart=on-failure
+RestartSec=5
+
 [Container]
 Image=ghcr.io/onetimesecret/onetimesecret:current
 Network=host
 Environment=PORT=%i
-EnvironmentFile=/var/lib/onetimesecret/.env-%i
-Volume=/etc/onetimesecret/config.yaml:/app/etc/config.yaml:ro
+EnvironmentFile=/etc/default/onetimesecret
+Secret=ots_hmac_secret,type=env,target=HMAC_SECRET
+Secret=ots_secret,type=env,target=SECRET
+Secret=ots_session_secret,type=env,target=SESSION_SECRET
+Volume=/etc/onetimesecret:/app/etc:ro
 Volume=static_assets:/app/public:ro
+HealthCmd=curl -sf http://localhost:%i/health || exit 1
+HealthInterval=30s
+HealthRetries=3
+HealthStartPeriod=10s
 
 [Install]
 WantedBy=multi-user.target
@@ -216,12 +283,7 @@ EOF
 # 4. Reload systemd
 sudo systemctl daemon-reload
 
-# 5. Create instance .env file
-sudo mkdir -p /var/lib/onetimesecret
-sed 's/${PORT}/7043/g; s/$PORT/7043/g' \
-    /etc/onetimesecret/.env > /var/lib/onetimesecret/.env-7043
-
-# 6. Start the service
+# 5. Start the service
 sudo systemctl start onetime@7043
 ```
 
@@ -230,7 +292,7 @@ sudo systemctl start onetime@7043
 Same as deploy, but use restart instead of start:
 
 ```bash
-# Steps 1-5 same as deploy
+# Steps 1-4 same as deploy
 sudo systemctl restart onetime@7043
 ```
 
@@ -241,13 +303,8 @@ This is `ots instance redeploy 7043 --force`:
 ```bash
 # Steps 1-4 same as deploy
 
-# 5. Stop and remove existing config
+# 5. Stop and start fresh
 sudo systemctl stop onetime@7043
-rm /var/lib/onetimesecret/.env-7043
-
-# 6. Recreate .env and start fresh
-sed 's/${PORT}/7043/g; s/$PORT/7043/g' \
-    /etc/onetimesecret/.env > /var/lib/onetimesecret/.env-7043
 sudo systemctl start onetime@7043
 ```
 
@@ -257,7 +314,6 @@ This is `ots instance undeploy 7043`:
 
 ```bash
 sudo systemctl stop onetime@7043
-rm /var/lib/onetimesecret/.env-7043
 ```
 
 ---
@@ -582,16 +638,24 @@ valkey-cli -p 6379 CONFIG GET '*'
 | Path | Purpose | Created By |
 |------|---------|------------|
 | `/etc/containers/systemd/onetime@.container` | Systemd quadlet template | `ots-containers instance deploy` |
-| `/var/lib/onetimesecret/.env-{port}` | Per-instance environment | `ots-containers instance deploy` |
 | `/etc/caddy/Caddyfile` | Rendered proxy config | `ots-containers proxy render` |
 
 ## Summary of Container Files Required
 
 | Path | Purpose |
 |------|---------|
-| `/etc/onetimesecret/.env` | Environment template |
 | `/etc/onetimesecret/config.yaml` | Application configuration |
+| `/etc/onetimesecret/*.yaml` | Additional YAML configs (auth, logging, billing) |
+| `/etc/default/onetimesecret` | Infrastructure environment (REDIS_URL, etc.) |
 | `/etc/onetimesecret/Caddyfile.template` | Proxy config template (optional) |
+
+## Summary of Podman Secrets Required
+
+| Secret Name | Target Env Var | Purpose |
+|-------------|---------------|---------|
+| `ots_hmac_secret` | `HMAC_SECRET` | HMAC signing key |
+| `ots_secret` | `SECRET` | Application secret |
+| `ots_session_secret` | `SESSION_SECRET` | Session encryption key |
 
 ## Summary of Container Commands Used
 
