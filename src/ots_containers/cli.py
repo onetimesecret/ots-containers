@@ -58,5 +58,28 @@ def ps():
     )
 
 
+@app.command
+def version():
+    """Show version and build info."""
+    import subprocess
+    from pathlib import Path
+
+    print(f"ots-containers {__version__}")
+
+    # Try to get git info if available
+    try:
+        pkg_dir = Path(__file__).parent
+        result = subprocess.run(
+            ["git", "-C", str(pkg_dir), "rev-parse", "--short", "HEAD"],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode == 0:
+            commit = result.stdout.strip()
+            print(f"git commit: {commit}")
+    except Exception:
+        pass
+
+
 if __name__ == "__main__":
     app()

@@ -37,10 +37,12 @@ class TestCLIStructure:
 
     def test_version_output(self, capsys):
         """--version should print version string."""
+        from ots_containers import __version__
+
         with pytest.raises(SystemExit):
             app(["--version"])
         captured = capsys.readouterr()
-        assert "0.2.0" in captured.out
+        assert __version__ in captured.out
 
 
 class TestCLISubcommands:

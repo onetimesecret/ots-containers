@@ -60,6 +60,19 @@ def restart(unit: str) -> None:
     subprocess.run(cmd, check=True)
 
 
+def unit_to_container_name(unit: str) -> str:
+    """Convert systemd unit name to Quadlet container name.
+
+    Quadlet names containers as: systemd-{unit_with_underscores}
+    Example: onetime@7044 -> systemd-onetime_7044
+    """
+    # Remove .service suffix if present
+    name = unit.removesuffix(".service")
+    # Replace @ with _ (Quadlet convention)
+    name = name.replace("@", "_")
+    return f"systemd-{name}"
+
+
 def recreate(unit: str) -> None:
     """Stop, remove, and start a Quadlet service to force container recreation.
 
@@ -76,9 +89,9 @@ def recreate(unit: str) -> None:
     print(f"  $ {' '.join(stop_cmd)}")
     subprocess.run(stop_cmd, check=True)
 
-    # Remove the container (Quadlet containers use the unit name)
-    # Use --ignore to avoid errors if container doesn't exist
-    rm_cmd = ["sudo", "podman", "rm", "--ignore", unit]
+    # Remove the container (Quadlet uses systemd-{name} format with @ -> _)
+    container_name = unit_to_container_name(unit)
+    rm_cmd = ["sudo", "podman", "rm", "--ignore", container_name]
     print(f"  $ {' '.join(rm_cmd)}")
     subprocess.run(rm_cmd, check=True)
 

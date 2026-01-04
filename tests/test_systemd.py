@@ -288,6 +288,59 @@ class TestStatus:
         mock_run.assert_called_once()
 
 
+class TestUnitToContainerName:
+    """Test unit_to_container_name function."""
+
+    def test_converts_template_instance_unit(self):
+        """Should convert onetime@7044 to systemd-onetime_7044."""
+        from ots_containers import systemd
+
+        assert systemd.unit_to_container_name("onetime@7044") == "systemd-onetime_7044"
+
+    def test_handles_service_suffix(self):
+        """Should strip .service suffix before converting."""
+        from ots_containers import systemd
+
+        assert systemd.unit_to_container_name("onetime@7043.service") == "systemd-onetime_7043"
+
+    def test_handles_different_ports(self):
+        """Should work with various port numbers."""
+        from ots_containers import systemd
+
+        assert systemd.unit_to_container_name("onetime@3000") == "systemd-onetime_3000"
+        assert systemd.unit_to_container_name("onetime@8080") == "systemd-onetime_8080"
+
+
+class TestRecreate:
+    """Test recreate function."""
+
+    def test_recreate_stops_removes_and_starts(self, mocker):
+        """Should stop unit, remove container, then start unit."""
+        from ots_containers import systemd
+
+        mock_run = mocker.patch("subprocess.run")
+
+        systemd.recreate("onetime@7044")
+
+        assert mock_run.call_count == 3
+        calls = mock_run.call_args_list
+        assert calls[0][0][0] == ["sudo", "systemctl", "stop", "onetime@7044"]
+        assert calls[1][0][0] == ["sudo", "podman", "rm", "--ignore", "systemd-onetime_7044"]
+        assert calls[2][0][0] == ["sudo", "systemctl", "start", "onetime@7044"]
+
+    def test_recreate_raises_on_stop_failure(self, mocker):
+        """Should propagate error if stop fails."""
+        from ots_containers import systemd
+
+        mocker.patch(
+            "subprocess.run",
+            side_effect=subprocess.CalledProcessError(1, "cmd"),
+        )
+
+        with pytest.raises(subprocess.CalledProcessError):
+            systemd.recreate("onetime@7044")
+
+
 class TestUnitExists:
     """Test unit_exists function."""
 
