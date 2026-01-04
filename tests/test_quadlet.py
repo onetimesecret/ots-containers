@@ -122,10 +122,17 @@ class TestContainerTemplate:
         quadlet.write_template(cfg)
 
         content = cfg.template_path.read_text()
-        # Secrets are injected as environment variables via Podman
+        # App secrets injected as environment variables via Podman
         assert "Secret=ots_hmac_secret,type=env,target=HMAC_SECRET" in content
         assert "Secret=ots_secret,type=env,target=SECRET" in content
         assert "Secret=ots_session_secret,type=env,target=SESSION_SECRET" in content
+        # Service integration secrets
+        assert "Secret=ots_stripe_api_key,type=env,target=STRIPE_API_KEY" in content
+        assert (
+            "Secret=ots_stripe_webhook_secret,type=env,target=STRIPE_WEBHOOK_SIGNING_SECRET"
+            in content
+        )
+        assert "Secret=ots_smtp_password,type=env,target=SMTP_PASSWORD" in content
 
     def test_write_template_includes_systemd_dependencies(self, mocker, tmp_path):
         """Container quadlet should have proper systemd dependencies."""

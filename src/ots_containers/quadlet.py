@@ -9,10 +9,16 @@ CONTAINER_TEMPLATE = """\
 #
 # PREREQUISITES (one-time setup):
 #
-# 1. Create Podman secrets (use strong random values):
+# 1. Create Podman secrets:
+#    # App secrets (generate strong random values)
 #    openssl rand -hex 32 | podman secret create ots_hmac_secret -
 #    openssl rand -hex 32 | podman secret create ots_secret -
 #    openssl rand -hex 32 | podman secret create ots_session_secret -
+#
+#    # Service integration secrets (from provider dashboards)
+#    echo "sk_live_..." | podman secret create ots_stripe_api_key -
+#    echo "whsec_..." | podman secret create ots_stripe_webhook_secret -
+#    echo "smtp-password" | podman secret create ots_smtp_password -
 #
 # 2. Create infrastructure env file /etc/default/onetimesecret:
 #    REDIS_URL=redis://localhost:6379
@@ -59,11 +65,14 @@ Environment=PORT=%i
 # Edit this file and restart to apply changes
 EnvironmentFile=/etc/default/onetimesecret
 
-# Cryptographic secrets via Podman secret store (not on disk)
+# Secrets via Podman secret store (not on disk)
 # These are injected as environment variables at container start
 Secret=ots_hmac_secret,type=env,target=HMAC_SECRET
 Secret=ots_secret,type=env,target=SECRET
 Secret=ots_session_secret,type=env,target=SESSION_SECRET
+Secret=ots_stripe_api_key,type=env,target=STRIPE_API_KEY
+Secret=ots_stripe_webhook_secret,type=env,target=STRIPE_WEBHOOK_SIGNING_SECRET
+Secret=ots_smtp_password,type=env,target=SMTP_PASSWORD
 
 # Config directory mounted read-only (all YAML configs)
 Volume={config_dir}:/app/etc:ro

@@ -32,13 +32,18 @@ The container management commands use this layout:
 
 ## Podman Secrets
 
-Cryptographic secrets are managed via Podman secrets (not environment files):
+Secrets are managed via Podman secrets (not environment files):
 
 ```bash
-# Create secrets (one-time setup)
-echo "your-hmac-secret" | podman secret create ots_hmac_secret -
-echo "your-app-secret" | podman secret create ots_secret -
-echo "your-session-secret" | podman secret create ots_session_secret -
+# Create app secrets (one-time setup, use strong random values)
+openssl rand -hex 32 | podman secret create ots_hmac_secret -
+openssl rand -hex 32 | podman secret create ots_secret -
+openssl rand -hex 32 | podman secret create ots_session_secret -
+
+# Create service integration secrets (from provider dashboards)
+echo "sk_live_..." | podman secret create ots_stripe_api_key -
+echo "whsec_..." | podman secret create ots_stripe_webhook_secret -
+echo "smtp-password" | podman secret create ots_smtp_password -
 
 # List secrets
 podman secret ls
@@ -75,6 +80,9 @@ EnvironmentFile=/etc/default/onetimesecret
 Secret=ots_hmac_secret,type=env,target=HMAC_SECRET
 Secret=ots_secret,type=env,target=SECRET
 Secret=ots_session_secret,type=env,target=SESSION_SECRET
+Secret=ots_stripe_api_key,type=env,target=STRIPE_API_KEY
+Secret=ots_stripe_webhook_secret,type=env,target=STRIPE_WEBHOOK_SIGNING_SECRET
+Secret=ots_smtp_password,type=env,target=SMTP_PASSWORD
 Volume=/etc/onetimesecret:/app/etc:ro
 Volume=static_assets:/app/public:ro
 HealthCmd=curl -sf http://localhost:%i/health || exit 1
@@ -217,12 +225,17 @@ podman exec -it onetime@7043 /bin/sh
 Before deploying instances, ensure Podman secrets and infrastructure config exist:
 
 ```bash
-# 1. Create Podman secrets
-echo "your-hmac-secret" | podman secret create ots_hmac_secret -
-echo "your-app-secret" | podman secret create ots_secret -
-echo "your-session-secret" | podman secret create ots_session_secret -
+# 1. Create app secrets (use strong random values)
+openssl rand -hex 32 | podman secret create ots_hmac_secret -
+openssl rand -hex 32 | podman secret create ots_secret -
+openssl rand -hex 32 | podman secret create ots_session_secret -
 
-# 2. Create infrastructure environment file
+# 2. Create service integration secrets (from provider dashboards)
+echo "sk_live_..." | podman secret create ots_stripe_api_key -
+echo "whsec_..." | podman secret create ots_stripe_webhook_secret -
+echo "smtp-password" | podman secret create ots_smtp_password -
+
+# 3. Create infrastructure environment file
 sudo tee /etc/default/onetimesecret << 'EOF'
 REDIS_URL=redis://localhost:6379
 DATABASE_URL=postgres://localhost:5432/onetimesecret
@@ -230,7 +243,7 @@ RABBITMQ_URL=amqp://localhost:5672
 LOG_LEVEL=info
 EOF
 
-# 3. Create config directory with YAML configs
+# 4. Create config directory with YAML configs
 sudo mkdir -p /etc/onetimesecret
 # Copy config.yaml, auth.yaml, etc. to /etc/onetimesecret/
 ```
@@ -269,6 +282,9 @@ EnvironmentFile=/etc/default/onetimesecret
 Secret=ots_hmac_secret,type=env,target=HMAC_SECRET
 Secret=ots_secret,type=env,target=SECRET
 Secret=ots_session_secret,type=env,target=SESSION_SECRET
+Secret=ots_stripe_api_key,type=env,target=STRIPE_API_KEY
+Secret=ots_stripe_webhook_secret,type=env,target=STRIPE_WEBHOOK_SIGNING_SECRET
+Secret=ots_smtp_password,type=env,target=SMTP_PASSWORD
 Volume=/etc/onetimesecret:/app/etc:ro
 Volume=static_assets:/app/public:ro
 HealthCmd=curl -sf http://localhost:%i/health || exit 1
@@ -656,6 +672,9 @@ valkey-cli -p 6379 CONFIG GET '*'
 | `ots_hmac_secret` | `HMAC_SECRET` | HMAC signing key |
 | `ots_secret` | `SECRET` | Application secret |
 | `ots_session_secret` | `SESSION_SECRET` | Session encryption key |
+| `ots_stripe_api_key` | `STRIPE_API_KEY` | Stripe API key |
+| `ots_stripe_webhook_secret` | `STRIPE_WEBHOOK_SIGNING_SECRET` | Stripe webhook verification |
+| `ots_smtp_password` | `SMTP_PASSWORD` | SMTP authentication |
 
 ## Summary of Container Commands Used
 
