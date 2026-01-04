@@ -170,8 +170,8 @@ def redeploy(
         write_env_file(cfg, port)
 
         try:
-            if force or not systemd.unit_exists(unit):
-                # Fresh deployment
+            if force or not systemd.container_exists(unit):
+                # Fresh deployment (no existing container)
                 print(f"Starting {unit}")
                 systemd.start(unit)
             else:

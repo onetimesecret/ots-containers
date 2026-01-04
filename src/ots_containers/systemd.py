@@ -118,3 +118,17 @@ def unit_exists(unit: str) -> bool:
         text=True,
     )
     return bool(result.stdout.strip())
+
+
+def container_exists(unit: str) -> bool:
+    """Check if the Quadlet container for a unit exists (running or stopped).
+
+    This is more reliable than unit_exists for template instances like
+    onetime@7044, since list-unit-files only shows the template, not instances.
+    """
+    container_name = unit_to_container_name(unit)
+    result = subprocess.run(
+        ["podman", "container", "exists", container_name],
+        capture_output=True,
+    )
+    return result.returncode == 0

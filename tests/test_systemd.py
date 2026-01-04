@@ -341,6 +341,45 @@ class TestRecreate:
             systemd.recreate("onetime@7044")
 
 
+class TestContainerExists:
+    """Test container_exists function."""
+
+    def test_container_exists_returns_true_when_found(self, mocker):
+        """Should return True when container exists."""
+        from ots_containers import systemd
+
+        mock_result = mocker.Mock()
+        mock_result.returncode = 0
+        mocker.patch("subprocess.run", return_value=mock_result)
+
+        assert systemd.container_exists("onetime@7044") is True
+
+    def test_container_exists_returns_false_when_not_found(self, mocker):
+        """Should return False when container doesn't exist."""
+        from ots_containers import systemd
+
+        mock_result = mocker.Mock()
+        mock_result.returncode = 1
+        mocker.patch("subprocess.run", return_value=mock_result)
+
+        assert systemd.container_exists("onetime@7044") is False
+
+    def test_container_exists_uses_correct_container_name(self, mocker):
+        """Should convert unit name to container name for podman check."""
+        from ots_containers import systemd
+
+        mock_result = mocker.Mock()
+        mock_result.returncode = 0
+        mock_run = mocker.patch("subprocess.run", return_value=mock_result)
+
+        systemd.container_exists("onetime@7044")
+
+        mock_run.assert_called_once_with(
+            ["podman", "container", "exists", "systemd-onetime_7044"],
+            capture_output=True,
+        )
+
+
 class TestUnitExists:
     """Test unit_exists function."""
 

@@ -137,7 +137,7 @@ class TestRedeployCommand:
         mocker.patch("ots_containers.commands.instance.app.systemd.recreate")
         mocker.patch("ots_containers.commands.instance.app.db.record_deployment")
         mocker.patch(
-            "ots_containers.commands.instance.app.systemd.unit_exists",
+            "ots_containers.commands.instance.app.systemd.container_exists",
             return_value=True,
         )
 
@@ -170,7 +170,7 @@ class TestRedeployCommand:
         mock_recreate = mocker.patch("ots_containers.commands.instance.app.systemd.recreate")
         mocker.patch("ots_containers.commands.instance.app.db.record_deployment")
         mocker.patch(
-            "ots_containers.commands.instance.app.systemd.unit_exists",
+            "ots_containers.commands.instance.app.systemd.container_exists",
             return_value=False,
         )
 
