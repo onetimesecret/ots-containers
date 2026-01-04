@@ -61,16 +61,28 @@ def restart(unit: str) -> None:
 
 
 def recreate(unit: str) -> None:
-    """Stop and start a Quadlet service to force container recreation.
+    """Stop, remove, and start a Quadlet service to force container recreation.
 
     Use this instead of restart() when the Quadlet .container file has
     been modified and you need to ensure the container is recreated
     with the new configuration (e.g., new volume mounts, environment, etc.).
+
+    The container must be removed between stop and start because podman
+    preserves stopped containers. Without removal, start just restarts
+    the existing container with its old configuration.
     """
+    # Stop the systemd unit
     stop_cmd = ["sudo", "systemctl", "stop", unit]
     print(f"  $ {' '.join(stop_cmd)}")
     subprocess.run(stop_cmd, check=True)
 
+    # Remove the container (Quadlet containers use the unit name)
+    # Use --ignore to avoid errors if container doesn't exist
+    rm_cmd = ["sudo", "podman", "rm", "--ignore", unit]
+    print(f"  $ {' '.join(rm_cmd)}")
+    subprocess.run(rm_cmd, check=True)
+
+    # Start creates a fresh container from the updated quadlet
     start_cmd = ["sudo", "systemctl", "start", unit]
     print(f"  $ {' '.join(start_cmd)}")
     subprocess.run(start_cmd, check=True)
