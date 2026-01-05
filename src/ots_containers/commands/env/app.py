@@ -139,7 +139,7 @@ def show(
     print("Secret Status:")
     print("-" * 60)
 
-    secrets, _ = extract_secrets(parsed)
+    secrets, messages = extract_secrets(parsed)
 
     for spec in secrets:
         podman_status = "exists" if secret_exists(spec.secret_name) else "missing"
@@ -156,6 +156,12 @@ def show(
         print(f"  {spec.env_var_name}:")
         print(f"    podman secret: {spec.secret_name} ({podman_status})")
         print(f"    env file: {env_status}")
+
+    # Show any warnings from extraction
+    if messages:
+        print()
+        for msg in messages:
+            print(msg)
 
     return 0
 
