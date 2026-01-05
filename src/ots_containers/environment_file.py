@@ -352,11 +352,8 @@ def process_env_file(
         if spec.value is not None:
             # Has a value to process
             if create_secrets and not dry_run:
-                created = ensure_podman_secret(spec.secret_name, spec.value)
-                if created:
-                    messages.append(f"Created podman secret: {spec.secret_name}")
-                else:
-                    messages.append(f"Podman secret already exists: {spec.secret_name}")
+                action = ensure_podman_secret(spec.secret_name, spec.value)
+                messages.append(f"Podman secret {action}: {spec.secret_name}")
 
             # Transform the entry in env file (in place, preserving position)
             env_file.rename(spec.env_var_name, f"_{spec.env_var_name}", spec.secret_name)
@@ -368,23 +365,30 @@ def process_env_file(
     return secrets, messages
 
 
-def ensure_podman_secret(secret_name: str, value: str) -> bool:
-    """Create a podman secret if it doesn't exist.
+def ensure_podman_secret(secret_name: str, value: str) -> str:
+    """Create or replace a podman secret.
 
     Args:
         secret_name: Name for the secret
         value: Secret value
 
     Returns:
-        True if created, False if already existed
+        "created" if new, "replaced" if existing was overwritten
     """
     # Check if secret exists
     result = subprocess.run(
         ["podman", "secret", "exists", secret_name],
         capture_output=True,
     )
-    if result.returncode == 0:
-        return False  # Already exists
+    existed = result.returncode == 0
+
+    if existed:
+        # Remove existing secret before recreating
+        subprocess.run(
+            ["podman", "secret", "rm", secret_name],
+            capture_output=True,
+            check=True,
+        )
 
     # Create the secret
     subprocess.run(
@@ -393,7 +397,7 @@ def ensure_podman_secret(secret_name: str, value: str) -> bool:
         check=True,
         capture_output=True,
     )
-    return True
+    return "replaced" if existed else "created"
 
 
 def secret_exists(secret_name: str) -> bool:
