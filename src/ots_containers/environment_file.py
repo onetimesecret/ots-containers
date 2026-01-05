@@ -302,14 +302,13 @@ def extract_secrets(env_file: EnvFile) -> tuple[list[SecretSpec], list[str]]:
     messages: list[str] = []
 
     for var_name in secret_names:
-        # Check for already-processed entry (_VARNAME=ots_varname)
+        # Check for already-processed entry (_VARNAME=secret_name)
         processed_key = f"_{var_name}"
         if env_file.has(processed_key):
-            existing_value = env_file.get(processed_key)
-            if is_processed_secret_entry(processed_key, existing_value):
-                # Already processed, just record the spec without value
-                secrets.append(SecretSpec.from_env_var(var_name, value=None))
-                continue
+            # Entry exists with underscore prefix - already processed
+            # Use actual value (may differ from calculated ots_varname pattern)
+            secrets.append(SecretSpec.from_env_var(var_name, value=None))
+            continue
 
         # Check for unprocessed entry (VARNAME=value)
         if env_file.has(var_name):
@@ -320,7 +319,7 @@ def extract_secrets(env_file: EnvFile) -> tuple[list[SecretSpec], list[str]]:
                 messages.append(f"Warning: {var_name} is empty, skipping secret creation")
             continue
 
-        # No entry found - might be commented out or missing
+        # No entry found - neither VARNAME nor _VARNAME exists
         messages.append(f"Warning: {var_name} listed in SECRET_VARIABLE_NAMES but not found")
         # Still include in secrets list so quadlet line is generated
         secrets.append(SecretSpec.from_env_var(var_name, value=None))
