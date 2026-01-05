@@ -142,19 +142,26 @@ def show(
     secrets, messages = extract_secrets(parsed)
 
     for spec in secrets:
-        podman_status = "exists" if secret_exists(spec.secret_name) else "missing"
+        processed_key = f"_{spec.env_var_name}"
 
-        # Check env file status
-        if parsed.has(f"_{spec.env_var_name}"):
+        # Check env file status and determine actual secret name
+        if parsed.has(processed_key):
+            # Use actual value from processed entry (may differ from calculated)
+            actual_secret_name = parsed.get(processed_key)
             env_status = "processed"
         elif parsed.has(spec.env_var_name):
+            actual_secret_name = spec.secret_name  # Use calculated name
             value = parsed.get(spec.env_var_name)
             env_status = "has value" if value else "empty"
         else:
+            actual_secret_name = spec.secret_name  # Use calculated name
             env_status = "not in file"
 
+        # Check podman secret based on actual value (not calculated)
+        podman_status = "exists" if secret_exists(actual_secret_name) else "missing"
+
         print(f"  {spec.env_var_name}:")
-        print(f"    podman secret: {spec.secret_name} ({podman_status})")
+        print(f"    podman secret: {actual_secret_name} ({podman_status})")
         print(f"    env file: {env_status}")
 
     # Show any warnings from extraction
