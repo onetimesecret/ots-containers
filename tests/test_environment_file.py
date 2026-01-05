@@ -348,6 +348,30 @@ class TestProcessEnvFile:
         assert lines[2] == "_API_KEY=ots_api_key"
         assert lines[3] == "AFTER=also_keep"
 
+    def test_no_changes_when_already_processed(self, tmp_path):
+        """Should report no changes when secrets already processed."""
+        from ots_containers.environment_file import EnvFile, process_env_file
+
+        env_file = tmp_path / "test.env"
+        env_file.write_text("SECRET_VARIABLE_NAMES=API_KEY\n_API_KEY=ots_api_key\n")
+
+        parsed = EnvFile.parse(env_file)
+        _, messages = process_env_file(parsed, create_secrets=False, dry_run=False)
+
+        assert any("No changes needed" in msg for msg in messages)
+
+    def test_reports_updated_when_changes_made(self, tmp_path):
+        """Should report updated when changes were made."""
+        from ots_containers.environment_file import EnvFile, process_env_file
+
+        env_file = tmp_path / "test.env"
+        env_file.write_text("SECRET_VARIABLE_NAMES=API_KEY\nAPI_KEY=secret\n")
+
+        parsed = EnvFile.parse(env_file)
+        _, messages = process_env_file(parsed, create_secrets=False, dry_run=False)
+
+        assert any("Updated environment file" in msg for msg in messages)
+
 
 class TestGenerateQuadletSecretLines:
     """Test quadlet Secret= line generation."""

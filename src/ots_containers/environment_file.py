@@ -336,7 +336,7 @@ def process_env_file(
     1. Extracts secrets based on SECRET_VARIABLE_NAMES
     2. Creates podman secrets for any with values (unless dry_run)
     3. Transforms env file entries: VARNAME=value -> _VARNAME=ots_varname
-    4. Writes the updated env file (unless dry_run)
+    4. Writes the updated env file only if changes were made (unless dry_run)
 
     Args:
         env_file: Parsed environment file
@@ -347,20 +347,25 @@ def process_env_file(
         Tuple of (processed secrets, messages/warnings)
     """
     secrets, messages = extract_secrets(env_file)
+    file_modified = False
 
     for spec in secrets:
         if spec.value is not None:
-            # Has a value to process
+            # Has a value to process - this secret needs extraction
             if create_secrets and not dry_run:
                 action = ensure_podman_secret(spec.secret_name, spec.value)
                 messages.append(f"Podman secret {action}: {spec.secret_name}")
 
             # Transform the entry in env file (in place, preserving position)
             env_file.rename(spec.env_var_name, f"_{spec.env_var_name}", spec.secret_name)
+            file_modified = True
 
     if not dry_run:
-        env_file.write()
-        messages.append(f"Updated environment file: {env_file.path}")
+        if file_modified:
+            env_file.write()
+            messages.append(f"Updated environment file: {env_file.path}")
+        else:
+            messages.append("No changes needed (secrets already processed)")
 
     return secrets, messages
 

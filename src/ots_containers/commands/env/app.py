@@ -4,6 +4,7 @@
 Process environment files to extract secrets and prepare for container deployment.
 """
 
+import sys
 from pathlib import Path
 from typing import Annotated
 
@@ -71,18 +72,21 @@ def process(
         print(f"Error: Environment file not found: {path}")
         return 1
 
+    parsed = EnvFile.parse(path)
+
+    if not parsed.secret_variable_names:
+        print("Error: No SECRET_VARIABLE_NAMES defined in environment file.")
+        print("Add a line like: SECRET_VARIABLE_NAMES=VAR1,VAR2,VAR3")
+        return 1
+
+    # Header
     print(f"Processing: {path}", end="")
     if dry_run:
         print(" (dry-run)")
     else:
         print()
-
-    parsed = EnvFile.parse(path)
-
-    if not parsed.secret_variable_names:
-        print("\nError: No SECRET_VARIABLE_NAMES defined in environment file.")
-        print("Add a line like: SECRET_VARIABLE_NAMES=VAR1,VAR2,VAR3")
-        return 1
+    print(f"Secrets: {', '.join(parsed.secret_variable_names)}")
+    print()
 
     secrets, messages = process_env_file(
         parsed,
@@ -90,17 +94,38 @@ def process(
         dry_run=dry_run,
     )
 
-    # Separate warnings from actions
-    warnings = [m for m in messages if m.startswith("Warning:")]
-    actions = [m for m in messages if not m.startswith("Warning:")]
+    # Categorize and display messages
+    has_errors = False
+    file_was_modified = False
+    for msg in messages:
+        if "secret created:" in msg:
+            print(f"  [created]  {msg.split(': ', 1)[-1]}")
+        elif "secret replaced:" in msg:
+            print(f"  [replaced] {msg.split(': ', 1)[-1]}")
+        elif "empty" in msg.lower():
+            var = msg.split()[1] if len(msg.split()) > 1 else "unknown"
+            print(f"  [error]    {var} is empty")
+            has_errors = True
+        elif "not found" in msg.lower():
+            var = msg.split()[1] if len(msg.split()) > 1 else "unknown"
+            print(f"  [error]    {var} not in file")
+            has_errors = True
+        elif "Updated environment file" in msg:
+            file_was_modified = True
+        elif "No changes needed" in msg:
+            print(f"  {msg}")
+        else:
+            print(f"  {msg}")
 
-    for action in actions:
-        print(action)
+    print()
+    if has_errors:
+        print("Errors found. All secrets must have values.")
+        return 1
 
-    if warnings:
-        print()
-        for warning in warnings:
-            print(warning)
+    if dry_run:
+        print("Dry-run complete. Run without --dry-run to apply changes.")
+    elif file_was_modified:
+        print(f"Updated: {path}")
 
     return 0
 
@@ -192,17 +217,23 @@ def quadlet_lines(
     path = env_file or DEFAULT_ENV_FILE
 
     if not path.exists():
-        print(f"# Error: Environment file not found: {path}")
+        print(f"Error: Environment file not found: {path}", file=sys.stderr)
         return 1
 
     parsed = EnvFile.parse(path)
 
     if not parsed.secret_variable_names:
-        print("Error: No SECRET_VARIABLE_NAMES defined in environment file.")
-        print("Add a line like: SECRET_VARIABLE_NAMES=VAR1,VAR2,VAR3")
+        print("Error: No SECRET_VARIABLE_NAMES defined in environment file.", file=sys.stderr)
         return 1
 
-    secrets, _ = extract_secrets(parsed)
+    secrets, messages = extract_secrets(parsed)
+
+    # Check for errors (empty or missing secrets)
+    errors = [m for m in messages if "empty" in m.lower() or "not found" in m.lower()]
+    if errors:
+        for err in errors:
+            print(f"Error: {err}", file=sys.stderr)
+        return 1
 
     print("# Secrets via Podman secret store (not on disk)")
     print("# These are injected as environment variables at container start")
