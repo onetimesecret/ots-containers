@@ -183,6 +183,35 @@ class EnvFile:
         self.entries = [e for e in self.entries if e.key != key]
         return value
 
+    def rename(self, old_key: str, new_key: str, new_value: str | None = None) -> bool:
+        """Rename a variable in place, preserving its position.
+
+        Args:
+            old_key: The current key name
+            new_key: The new key name
+            new_value: Optional new value (keeps existing value if None)
+
+        Returns:
+            True if renamed, False if old_key not found
+        """
+        if old_key not in self._variables:
+            return False
+
+        # Update internal dict
+        old_value = self._variables.pop(old_key)
+        final_value = new_value if new_value is not None else old_value
+        self._variables[new_key] = final_value
+
+        # Update entry in place (preserving position)
+        for entry in self.entries:
+            if entry.key == old_key:
+                entry.key = new_key
+                entry.value = final_value
+                entry.raw_line = f"{new_key}={final_value}"
+                return True
+
+        return False
+
     def has(self, key: str) -> bool:
         """Check if a variable exists."""
         return key in self._variables
@@ -330,9 +359,8 @@ def process_env_file(
                 else:
                     messages.append(f"Podman secret already exists: {spec.secret_name}")
 
-            # Transform the entry in env file
-            env_file.remove(spec.env_var_name)
-            env_file.set(f"_{spec.env_var_name}", spec.secret_name)
+            # Transform the entry in env file (in place, preserving position)
+            env_file.rename(spec.env_var_name, f"_{spec.env_var_name}", spec.secret_name)
 
     if not dry_run:
         env_file.write()

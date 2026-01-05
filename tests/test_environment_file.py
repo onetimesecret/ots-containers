@@ -180,6 +180,40 @@ class TestEnvFile:
         assert "KEY1=value1" in content
         assert "KEY2=value2" in content
 
+    def test_rename_preserves_position(self, tmp_path):
+        """Should rename variable in place, preserving its position."""
+        from ots_containers.environment_file import EnvFile
+
+        env_file = tmp_path / "test.env"
+        env_file.write_text("FIRST=1\nMIDDLE=2\nLAST=3\n")
+
+        parsed = EnvFile.parse(env_file)
+        result = parsed.rename("MIDDLE", "_MIDDLE", "new_value")
+        parsed.write()
+
+        assert result is True
+        assert not parsed.has("MIDDLE")
+        assert parsed.get("_MIDDLE") == "new_value"
+
+        # Verify position is preserved
+        content = env_file.read_text()
+        lines = content.strip().split("\n")
+        assert lines[0] == "FIRST=1"
+        assert lines[1] == "_MIDDLE=new_value"
+        assert lines[2] == "LAST=3"
+
+    def test_rename_nonexistent_returns_false(self, tmp_path):
+        """Should return False when renaming nonexistent key."""
+        from ots_containers.environment_file import EnvFile
+
+        env_file = tmp_path / "test.env"
+        env_file.write_text("KEY=value\n")
+
+        parsed = EnvFile.parse(env_file)
+        result = parsed.rename("NONEXISTENT", "_NONEXISTENT", "value")
+
+        assert result is False
+
 
 class TestSecretSpec:
     """Test SecretSpec dataclass."""
@@ -293,11 +327,13 @@ class TestProcessEnvFile:
         assert env_file.read_text() == original
 
     def test_transforms_entries(self, tmp_path):
-        """Should transform VARNAME=value to _VARNAME=ots_varname."""
+        """Should transform VARNAME=value to _VARNAME=ots_varname in place."""
         from ots_containers.environment_file import EnvFile, process_env_file
 
         env_file = tmp_path / "test.env"
-        env_file.write_text("SECRET_VARIABLE_NAMES=API_KEY\nAPI_KEY=secret\n")
+        env_file.write_text(
+            "SECRET_VARIABLE_NAMES=API_KEY\n" "BEFORE=keep\n" "API_KEY=secret\n" "AFTER=also_keep\n"
+        )
 
         parsed = EnvFile.parse(env_file)
         process_env_file(parsed, create_secrets=False, dry_run=False)
@@ -305,6 +341,12 @@ class TestProcessEnvFile:
         content = env_file.read_text()
         assert "API_KEY=secret" not in content
         assert "_API_KEY=ots_api_key" in content
+
+        # Verify position is preserved (transformed entry stays in same location)
+        lines = content.strip().split("\n")
+        assert lines[1] == "BEFORE=keep"
+        assert lines[2] == "_API_KEY=ots_api_key"
+        assert lines[3] == "AFTER=also_keep"
 
 
 class TestGenerateQuadletSecretLines:
