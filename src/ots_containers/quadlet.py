@@ -1,8 +1,22 @@
 # src/ots_containers/quadlet.py
+"""
+Quadlet template generation for OneTimeSecret containers.
+
+The quadlet template is a systemd unit file that defines how to run
+the container. Secret= lines are generated dynamically based on the
+SECRET_VARIABLE_NAMES defined in the environment file.
+"""
+
+from pathlib import Path
 
 from . import systemd
 from .config import Config
+from .environment_file import generate_quadlet_secret_lines, get_secrets_from_env_file
 
+# Default environment file path
+DEFAULT_ENV_FILE = Path("/etc/default/onetimesecret")
+
+# Quadlet template with {secrets_section} placeholder for dynamic generation
 CONTAINER_TEMPLATE = """\
 # OneTimeSecret Quadlet - Systemd-managed Podman container
 # Location: /etc/containers/systemd/onetime@.container
@@ -13,24 +27,12 @@ CONTAINER_TEMPLATE = """\
 #    ots image login --username <user>
 #    # Credentials stored in /etc/containers/auth.json
 #
-# 1. Create Podman secrets:
-#    # App secrets (generate strong random values)
-#    openssl rand -hex 32 | podman secret create ots_hmac_secret -
-#    openssl rand -hex 32 | podman secret create ots_secret -
-#    openssl rand -hex 32 | podman secret create ots_session_secret -
+# 1. Process environment file to create podman secrets:
+#    ots env process /etc/default/onetimesecret
+#    # This reads SECRET_VARIABLE_NAMES from the env file,
+#    # creates podman secrets, and updates the file
 #
-#    # Service integration secrets (from provider dashboards)
-#    echo "sk_live_..." | podman secret create ots_stripe_api_key -
-#    echo "whsec_..." | podman secret create ots_stripe_webhook_secret -
-#    echo "smtp-password" | podman secret create ots_smtp_password -
-#
-# 2. Create infrastructure env file /etc/default/onetimesecret:
-#    REDIS_URL=redis://localhost:6379
-#    DATABASE_URL=postgres://localhost:5432/onetimesecret
-#    RABBITMQ_URL=amqp://localhost:5672
-#    LOG_LEVEL=info
-#
-# 3. Place YAML configs in {config_dir}/:
+# 2. Place YAML configs in {config_dir}/:
 #    config.yaml, auth.yaml, logging.yaml, billing.yaml
 #
 # OPERATIONS:
@@ -72,14 +74,7 @@ Environment=PORT=%i
 # Edit this file and restart to apply changes
 EnvironmentFile=/etc/default/onetimesecret
 
-# Secrets via Podman secret store (not on disk)
-# These are injected as environment variables at container start
-Secret=ots_hmac_secret,type=env,target=HMAC_SECRET
-Secret=ots_secret,type=env,target=SECRET
-Secret=ots_session_secret,type=env,target=SESSION_SECRET
-Secret=ots_stripe_api_key,type=env,target=STRIPE_API_KEY
-Secret=ots_stripe_webhook_secret,type=env,target=STRIPE_WEBHOOK_SIGNING_SECRET
-Secret=ots_smtp_password,type=env,target=SMTP_PASSWORD
+{secrets_section}
 
 # Config directory mounted read-only (all YAML configs)
 Volume={config_dir}:/app/etc:ro
@@ -98,11 +93,44 @@ WantedBy=multi-user.target
 """
 
 
-def write_template(cfg: Config) -> None:
-    """Write the container quadlet template."""
+def get_secrets_section(env_file_path: Path | None = None) -> str:
+    """Generate the secrets section for the quadlet template.
+
+    Reads SECRET_VARIABLE_NAMES from the environment file and generates
+    corresponding Secret= directives. Returns empty comment if no secrets
+    are defined.
+
+    Args:
+        env_file_path: Path to environment file (defaults to /etc/default/onetimesecret)
+
+    Returns:
+        Multi-line string with Secret= directives, or comment if none defined
+    """
+    env_path = env_file_path or DEFAULT_ENV_FILE
+
+    if not env_path.exists():
+        return "# No secrets configured (env file not found)"
+
+    secrets = get_secrets_from_env_file(env_path)
+    if not secrets:
+        return "# No secrets configured (SECRET_VARIABLE_NAMES not set in env file)"
+
+    return generate_quadlet_secret_lines(secrets)
+
+
+def write_template(cfg: Config, env_file_path: Path | None = None) -> None:
+    """Write the container quadlet template.
+
+    Args:
+        cfg: Configuration object with image and paths
+        env_file_path: Optional path to environment file for secret discovery
+    """
+    secrets_section = get_secrets_section(env_file_path)
+
     content = CONTAINER_TEMPLATE.format(
         image=cfg.resolved_image_with_tag,
         config_dir=cfg.config_dir,
+        secrets_section=secrets_section,
     )
     cfg.template_path.parent.mkdir(parents=True, exist_ok=True)
     cfg.template_path.write_text(content)
