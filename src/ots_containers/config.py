@@ -4,7 +4,7 @@ import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
-# Default image registry
+# Default image registry (public)
 DEFAULT_IMAGE = "ghcr.io/onetimesecret/onetimesecret"
 DEFAULT_TAG = "current"
 
@@ -31,6 +31,10 @@ class Config:
     tag: str = field(default_factory=lambda: os.environ.get("TAG", DEFAULT_TAG))
     template_path: Path = Path("/etc/containers/systemd/onetime@.container")
 
+    # Private registry configuration (optional, set via OTS_REGISTRY env var)
+    registry: str | None = field(default_factory=lambda: os.environ.get("OTS_REGISTRY"))
+    registry_auth_file: Path = Path("/etc/containers/auth.json")
+
     # Proxy (Caddy) configuration - uses HOST environment, not container .env
     proxy_template: Path = Path("/etc/onetimesecret/Caddyfile.template")
     proxy_config: Path = Path("/etc/caddy/Caddyfile")
@@ -38,6 +42,20 @@ class Config:
     @property
     def image_with_tag(self) -> str:
         return f"{self.image}:{self.tag}"
+
+    @property
+    def private_image(self) -> str | None:
+        """Image path for private registry (requires OTS_REGISTRY env var)."""
+        if not self.registry:
+            return None
+        return f"{self.registry}/onetimesecret"
+
+    @property
+    def private_image_with_tag(self) -> str | None:
+        """Full image reference for private registry."""
+        if not self.private_image:
+            return None
+        return f"{self.private_image}:{self.tag}"
 
     @property
     def config_yaml(self) -> Path:

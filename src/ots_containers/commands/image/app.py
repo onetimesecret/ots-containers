@@ -50,6 +50,13 @@ def pull(
             help="Set as CURRENT alias after pulling",
         ),
     ] = False,
+    private: Annotated[
+        bool,
+        cyclopts.Parameter(
+            name=["--private", "-P"],
+            help="Pull from private registry (uses configured OTS_REGISTRY)",
+        ),
+    ] = False,
     quiet: Annotated[
         bool,
         cyclopts.Parameter(name=["--quiet", "-q"], help="Suppress progress output"),
@@ -61,15 +68,31 @@ def pull(
         ots image pull --tag v0.23.0
         ots image pull --tag latest --current
         ots image pull --tag v0.23.0 --image docker.io/onetimesecret/onetimesecret
+        ots image pull --tag v0.23.0 --private  # Pull from private registry
     """
     cfg = Config()
+
+    # Use private registry if requested
+    if private:
+        if not cfg.private_image:
+            print("Error: --private requires OTS_REGISTRY env var to be set")
+            raise SystemExit(1)
+        image = cfg.private_image
+
     full_image = f"{image}:{tag}"
 
     if not quiet:
         print(f"Pulling {full_image}...")
 
     try:
-        podman.pull(full_image, check=True, capture_output=True, text=True)
+        # Use auth file for authenticated registries
+        podman.pull(
+            full_image,
+            authfile=str(cfg.registry_auth_file),
+            check=True,
+            capture_output=True,
+            text=True,
+        )
         if not quiet:
             print(f"Successfully pulled {full_image}")
     except Exception as e:
@@ -306,3 +329,221 @@ def aliases():
     rollback_img = db.get_rollback_image(cfg.db_path)
     if rollback_img:
         print(f"  TAG=rollback -> {rollback_img[0]}:{rollback_img[1]}")
+
+
+# --- Private Registry Commands ---
+
+
+@app.command
+def login(
+    registry: Annotated[
+        str | None,
+        cyclopts.Parameter(
+            name=["--registry", "-r"],
+            help="Registry URL (or set OTS_REGISTRY env var)",
+        ),
+    ] = None,
+    username: Annotated[
+        str | None,
+        cyclopts.Parameter(
+            name=["--username", "-u"],
+            help="Registry username (or set OTS_REGISTRY_USER env var)",
+        ),
+    ] = None,
+    password: Annotated[
+        str | None,
+        cyclopts.Parameter(
+            name=["--password", "-p"],
+            help="Registry password (env: OTS_REGISTRY_PASSWORD, or --password-stdin)",
+        ),
+    ] = None,
+    password_stdin: Annotated[
+        bool,
+        cyclopts.Parameter(
+            name=["--password-stdin"],
+            help="Read password from stdin",
+        ),
+    ] = False,
+):
+    """Authenticate with a container registry.
+
+    Uses HTTP basic auth. Credentials can be provided via:
+      - Command line arguments
+      - Environment variables: OTS_REGISTRY_USER, OTS_REGISTRY_PASSWORD
+      - Interactive prompt (if not provided)
+
+    Examples:
+        ots image login --registry registry.example.com
+        ots image login --registry registry.example.com --username admin --password-stdin
+        OTS_REGISTRY=registry.example.com ots image login
+    """
+    import getpass
+    import os
+    import sys
+
+    cfg = Config()
+
+    # Resolve registry from arg or config
+    reg = registry or cfg.registry
+    if not reg:
+        print("Error: Registry URL required. Use --registry or set OTS_REGISTRY env var")
+        raise SystemExit(1)
+
+    # Resolve credentials from args, env vars, or prompt
+    user = username or os.environ.get("OTS_REGISTRY_USER")
+    pw = password or os.environ.get("OTS_REGISTRY_PASSWORD")
+
+    if not user:
+        user = input(f"Username for {reg}: ")
+
+    if password_stdin:
+        pw = sys.stdin.read().strip()
+    elif not pw:
+        pw = getpass.getpass(f"Password for {user}@{reg}: ")
+
+    if not user or not pw:
+        print("Error: Username and password are required")
+        raise SystemExit(1)
+
+    print(f"Logging in to {reg}...")
+
+    try:
+        podman.login(
+            reg,
+            username=user,
+            password=pw,
+            authfile=str(cfg.registry_auth_file),
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        print(f"Login successful: {reg}")
+    except Exception as e:
+        print(f"Login failed: {e}")
+        raise SystemExit(1)
+
+
+@app.command
+def push(
+    tag: Annotated[
+        str,
+        cyclopts.Parameter(
+            name=["--tag", "-t"],
+            help="Image tag to push",
+        ),
+    ],
+    source_image: Annotated[
+        str,
+        cyclopts.Parameter(
+            name=["--source", "-s"],
+            help="Source image to push (default: ghcr.io/onetimesecret/onetimesecret)",
+        ),
+    ] = DEFAULT_IMAGE,
+    registry: Annotated[
+        str | None,
+        cyclopts.Parameter(
+            name=["--registry", "-r"],
+            help="Target registry URL (or set OTS_REGISTRY env var)",
+        ),
+    ] = None,
+    quiet: Annotated[
+        bool,
+        cyclopts.Parameter(name=["--quiet", "-q"], help="Suppress progress output"),
+    ] = False,
+):
+    """Push an image to a private registry.
+
+    Tags the source image for the target registry and pushes it.
+    Requires prior authentication via 'ots image login'.
+
+    Examples:
+        ots image push --tag v0.23.0 --registry registry.example.com
+        ots image push --tag latest --source docker.io/onetimesecret/onetimesecret
+        OTS_REGISTRY=registry.example.com ots image push --tag v0.23.0
+    """
+    cfg = Config()
+
+    # Resolve registry from arg or config
+    reg = registry or cfg.registry
+    if not reg:
+        print("Error: Registry URL required. Use --registry or set OTS_REGISTRY env var")
+        raise SystemExit(1)
+
+    source_full = f"{source_image}:{tag}"
+    target_full = f"{reg}/onetimesecret:{tag}"
+
+    if not quiet:
+        print(f"Tagging {source_full} -> {target_full}")
+
+    # Tag the image for the target registry
+    try:
+        podman.tag(source_full, target_full, check=True, capture_output=True, text=True)
+    except Exception as e:
+        print(f"Failed to tag image: {e}")
+        raise SystemExit(1)
+
+    if not quiet:
+        print(f"Pushing {target_full}...")
+
+    # Push to registry
+    try:
+        podman.push(
+            target_full,
+            authfile=str(cfg.registry_auth_file),
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        if not quiet:
+            print(f"Successfully pushed {target_full}")
+    except Exception as e:
+        print(f"Failed to push {target_full}: {e}")
+        raise SystemExit(1)
+
+    # Record the push action
+    db.record_deployment(
+        cfg.db_path,
+        image=f"{reg}/onetimesecret",
+        tag=tag,
+        action="push",
+        success=True,
+    )
+
+
+@app.command
+def logout(
+    registry: Annotated[
+        str | None,
+        cyclopts.Parameter(
+            name=["--registry", "-r"],
+            help="Registry URL (or set OTS_REGISTRY env var)",
+        ),
+    ] = None,
+):
+    """Remove authentication for a container registry.
+
+    Examples:
+        ots image logout --registry registry.example.com
+        OTS_REGISTRY=registry.example.com ots image logout
+    """
+    cfg = Config()
+
+    # Resolve registry from arg or config
+    reg = registry or cfg.registry
+    if not reg:
+        print("Error: Registry URL required. Use --registry or set OTS_REGISTRY env var")
+        raise SystemExit(1)
+
+    print(f"Logging out from {reg}...")
+
+    try:
+        podman.logout(
+            reg,
+            authfile=str(cfg.registry_auth_file),
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        print(f"Logged out from {reg}")
+    except Exception as e:
+        print(f"Logout failed: {e}")

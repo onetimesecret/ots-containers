@@ -9,6 +9,10 @@ CONTAINER_TEMPLATE = """\
 #
 # PREREQUISITES (one-time setup):
 #
+# 0. (Private registry only) Authenticate with registry:
+#    ots image login --username <user>
+#    # Credentials stored in /etc/containers/auth.json
+#
 # 1. Create Podman secrets:
 #    # App secrets (generate strong random values)
 #    openssl rand -hex 32 | podman secret create ots_hmac_secret -
@@ -57,6 +61,9 @@ RestartSec=5
 [Container]
 Image={image}
 Network=host
+
+# Auth file for private registry pulls (created via: ots image login)
+GlobalArgs=--authfile=/etc/containers/auth.json
 
 # Port is derived from instance name: onetime@7043 -> PORT=7043
 Environment=PORT=%i
