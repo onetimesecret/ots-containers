@@ -71,20 +71,18 @@ def process(
         print(f"Error: Environment file not found: {path}")
         return 1
 
-    print(f"Processing environment file: {path}")
+    print(f"Processing: {path}", end="")
     if dry_run:
-        print("(dry-run mode - no changes will be made)")
-    print()
+        print(" (dry-run)")
+    else:
+        print()
 
     parsed = EnvFile.parse(path)
 
     if not parsed.secret_variable_names:
-        print("Error: No SECRET_VARIABLE_NAMES defined in environment file.")
+        print("\nError: No SECRET_VARIABLE_NAMES defined in environment file.")
         print("Add a line like: SECRET_VARIABLE_NAMES=VAR1,VAR2,VAR3")
         return 1
-
-    print(f"Secret variables defined: {', '.join(parsed.secret_variable_names)}")
-    print()
 
     secrets, messages = process_env_file(
         parsed,
@@ -92,14 +90,17 @@ def process(
         dry_run=dry_run,
     )
 
-    for msg in messages:
-        print(f"  {msg}")
+    # Separate warnings from actions
+    warnings = [m for m in messages if m.startswith("Warning:")]
+    actions = [m for m in messages if not m.startswith("Warning:")]
 
-    print()
-    if dry_run:
-        print("Dry-run complete. Run without --dry-run to apply changes.")
-    else:
-        print("Processing complete.")
+    for action in actions:
+        print(action)
+
+    if warnings:
+        print()
+        for warning in warnings:
+            print(warning)
 
     return 0
 
