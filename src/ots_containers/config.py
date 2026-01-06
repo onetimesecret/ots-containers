@@ -30,10 +30,11 @@ class Config:
     image: str = field(default_factory=lambda: os.environ.get("IMAGE", DEFAULT_IMAGE))
     tag: str = field(default_factory=lambda: os.environ.get("TAG", DEFAULT_TAG))
     template_path: Path = Path("/etc/containers/systemd/onetime@.container")
+    worker_template_path: Path = Path("/etc/containers/systemd/onetime-worker@.container")
 
     # Private registry configuration (optional, set via OTS_REGISTRY env var)
     registry: str | None = field(default_factory=lambda: os.environ.get("OTS_REGISTRY"))
-    registry_auth_file: Path = Path("/etc/containers/auth.json")
+    _registry_auth_file: Path | None = field(default=None, repr=False)
 
     # Proxy (Caddy) configuration - uses HOST environment, not container .env
     proxy_template: Path = Path("/etc/onetimesecret/Caddyfile.template")
@@ -42,6 +43,43 @@ class Config:
     @property
     def image_with_tag(self) -> str:
         return f"{self.image}:{self.tag}"
+
+    @property
+    def registry_auth_file(self) -> Path:
+        """Container registry auth file path.
+
+        Resolution order:
+        1. Explicit override via _registry_auth_file
+        2. REGISTRY_AUTH_FILE env var
+        3. XDG_RUNTIME_DIR/containers/auth.json (if exists)
+        4. ~/.config/containers/auth.json (macOS default, user-level)
+        5. /etc/containers/auth.json (Linux system-level)
+        """
+        import sys
+
+        # Explicit override
+        if self._registry_auth_file:
+            return self._registry_auth_file
+
+        # Environment variable
+        env_path = os.environ.get("REGISTRY_AUTH_FILE")
+        if env_path:
+            return Path(env_path)
+
+        # XDG_RUNTIME_DIR (podman's default on Linux)
+        xdg_runtime = os.environ.get("XDG_RUNTIME_DIR")
+        if xdg_runtime:
+            runtime_auth = Path(xdg_runtime) / "containers" / "auth.json"
+            if runtime_auth.exists():
+                return runtime_auth
+
+        # User config (works on macOS and Linux without root)
+        user_auth = Path.home() / ".config" / "containers" / "auth.json"
+        if user_auth.exists() or sys.platform == "darwin":
+            return user_auth
+
+        # System path (Linux with root)
+        return Path("/etc/containers/auth.json")
 
     @property
     def private_image(self) -> str | None:
@@ -64,8 +102,24 @@ class Config:
 
     @property
     def db_path(self) -> Path:
-        """SQLite database for deployment tracking."""
-        return self.var_dir / "deployments.db"
+        """SQLite database for deployment tracking.
+
+        Uses system path (/var/lib/onetimesecret/) on Linux production,
+        falls back to user space (~/.local/share/ots-containers/) when
+        system path is not writable (macOS, non-root user).
+        """
+        system_path = self.var_dir / "deployments.db"
+
+        # Check if system path is usable (exists and writable, or parent is writable)
+        if system_path.exists() and os.access(system_path, os.W_OK):
+            return system_path
+        if self.var_dir.exists() and os.access(self.var_dir, os.W_OK):
+            return system_path
+
+        # Fall back to XDG_DATA_HOME (~/.local/share/ots-containers/)
+        xdg_data = Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local" / "share"))
+        user_dir = xdg_data / "ots-containers"
+        return user_dir / "deployments.db"
 
     def validate(self) -> None:
         required = [

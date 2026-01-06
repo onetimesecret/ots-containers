@@ -135,3 +135,105 @@ def write_template(cfg: Config, env_file_path: Path | None = None) -> None:
     cfg.template_path.parent.mkdir(parents=True, exist_ok=True)
     cfg.template_path.write_text(content)
     systemd.daemon_reload()
+
+
+# Worker quadlet template - for background job processing (Sneakers/RabbitMQ)
+WORKER_TEMPLATE = """\
+# OneTimeSecret Worker Quadlet - Systemd-managed Podman container for background jobs
+# Location: /etc/containers/systemd/onetime-worker@.container
+#
+# PREREQUISITES (one-time setup):
+#
+# 0. (Private registry only) Authenticate with registry:
+#    ots image login --username <user>
+#    # Credentials stored in /etc/containers/auth.json
+#
+# 1. Process environment file to create podman secrets:
+#    ots env process /etc/default/onetimesecret
+#    # This reads SECRET_VARIABLE_NAMES from the env file,
+#    # creates podman secrets, and updates the file
+#
+# 2. Place YAML configs in {config_dir}/:
+#    config.yaml, auth.yaml, logging.yaml, billing.yaml
+#
+# OPERATIONS:
+#   Start:    systemctl start onetime-worker@1
+#   Stop:     systemctl stop onetime-worker@1
+#   Logs:     journalctl -u onetime-worker@1 -f
+#   Status:   systemctl status onetime-worker@1
+#
+# WORKER INSTANCES:
+#   Numeric: onetime-worker@1, onetime-worker@2
+#   Named:   onetime-worker@billing, onetime-worker@emails
+#
+# SECRET ROTATION:
+#   podman secret rm ots_hmac_secret
+#   openssl rand -hex 32 | podman secret create ots_hmac_secret -
+#   systemctl restart onetime-worker@1
+#
+# TROUBLESHOOTING:
+#   List secrets:  podman secret ls
+#   Inspect:       podman secret inspect ots_hmac_secret
+#   Container:     podman exec -it systemd-onetime-worker@1 /bin/sh
+
+[Unit]
+Description=OneTimeSecret Worker %i
+After=local-fs.target network-online.target
+Wants=network-online.target
+
+[Service]
+Restart=on-failure
+RestartSec=5
+# Allow time for graceful job completion on stop
+TimeoutStopSec=90
+
+[Container]
+Image={image}
+Network=host
+
+# Auth file for private registry pulls (created via: ots image login)
+GlobalArgs=--authfile=/etc/containers/auth.json
+
+# Worker ID is derived from instance name: onetime-worker@1 -> WORKER_ID=1
+Environment=WORKER_ID=%i
+
+# Infrastructure config (connection strings, log level)
+# Edit this file and restart to apply changes
+EnvironmentFile=/etc/default/onetimesecret
+
+{secrets_section}
+
+# Config directory mounted read-only (all YAML configs)
+Volume={config_dir}:/app/etc:ro
+
+# Worker entry point - runs Sneakers job processor
+Exec=bin/entrypoint.sh bin/ots worker
+
+# Health check - verify sneakers process is running
+HealthCmd=pgrep -f "sneakers" || exit 1
+HealthInterval=30s
+HealthRetries=3
+HealthStartPeriod=15s
+
+[Install]
+WantedBy=multi-user.target
+"""
+
+
+def write_worker_template(cfg: Config, env_file_path: Path | None = None) -> None:
+    """Write the worker container quadlet template.
+
+    Args:
+        cfg: Configuration object with image and paths
+        env_file_path: Optional path to environment file for secret discovery
+    """
+    secrets_section = get_secrets_section(env_file_path)
+
+    content = WORKER_TEMPLATE.format(
+        image=cfg.resolved_image_with_tag,
+        config_dir=cfg.config_dir,
+        secrets_section=secrets_section,
+    )
+    cfg.worker_template_path.parent.mkdir(parents=True, exist_ok=True)
+    cfg.worker_template_path.write_text(content)
+    systemd.daemon_reload()

@@ -27,6 +27,29 @@ def resolve_ports(
     return tuple(discovered)
 
 
+def resolve_worker_ids(
+    worker_ids: tuple[str, ...],
+    running_only: bool = False,
+) -> tuple[str, ...]:
+    """Return provided worker IDs, or discover worker instances if none given.
+
+    Args:
+        worker_ids: Explicitly provided worker IDs. If non-empty, returned as-is.
+        running_only: If True, only discover running instances.
+                      If False (default), discover all loaded units.
+    """
+    if worker_ids:
+        return worker_ids
+    discovered = systemd.discover_worker_instances(running_only=running_only)
+    if not discovered:
+        if running_only:
+            print("No running worker instances found")
+        else:
+            print("No configured worker instances found")
+        return ()
+    return tuple(discovered)
+
+
 def for_each(
     ports: tuple[int, ...],
     delay: int,
@@ -44,3 +67,22 @@ def for_each(
             print(f"Waiting {delay}s...")
             time.sleep(delay)
     print(f"Processed {total} container(s)")
+
+
+def for_each_worker(
+    worker_ids: tuple[str, ...],
+    delay: int,
+    action: Callable[[str], None],
+    verb: str,
+) -> None:
+    """Run action for each worker ID with delay between."""
+    import time
+
+    total = len(worker_ids)
+    for i, worker_id in enumerate(worker_ids, 1):
+        print(f"[{i}/{total}] {verb} worker {worker_id}...")
+        action(worker_id)
+        if i < total and delay > 0:
+            print(f"Waiting {delay}s...")
+            time.sleep(delay)
+    print(f"Processed {total} worker(s)")

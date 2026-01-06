@@ -9,8 +9,8 @@ import cyclopts
 from ots_containers import assets, db, quadlet, systemd
 from ots_containers.config import Config
 
-from ._helpers import for_each, resolve_ports
-from .annotations import Delay, OptionalPorts, Ports
+from ._helpers import for_each, for_each_worker, resolve_ports
+from .annotations import Delay, InstanceType, OptionalPorts
 
 app = cyclopts.App(
     name=["instance", "instances"],
@@ -68,12 +68,30 @@ def list_instances(ports: OptionalPorts = (), alias: str = "instances"):
 
 
 @app.command
-def deploy(ports: Ports, delay: Delay = 5):
+def deploy(
+    ids: Annotated[
+        tuple[str, ...],
+        cyclopts.Parameter(help="Instance IDs (ports for web, names/numbers for workers)"),
+    ],
+    delay: Delay = 5,
+    instance_type: Annotated[
+        InstanceType,
+        cyclopts.Parameter(
+            name=["--type", "-t"],
+            help="Container type: 'web' (default) or 'worker'",
+        ),
+    ] = InstanceType.WEB,
+):
     """Deploy new instance(s) using quadlet and Podman secrets.
 
     Writes quadlet config and starts systemd service.
     Requires /etc/default/onetimesecret and Podman secrets to be configured.
     Records deployment to timeline for audit and rollback support.
+
+    Examples:
+        ots instance deploy 7043 7044       # Deploy web containers on ports
+        ots instance deploy --type worker 1 2  # Deploy worker containers 1, 2
+        ots instance deploy -t worker billing  # Deploy 'billing' queue worker
     """
     cfg = Config()
     cfg.validate()
@@ -83,6 +101,23 @@ def deploy(ports: Ports, delay: Delay = 5):
     print(f"Image: {image}:{tag}")
 
     print(f"Reading config from {cfg.config_yaml}")
+
+    if instance_type == InstanceType.WORKER:
+        _deploy_workers(cfg, ids, delay, image, tag)
+    else:
+        # Convert string IDs to int ports for web containers
+        ports = tuple(int(p) for p in ids)
+        _deploy_web(cfg, ports, delay, image, tag)
+
+
+def _deploy_web(
+    cfg: Config,
+    ports: tuple[int, ...],
+    delay: int,
+    image: str,
+    tag: str,
+) -> None:
+    """Deploy web container instances."""
     assets.update(cfg, create_volume=True)
     print(f"Writing quadlet files to {cfg.template_path.parent}")
     quadlet.write_template(cfg)
@@ -114,6 +149,48 @@ def deploy(ports: Ports, delay: Delay = 5):
             raise
 
     for_each(ports, delay, do_deploy, "Deploying")
+
+
+def _deploy_workers(
+    cfg: Config,
+    worker_ids: tuple[str, ...],
+    delay: int,
+    image: str,
+    tag: str,
+) -> None:
+    """Deploy worker container instances."""
+    print(f"Writing worker quadlet files to {cfg.worker_template_path.parent}")
+    quadlet.write_worker_template(cfg)
+
+    def do_deploy(worker_id: str) -> None:
+        unit = f"onetime-worker@{worker_id}"
+        print(f"Starting {unit}")
+        try:
+            systemd.start(unit)
+            # Record successful deployment (use worker_id as port field for tracking)
+            db.record_deployment(
+                cfg.db_path,
+                image=image,
+                tag=tag,
+                action="deploy-worker",
+                port=0,  # Workers don't have ports
+                success=True,
+                notes=f"worker_id={worker_id}",
+            )
+        except Exception as e:
+            # Record failed deployment
+            db.record_deployment(
+                cfg.db_path,
+                image=image,
+                tag=tag,
+                action="deploy-worker",
+                port=0,
+                success=False,
+                notes=f"worker_id={worker_id}: {e}",
+            )
+            raise
+
+    for_each_worker(worker_ids, delay, do_deploy, "Deploying")
 
 
 @app.command

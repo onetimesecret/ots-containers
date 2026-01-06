@@ -69,12 +69,12 @@ class TestDeployCommand:
         )
 
         with pytest.raises(SystemExit):
-            instance.deploy(ports=(7143,))
+            instance.deploy(ids=("7143",))
 
         mock_validate.assert_called_once()
 
     def test_deploy_calls_assets_update(self, mocker, tmp_path):
-        """deploy should update assets."""
+        """deploy should update assets for web containers."""
         mock_config = mocker.MagicMock()
         mock_config.config_dir = mocker.MagicMock()
         mock_config.config_yaml = mocker.MagicMock()
@@ -95,10 +95,151 @@ class TestDeployCommand:
         mock_config.env_template.read_text.return_value = "PORT=${PORT}"
         mock_config.var_dir.mkdir = mocker.MagicMock()
 
-        instance.deploy(ports=(7143,))
+        instance.deploy(ids=("7143",))
 
         mock_assets.assert_called_once_with(mock_config, create_volume=True)
         mock_quadlet.assert_called_once_with(mock_config)
+
+
+class TestDeployWorkerCommand:
+    """Test deploy command with --type worker flag."""
+
+    def test_deploy_worker_calls_write_worker_template(self, mocker, tmp_path):
+        """deploy --type worker should write worker quadlet template."""
+        from ots_containers.commands.instance.annotations import InstanceType
+
+        mock_config = mocker.MagicMock()
+        mock_config.config_dir = mocker.MagicMock()
+        mock_config.config_yaml = mocker.MagicMock()
+        mock_config.var_dir = mocker.MagicMock()
+        mock_config.worker_template_path = mocker.MagicMock()
+        mock_config.worker_template_path.parent = mocker.MagicMock()
+        mock_config.db_path = tmp_path / "test.db"
+        mock_config.resolve_image_tag.return_value = ("ghcr.io/test/image", "v1.0.0")
+        mocker.patch("ots_containers.commands.instance.app.Config", return_value=mock_config)
+        mock_quadlet = mocker.patch(
+            "ots_containers.commands.instance.app.quadlet.write_worker_template"
+        )
+        mocker.patch("ots_containers.commands.instance.app.systemd.start")
+        mocker.patch("ots_containers.commands.instance.app.db.record_deployment")
+
+        instance.deploy(ids=("1",), instance_type=InstanceType.WORKER)
+
+        mock_quadlet.assert_called_once_with(mock_config)
+
+    def test_deploy_worker_does_not_update_assets(self, mocker, tmp_path):
+        """deploy --type worker should NOT update static assets."""
+        from ots_containers.commands.instance.annotations import InstanceType
+
+        mock_config = mocker.MagicMock()
+        mock_config.config_dir = mocker.MagicMock()
+        mock_config.config_yaml = mocker.MagicMock()
+        mock_config.var_dir = mocker.MagicMock()
+        mock_config.worker_template_path = mocker.MagicMock()
+        mock_config.worker_template_path.parent = mocker.MagicMock()
+        mock_config.db_path = tmp_path / "test.db"
+        mock_config.resolve_image_tag.return_value = ("ghcr.io/test/image", "v1.0.0")
+        mocker.patch("ots_containers.commands.instance.app.Config", return_value=mock_config)
+        mock_assets = mocker.patch("ots_containers.commands.instance.app.assets.update")
+        mocker.patch("ots_containers.commands.instance.app.quadlet.write_worker_template")
+        mocker.patch("ots_containers.commands.instance.app.systemd.start")
+        mocker.patch("ots_containers.commands.instance.app.db.record_deployment")
+
+        instance.deploy(ids=("1",), instance_type=InstanceType.WORKER)
+
+        mock_assets.assert_not_called()
+
+    def test_deploy_worker_starts_worker_unit(self, mocker, tmp_path):
+        """deploy --type worker should start onetime-worker@{id} unit."""
+        from ots_containers.commands.instance.annotations import InstanceType
+
+        mock_config = mocker.MagicMock()
+        mock_config.config_dir = mocker.MagicMock()
+        mock_config.config_yaml = mocker.MagicMock()
+        mock_config.var_dir = mocker.MagicMock()
+        mock_config.worker_template_path = mocker.MagicMock()
+        mock_config.worker_template_path.parent = mocker.MagicMock()
+        mock_config.db_path = tmp_path / "test.db"
+        mock_config.resolve_image_tag.return_value = ("ghcr.io/test/image", "v1.0.0")
+        mocker.patch("ots_containers.commands.instance.app.Config", return_value=mock_config)
+        mocker.patch("ots_containers.commands.instance.app.quadlet.write_worker_template")
+        mock_start = mocker.patch("ots_containers.commands.instance.app.systemd.start")
+        mocker.patch("ots_containers.commands.instance.app.db.record_deployment")
+
+        instance.deploy(ids=("billing",), instance_type=InstanceType.WORKER)
+
+        mock_start.assert_called_once_with("onetime-worker@billing")
+
+    def test_deploy_worker_with_numeric_id(self, mocker, tmp_path):
+        """deploy --type worker 1 should start onetime-worker@1 unit."""
+        from ots_containers.commands.instance.annotations import InstanceType
+
+        mock_config = mocker.MagicMock()
+        mock_config.config_dir = mocker.MagicMock()
+        mock_config.config_yaml = mocker.MagicMock()
+        mock_config.var_dir = mocker.MagicMock()
+        mock_config.worker_template_path = mocker.MagicMock()
+        mock_config.worker_template_path.parent = mocker.MagicMock()
+        mock_config.db_path = tmp_path / "test.db"
+        mock_config.resolve_image_tag.return_value = ("ghcr.io/test/image", "v1.0.0")
+        mocker.patch("ots_containers.commands.instance.app.Config", return_value=mock_config)
+        mocker.patch("ots_containers.commands.instance.app.quadlet.write_worker_template")
+        mock_start = mocker.patch("ots_containers.commands.instance.app.systemd.start")
+        mocker.patch("ots_containers.commands.instance.app.db.record_deployment")
+
+        instance.deploy(ids=("1",), instance_type=InstanceType.WORKER)
+
+        mock_start.assert_called_once_with("onetime-worker@1")
+
+    def test_deploy_worker_records_deployment(self, mocker, tmp_path):
+        """deploy --type worker should record deployment with worker action."""
+        from ots_containers.commands.instance.annotations import InstanceType
+
+        mock_config = mocker.MagicMock()
+        mock_config.config_dir = mocker.MagicMock()
+        mock_config.config_yaml = mocker.MagicMock()
+        mock_config.var_dir = mocker.MagicMock()
+        mock_config.worker_template_path = mocker.MagicMock()
+        mock_config.worker_template_path.parent = mocker.MagicMock()
+        mock_config.db_path = tmp_path / "test.db"
+        mock_config.resolve_image_tag.return_value = ("ghcr.io/test/image", "v1.0.0")
+        mocker.patch("ots_containers.commands.instance.app.Config", return_value=mock_config)
+        mocker.patch("ots_containers.commands.instance.app.quadlet.write_worker_template")
+        mocker.patch("ots_containers.commands.instance.app.systemd.start")
+        mock_record = mocker.patch("ots_containers.commands.instance.app.db.record_deployment")
+
+        instance.deploy(ids=("billing",), instance_type=InstanceType.WORKER)
+
+        mock_record.assert_called_once()
+        call_kwargs = mock_record.call_args[1]
+        assert call_kwargs["action"] == "deploy-worker"
+        assert call_kwargs["port"] == 0
+        assert "worker_id=billing" in call_kwargs["notes"]
+
+    def test_deploy_multiple_workers(self, mocker, tmp_path):
+        """deploy --type worker 1 2 billing should deploy multiple workers."""
+        from ots_containers.commands.instance.annotations import InstanceType
+
+        mock_config = mocker.MagicMock()
+        mock_config.config_dir = mocker.MagicMock()
+        mock_config.config_yaml = mocker.MagicMock()
+        mock_config.var_dir = mocker.MagicMock()
+        mock_config.worker_template_path = mocker.MagicMock()
+        mock_config.worker_template_path.parent = mocker.MagicMock()
+        mock_config.db_path = tmp_path / "test.db"
+        mock_config.resolve_image_tag.return_value = ("ghcr.io/test/image", "v1.0.0")
+        mocker.patch("ots_containers.commands.instance.app.Config", return_value=mock_config)
+        mocker.patch("ots_containers.commands.instance.app.quadlet.write_worker_template")
+        mock_start = mocker.patch("ots_containers.commands.instance.app.systemd.start")
+        mocker.patch("ots_containers.commands.instance.app.db.record_deployment")
+
+        instance.deploy(ids=("1", "2", "billing"), instance_type=InstanceType.WORKER, delay=0)
+
+        assert mock_start.call_count == 3
+        calls = [c[0][0] for c in mock_start.call_args_list]
+        assert "onetime-worker@1" in calls
+        assert "onetime-worker@2" in calls
+        assert "onetime-worker@billing" in calls
 
 
 class TestRedeployCommand:

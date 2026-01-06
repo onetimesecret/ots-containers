@@ -86,12 +86,20 @@ class TestConfigPaths:
         cfg = Config(config_dir=Path("/etc/ots"))
         assert cfg.config_yaml == Path("/etc/ots/config.yaml")
 
-    def test_db_path(self):
-        """Should return correct path for deployments database."""
+    def test_db_path_with_writable_var_dir(self, tmp_path):
+        """Should use system path when var_dir is writable."""
         from ots_containers.config import Config
 
-        cfg = Config(var_dir=Path("/var/lib/ots"))
-        assert cfg.db_path == Path("/var/lib/ots/deployments.db")
+        cfg = Config(var_dir=tmp_path)
+        assert cfg.db_path == tmp_path / "deployments.db"
+
+    def test_db_path_falls_back_to_user_space(self):
+        """Should fall back to ~/.local/share when var_dir not writable."""
+        from ots_containers.config import Config
+
+        # Non-existent path triggers fallback
+        cfg = Config(var_dir=Path("/nonexistent/path"))
+        assert ".local/share/ots-containers/deployments.db" in str(cfg.db_path)
 
 
 class TestConfigValidate:

@@ -168,6 +168,87 @@ def ls(
             print(f"  {alias.alias}: {alias.image}:{alias.tag} (set {alias.set_at})")
 
 
+@app.command(name="list-remote")
+def list_remote(
+    registry: Annotated[
+        str | None,
+        cyclopts.Parameter(
+            name=["--registry", "-r"],
+            help="Registry URL (or set OTS_REGISTRY env var)",
+        ),
+    ] = None,
+    image: Annotated[
+        str,
+        cyclopts.Parameter(
+            name=["--image", "-i"],
+            help="Image name to list tags for",
+        ),
+    ] = "onetimesecret",
+    quiet: Annotated[
+        bool,
+        cyclopts.Parameter(name=["--quiet", "-q"], help="Suppress command output"),
+    ] = False,
+):
+    """List image tags on a remote registry.
+
+    Uses skopeo to query the registry API. Requires skopeo to be installed.
+
+    Examples:
+        ots image list-remote
+        ots image list-remote --registry ghcr.io/onetimesecret
+        OTS_REGISTRY=registry.example.com ots image list-remote
+    """
+    import json
+    import shutil
+    import subprocess
+
+    cfg = Config()
+
+    # Check for skopeo
+    if not shutil.which("skopeo"):
+        print("Error: skopeo not found. Install with: brew install skopeo (macOS)")
+        raise SystemExit(1)
+
+    # Resolve registry
+    reg = registry or cfg.registry
+    if not reg:
+        print("Error: Registry URL required. Use --registry or set OTS_REGISTRY env var")
+        raise SystemExit(1)
+
+    # Build skopeo command
+    image_ref = f"docker://{reg}/{image}"
+    cmd = [
+        "skopeo",
+        "list-tags",
+        "--authfile",
+        str(cfg.registry_auth_file),
+        image_ref,
+    ]
+
+    if not quiet:
+        print(f"$ {' '.join(cmd)}")
+
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+        data = json.loads(result.stdout)
+        tags = data.get("Tags", [])
+
+        if not quiet:
+            print(f"\nTags for {reg}/{image} ({len(tags)} total):")
+
+        # Sort tags (newest-looking first)
+        tags_sorted = sorted(tags, reverse=True)
+        for tag in tags_sorted:
+            print(f"  {tag}")
+
+    except subprocess.CalledProcessError as e:
+        print(f"Failed to list tags: {e.stderr}")
+        raise SystemExit(1)
+    except json.JSONDecodeError as e:
+        print(f"Failed to parse response: {e}")
+        raise SystemExit(1)
+
+
 @app.command(name="set-current")
 def set_current(
     tag: Annotated[
@@ -437,9 +518,9 @@ def push(
         str,
         cyclopts.Parameter(
             name=["--source", "-s"],
-            help="Source image to push (default: ghcr.io/onetimesecret/onetimesecret)",
+            help="Source image to push (default: onetimesecret for local builds)",
         ),
-    ] = DEFAULT_IMAGE,
+    ] = "onetimesecret",
     registry: Annotated[
         str | None,
         cyclopts.Parameter(
@@ -458,8 +539,9 @@ def push(
     Requires prior authentication via 'ots image login'.
 
     Examples:
+        ots image push --tag v0.23.0
         ots image push --tag v0.23.0 --registry registry.example.com
-        ots image push --tag latest --source docker.io/onetimesecret/onetimesecret
+        ots image push --tag latest --source ghcr.io/onetimesecret/onetimesecret
         OTS_REGISTRY=registry.example.com ots image push --tag v0.23.0
     """
     cfg = Config()

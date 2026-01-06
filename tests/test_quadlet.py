@@ -3,7 +3,7 @@
 
 
 class TestContainerTemplate:
-    """Test container quadlet template generation."""
+    """Test web container quadlet template generation."""
 
     def test_write_template_creates_file(self, mocker, tmp_path):
         """write_template should create the container quadlet file."""
@@ -217,5 +217,213 @@ class TestContainerTemplate:
         )
 
         quadlet.write_template(cfg)
+
+        mock_reload.assert_called_once()
+
+
+class TestWorkerTemplate:
+    """Test worker container quadlet template generation."""
+
+    def test_write_worker_template_creates_file(self, mocker, tmp_path):
+        """write_worker_template should create the worker quadlet file."""
+        mocker.patch("ots_containers.quadlet.systemd.daemon_reload")
+        from ots_containers import quadlet
+        from ots_containers.config import Config
+
+        cfg = Config(
+            worker_template_path=tmp_path / "onetime-worker@.container",
+            var_dir=tmp_path / "var",
+        )
+
+        quadlet.write_worker_template(cfg)
+
+        assert cfg.worker_template_path.exists()
+
+    def test_write_worker_template_includes_image(self, mocker, tmp_path, monkeypatch):
+        """Worker quadlet should include Image from config."""
+        mocker.patch("ots_containers.quadlet.systemd.daemon_reload")
+        monkeypatch.setenv("IMAGE", "myregistry/myimage")
+        monkeypatch.setenv("TAG", "v1.0.0")
+
+        from ots_containers import quadlet
+        from ots_containers.config import Config
+
+        cfg = Config(
+            worker_template_path=tmp_path / "onetime-worker@.container",
+            var_dir=tmp_path / "var",
+        )
+
+        quadlet.write_worker_template(cfg)
+
+        content = cfg.worker_template_path.read_text()
+        assert "Image=myregistry/myimage:v1.0.0" in content
+
+    def test_write_worker_template_uses_host_network(self, mocker, tmp_path):
+        """Worker quadlet should use host networking."""
+        mocker.patch("ots_containers.quadlet.systemd.daemon_reload")
+        from ots_containers import quadlet
+        from ots_containers.config import Config
+
+        cfg = Config(
+            worker_template_path=tmp_path / "onetime-worker@.container",
+            var_dir=tmp_path / "var",
+        )
+
+        quadlet.write_worker_template(cfg)
+
+        content = cfg.worker_template_path.read_text()
+        assert "Network=host" in content
+
+    def test_write_worker_template_sets_worker_id_env_var(self, mocker, tmp_path):
+        """Worker quadlet should set WORKER_ID env var from instance."""
+        mocker.patch("ots_containers.quadlet.systemd.daemon_reload")
+        from ots_containers import quadlet
+        from ots_containers.config import Config
+
+        cfg = Config(
+            worker_template_path=tmp_path / "onetime-worker@.container",
+            var_dir=tmp_path / "var",
+        )
+
+        quadlet.write_worker_template(cfg)
+
+        content = cfg.worker_template_path.read_text()
+        assert "Environment=WORKER_ID=%i" in content
+
+    def test_write_worker_template_has_worker_exec(self, mocker, tmp_path):
+        """Worker quadlet should have worker-specific Exec directive."""
+        mocker.patch("ots_containers.quadlet.systemd.daemon_reload")
+        from ots_containers import quadlet
+        from ots_containers.config import Config
+
+        cfg = Config(
+            worker_template_path=tmp_path / "onetime-worker@.container",
+            var_dir=tmp_path / "var",
+        )
+
+        quadlet.write_worker_template(cfg)
+
+        content = cfg.worker_template_path.read_text()
+        assert "Exec=bin/entrypoint.sh bin/ots worker" in content
+
+    def test_write_worker_template_has_sneakers_health_check(self, mocker, tmp_path):
+        """Worker quadlet should check for sneakers process."""
+        mocker.patch("ots_containers.quadlet.systemd.daemon_reload")
+        from ots_containers import quadlet
+        from ots_containers.config import Config
+
+        cfg = Config(
+            worker_template_path=tmp_path / "onetime-worker@.container",
+            var_dir=tmp_path / "var",
+        )
+
+        quadlet.write_worker_template(cfg)
+
+        content = cfg.worker_template_path.read_text()
+        assert 'HealthCmd=pgrep -f "sneakers"' in content
+
+    def test_write_worker_template_has_timeout_stop_sec(self, mocker, tmp_path):
+        """Worker quadlet should have TimeoutStopSec for graceful shutdown."""
+        mocker.patch("ots_containers.quadlet.systemd.daemon_reload")
+        from ots_containers import quadlet
+        from ots_containers.config import Config
+
+        cfg = Config(
+            worker_template_path=tmp_path / "onetime-worker@.container",
+            var_dir=tmp_path / "var",
+        )
+
+        quadlet.write_worker_template(cfg)
+
+        content = cfg.worker_template_path.read_text()
+        assert "TimeoutStopSec=90" in content
+
+    def test_write_worker_template_no_static_assets_volume(self, mocker, tmp_path):
+        """Worker quadlet should NOT mount static_assets volume."""
+        mocker.patch("ots_containers.quadlet.systemd.daemon_reload")
+        from ots_containers import quadlet
+        from ots_containers.config import Config
+
+        cfg = Config(
+            worker_template_path=tmp_path / "onetime-worker@.container",
+            var_dir=tmp_path / "var",
+        )
+
+        quadlet.write_worker_template(cfg)
+
+        content = cfg.worker_template_path.read_text()
+        assert "static_assets" not in content
+
+    def test_write_worker_template_includes_environment_file(self, mocker, tmp_path):
+        """Worker quadlet should reference shared environment file."""
+        mocker.patch("ots_containers.quadlet.systemd.daemon_reload")
+        from ots_containers import quadlet
+        from ots_containers.config import Config
+
+        cfg = Config(
+            worker_template_path=tmp_path / "onetime-worker@.container",
+            var_dir=tmp_path / "var",
+        )
+
+        quadlet.write_worker_template(cfg)
+
+        content = cfg.worker_template_path.read_text()
+        assert "EnvironmentFile=/etc/default/onetimesecret" in content
+
+    def test_write_worker_template_includes_config_volume(self, mocker, tmp_path):
+        """Worker quadlet should mount config directory."""
+        mocker.patch("ots_containers.quadlet.systemd.daemon_reload")
+        from ots_containers import quadlet
+        from ots_containers.config import Config
+
+        config_dir = tmp_path / "etc"
+        cfg = Config(
+            worker_template_path=tmp_path / "onetime-worker@.container",
+            config_dir=config_dir,
+            var_dir=tmp_path / "var",
+        )
+
+        quadlet.write_worker_template(cfg)
+
+        content = cfg.worker_template_path.read_text()
+        assert f"Volume={config_dir}:/app/etc:ro" in content
+
+    def test_write_worker_template_includes_secrets(self, mocker, tmp_path):
+        """Worker quadlet should include Secret= directives from env file."""
+        mocker.patch("ots_containers.quadlet.systemd.daemon_reload")
+        from ots_containers import quadlet
+        from ots_containers.config import Config
+
+        # Create an env file with SECRET_VARIABLE_NAMES
+        env_file = tmp_path / "onetimesecret.env"
+        env_file.write_text(
+            "SECRET_VARIABLE_NAMES=API_KEY,DB_PASSWORD\n"
+            "_API_KEY=ots_api_key\n"
+            "_DB_PASSWORD=ots_db_password\n"
+        )
+
+        cfg = Config(
+            worker_template_path=tmp_path / "onetime-worker@.container",
+            var_dir=tmp_path / "var",
+        )
+
+        quadlet.write_worker_template(cfg, env_file_path=env_file)
+
+        content = cfg.worker_template_path.read_text()
+        assert "Secret=ots_api_key,type=env,target=API_KEY" in content
+        assert "Secret=ots_db_password,type=env,target=DB_PASSWORD" in content
+
+    def test_write_worker_template_reloads_daemon(self, mocker, tmp_path):
+        """write_worker_template should reload systemd daemon after writing."""
+        mock_reload = mocker.patch("ots_containers.quadlet.systemd.daemon_reload")
+        from ots_containers import quadlet
+        from ots_containers.config import Config
+
+        cfg = Config(
+            worker_template_path=tmp_path / "onetime-worker@.container",
+            var_dir=tmp_path / "var",
+        )
+
+        quadlet.write_worker_template(cfg)
 
         mock_reload.assert_called_once()
