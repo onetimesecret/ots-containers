@@ -68,6 +68,121 @@ def list_instances(ports: OptionalPorts = (), alias: str = "instances"):
 
 
 @app.command
+def run(
+    port: Annotated[
+        int,
+        cyclopts.Parameter(help="Port for the container"),
+    ],
+    detach: Annotated[
+        bool,
+        cyclopts.Parameter(
+            name=["--detach", "-d"],
+            help="Run container in background",
+        ),
+    ] = False,
+    rm: Annotated[
+        bool,
+        cyclopts.Parameter(
+            name=["--rm"],
+            help="Remove container when it exits",
+        ),
+    ] = True,
+    name: Annotated[
+        str | None,
+        cyclopts.Parameter(
+            name=["--name", "-n"],
+            help="Container name (default: onetimesecret-{port})",
+        ),
+    ] = None,
+    quiet: Annotated[
+        bool,
+        cyclopts.Parameter(name=["--quiet", "-q"], help="Don't print the command"),
+    ] = False,
+):
+    """Run a container directly with podman (no systemd).
+
+    Useful for quick testing without full deployment. Uses the same
+    configuration as deploy (env file, secrets, volumes).
+
+    Examples:
+        ots instance run 7143
+        ots instance run 7143 -d        # detached
+        ots instance run 7143 --no-rm   # keep container after exit
+    """
+    from ots_containers.environment_file import get_secrets_from_env_file
+
+    cfg = Config()
+
+    # Resolve image/tag
+    image, tag = cfg.resolve_image_tag()
+    full_image = f"{image}:{tag}"
+
+    # Container name
+    container_name = name or f"onetimesecret-{port}"
+
+    # Get secrets from env file
+    env_file = quadlet.DEFAULT_ENV_FILE
+    secrets = []
+    if env_file.exists():
+        secret_specs = get_secrets_from_env_file(env_file)
+        for spec in secret_specs:
+            secrets.append(f"{spec.secret_name},type=env,target={spec.env_var_name}")
+
+    # Build podman run command
+    cmd = ["podman", "run"]
+
+    if detach:
+        cmd.append("-d")
+    if rm:
+        cmd.append("--rm")
+
+    cmd.extend(["--name", container_name])
+    cmd.append("--network=host")
+    cmd.extend(["-e", f"PORT={port}"])
+
+    # Environment file
+    if env_file.exists():
+        cmd.extend(["--env-file", str(env_file)])
+
+    # Secrets
+    for secret in secrets:
+        cmd.extend(["--secret", secret])
+
+    # Volumes
+    cmd.extend(["-v", f"{cfg.config_dir}:/app/etc:ro"])
+    cmd.extend(["-v", "static_assets:/app/public:ro"])
+
+    # Auth file for private registry
+    if cfg.registry:
+        cmd.extend(["--authfile", str(cfg.registry_auth_file)])
+
+    # Image
+    cmd.append(full_image)
+
+    if not quiet:
+        # Print command (mask secrets)
+        display_cmd = " ".join(cmd)
+        print(f"$ {display_cmd}")
+        print()
+
+    # Run it
+    try:
+        if detach:
+            result = subprocess.run(cmd, check=True, capture_output=True, text=True)
+            print(f"Container started: {result.stdout.strip()[:12]}")
+        else:
+            # Foreground - let it take over the terminal
+            subprocess.run(cmd, check=True)
+    except subprocess.CalledProcessError as e:
+        print(f"Failed to run container: {e}")
+        if e.stderr:
+            print(e.stderr)
+        raise SystemExit(1)
+    except KeyboardInterrupt:
+        print("\nStopped")
+
+
+@app.command
 def deploy(
     ids: Annotated[
         tuple[str, ...],

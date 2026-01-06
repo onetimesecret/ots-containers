@@ -33,6 +33,11 @@ class TestInstanceImports:
         assert hasattr(instance, "undeploy")
         assert callable(instance.undeploy)
 
+    def test_run_function_exists(self):
+        """run command should be defined."""
+        assert hasattr(instance, "run")
+        assert callable(instance.run)
+
 
 class TestInstanceHelp:
     """Test instance command help output."""
@@ -56,6 +61,129 @@ class TestInstanceHelp:
         assert exc_info.value.code == 0
         captured = capsys.readouterr()
         assert "force" in captured.out.lower() or "redeploy" in captured.out.lower()
+
+    def test_instance_run_help(self, capsys):
+        """instance run --help should work."""
+        from ots_containers.cli import app
+
+        with pytest.raises(SystemExit) as exc_info:
+            app(["instance", "run", "--help"])
+        assert exc_info.value.code == 0
+        captured = capsys.readouterr()
+        assert "port" in captured.out.lower() or "run" in captured.out.lower()
+
+
+class TestRunCommand:
+    """Test run command for direct podman execution."""
+
+    def test_run_builds_correct_command(self, mocker, tmp_path):
+        """run should build correct podman command."""
+        import subprocess
+
+        # Mock Config
+        mock_config = mocker.MagicMock()
+        mock_config.resolve_image_tag.return_value = ("onetimesecret", "v0.23.0")
+        mock_config.config_dir = tmp_path / "etc"
+        mock_config.config_dir.mkdir()
+        mock_config.registry = None
+        mocker.patch("ots_containers.commands.instance.app.Config", return_value=mock_config)
+
+        # Mock env file not existing
+        mocker.patch(
+            "ots_containers.commands.instance.app.quadlet.DEFAULT_ENV_FILE",
+            tmp_path / "nonexistent",
+        )
+
+        # Mock subprocess.run
+        mock_run = mocker.patch("subprocess.run")
+        mock_run.return_value = subprocess.CompletedProcess([], 0, stdout="abc123")
+
+        # Call run command in detached mode
+        instance.run(port=7143, detach=True, quiet=True)
+
+        # Verify podman run was called
+        mock_run.assert_called_once()
+        cmd = mock_run.call_args[0][0]
+        assert cmd[0] == "podman"
+        assert cmd[1] == "run"
+        assert "-d" in cmd
+        assert "--rm" in cmd
+        assert "--network=host" in cmd
+        assert "onetimesecret:v0.23.0" in cmd
+
+    def test_run_includes_secrets_from_env_file(self, mocker, tmp_path):
+        """run should include secrets from env file."""
+        import subprocess
+
+        # Mock Config
+        mock_config = mocker.MagicMock()
+        mock_config.resolve_image_tag.return_value = ("onetimesecret", "latest")
+        mock_config.config_dir = tmp_path / "etc"
+        mock_config.config_dir.mkdir()
+        mock_config.registry = None
+        mocker.patch("ots_containers.commands.instance.app.Config", return_value=mock_config)
+
+        # Create env file with secrets
+        env_file = tmp_path / "onetimesecret"
+        env_file.write_text("SECRET_VARIABLE_NAMES=HMAC_SECRET,API_KEY\n")
+        mocker.patch(
+            "ots_containers.commands.instance.app.quadlet.DEFAULT_ENV_FILE",
+            env_file,
+        )
+
+        # Mock get_secrets_from_env_file (imported inside run function)
+        from ots_containers.environment_file import SecretSpec
+
+        mock_secrets = [
+            SecretSpec(env_var_name="HMAC_SECRET", secret_name="ots_hmac_secret"),
+            SecretSpec(env_var_name="API_KEY", secret_name="ots_api_key"),
+        ]
+        mocker.patch(
+            "ots_containers.environment_file.get_secrets_from_env_file",
+            return_value=mock_secrets,
+        )
+
+        # Mock subprocess.run
+        mock_run = mocker.patch("subprocess.run")
+        mock_run.return_value = subprocess.CompletedProcess([], 0, stdout="abc123")
+
+        # Call run command
+        instance.run(port=7143, detach=True, quiet=True)
+
+        # Verify secrets were included
+        cmd = mock_run.call_args[0][0]
+        cmd_str = " ".join(cmd)
+        assert "--secret" in cmd_str
+        assert "ots_hmac_secret" in cmd_str
+
+    def test_run_prints_command_when_not_quiet(self, mocker, tmp_path, capsys):
+        """run should print command when not in quiet mode."""
+        import subprocess
+
+        # Mock Config
+        mock_config = mocker.MagicMock()
+        mock_config.resolve_image_tag.return_value = ("onetimesecret", "latest")
+        mock_config.config_dir = tmp_path / "etc"
+        mock_config.config_dir.mkdir()
+        mock_config.registry = None
+        mocker.patch("ots_containers.commands.instance.app.Config", return_value=mock_config)
+
+        # Mock env file not existing
+        mocker.patch(
+            "ots_containers.commands.instance.app.quadlet.DEFAULT_ENV_FILE",
+            tmp_path / "nonexistent",
+        )
+
+        # Mock subprocess.run
+        mock_run = mocker.patch("subprocess.run")
+        mock_run.return_value = subprocess.CompletedProcess([], 0, stdout="abc123")
+
+        # Call run command without quiet
+        instance.run(port=7143, detach=True, quiet=False)
+
+        # Verify command was printed
+        captured = capsys.readouterr()
+        assert "$ podman run" in captured.out
 
 
 class TestDeployCommand:
