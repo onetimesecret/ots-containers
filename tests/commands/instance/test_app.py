@@ -111,6 +111,7 @@ class TestRunCommand:
 
         # Mock Config
         mock_config = mocker.MagicMock()
+        mock_config.tag = "v0.23.0"  # Default uses local image with cfg.tag
         mock_config.resolve_image_tag.return_value = ("onetimesecret", "v0.23.0")
         mock_config.config_dir = tmp_path / "etc"
         mock_config.config_dir.mkdir()
@@ -137,7 +138,8 @@ class TestRunCommand:
         assert cmd[1] == "run"
         assert "-d" in cmd
         assert "--rm" in cmd
-        assert "--network=host" in cmd
+        assert "-p" in cmd
+        assert "7143:7143" in cmd
         assert "onetimesecret:v0.23.0" in cmd
 
     def test_run_includes_secrets_with_production_flag(self, mocker, tmp_path):
@@ -269,6 +271,78 @@ class TestRunCommand:
         cmd_str = " ".join(cmd)
         assert "v0.19.0" in cmd_str
         assert "current" not in cmd_str
+
+    def test_run_defaults_to_local_image(self, mocker, tmp_path):
+        """run should use local image by default (no --remote flag)."""
+        import subprocess
+
+        # Mock Config
+        mock_config = mocker.MagicMock()
+        mock_config.image = "ghcr.io/onetimesecret/onetimesecret"
+        mock_config.tag = "latest"
+        mock_config.resolve_image_tag.return_value = (
+            "ghcr.io/onetimesecret/onetimesecret",
+            "latest",
+        )
+        mock_config.config_dir = tmp_path / "etc"
+        mock_config.config_dir.mkdir()
+        mock_config.registry = None
+        mocker.patch("ots_containers.commands.instance.app.Config", return_value=mock_config)
+
+        # Mock env file not existing
+        mocker.patch(
+            "ots_containers.commands.instance.app.quadlet.DEFAULT_ENV_FILE",
+            tmp_path / "nonexistent",
+        )
+
+        # Mock subprocess.run
+        mock_run = mocker.patch("subprocess.run")
+        mock_run.return_value = subprocess.CompletedProcess([], 0, stdout="abc123")
+
+        # Call run with --tag (default is local)
+        instance.run(port=7143, detach=True, quiet=True, tag="plop-2")
+
+        # Verify local image was used
+        cmd = mock_run.call_args[0][0]
+        cmd_str = " ".join(cmd)
+        assert "onetimesecret:plop-2" in cmd_str
+        # Should NOT include ghcr.io prefix
+        assert "ghcr.io" not in cmd_str
+
+    def test_run_with_remote_flag_uses_registry(self, mocker, tmp_path):
+        """run --remote should pull from registry instead of local."""
+        import subprocess
+
+        # Mock Config
+        mock_config = mocker.MagicMock()
+        mock_config.image = "ghcr.io/onetimesecret/onetimesecret"
+        mock_config.tag = "v0.23.0"
+        mock_config.resolve_image_tag.return_value = (
+            "ghcr.io/onetimesecret/onetimesecret",
+            "v0.23.0",
+        )
+        mock_config.config_dir = tmp_path / "etc"
+        mock_config.config_dir.mkdir()
+        mock_config.registry = None
+        mocker.patch("ots_containers.commands.instance.app.Config", return_value=mock_config)
+
+        # Mock env file not existing
+        mocker.patch(
+            "ots_containers.commands.instance.app.quadlet.DEFAULT_ENV_FILE",
+            tmp_path / "nonexistent",
+        )
+
+        # Mock subprocess.run
+        mock_run = mocker.patch("subprocess.run")
+        mock_run.return_value = subprocess.CompletedProcess([], 0, stdout="abc123")
+
+        # Call run with --remote
+        instance.run(port=7143, detach=True, quiet=True, remote=True)
+
+        # Verify registry image was used
+        cmd = mock_run.call_args[0][0]
+        cmd_str = " ".join(cmd)
+        assert "ghcr.io/onetimesecret/onetimesecret:v0.23.0" in cmd_str
 
 
 class TestDeployCommand:

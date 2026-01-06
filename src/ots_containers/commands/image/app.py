@@ -651,11 +651,23 @@ def _is_dev_version(version: str) -> bool:
     return False
 
 
-def _get_git_hash(project_dir: Path) -> str:
-    """Get short git commit hash from project directory."""
+def _get_git_hash(project_dir: Path, required: bool = True) -> str | None:
+    """Get short git commit hash from project directory, with dirty indicator.
+
+    Returns an 8-char hash with '*' suffix if there are uncommitted changes.
+
+    Args:
+        project_dir: Path to the git repository
+        required: If True, raise SystemExit on failure. If False, return None.
+
+    Returns:
+        Git hash (e.g., 'a1b2c3d4' or 'a1b2c3d4*' if dirty),
+        or None if not available and required=False
+    """
     import subprocess
 
     try:
+        # Get the short commit hash
         result = subprocess.run(
             ["git", "rev-parse", "--short=8", "HEAD"],
             cwd=project_dir,
@@ -663,9 +675,22 @@ def _get_git_hash(project_dir: Path) -> str:
             text=True,
             check=True,
         )
-        return result.stdout.strip()
+        commit_hash = result.stdout.strip()
+
+        # Check for dirty working tree (uncommitted or untracked changes)
+        status = subprocess.run(
+            ["git", "status", "--porcelain"],
+            cwd=project_dir,
+            capture_output=True,
+            text=True,
+        )
+        dirty = "*" if status.stdout.strip() else ""
+
+        return f"{commit_hash}{dirty}"
     except subprocess.CalledProcessError as e:
-        raise SystemExit(f"Failed to get git hash: {e.stderr}") from e
+        if required:
+            raise SystemExit(f"Failed to get git hash: {e.stderr}") from e
+        return None
 
 
 def _read_package_version(project_dir: Path) -> str:
@@ -709,16 +734,17 @@ def _determine_build_tag(project_dir: Path, override_tag: str | None) -> str:
         return f"v{version}"
 
 
-def _validate_project_dir(project_dir: Path) -> None:
+def _validate_project_dir(project_dir: Path, skip_dockerfile_check: bool = False) -> None:
     """Validate that project directory has required build files."""
     if not project_dir.is_dir():
         raise SystemExit(f"Project directory not found: {project_dir}")
 
-    has_containerfile = (project_dir / "Containerfile").exists()
-    has_dockerfile = (project_dir / "Dockerfile").exists()
+    if not skip_dockerfile_check:
+        has_containerfile = (project_dir / "Containerfile").exists()
+        has_dockerfile = (project_dir / "Dockerfile").exists()
 
-    if not has_containerfile and not has_dockerfile:
-        raise SystemExit(f"No Containerfile or Dockerfile found in {project_dir}")
+        if not has_containerfile and not has_dockerfile:
+            raise SystemExit(f"No Containerfile or Dockerfile found in {project_dir}")
 
     if not (project_dir / "package.json").exists():
         raise SystemExit(f"No package.json found in {project_dir}")
@@ -731,6 +757,27 @@ def build(
         cyclopts.Parameter(
             name=["--project-dir", "-d"],
             help="Path to onetimesecret checkout (default: current directory)",
+        ),
+    ] = None,
+    dockerfile: Annotated[
+        str | None,
+        cyclopts.Parameter(
+            name=["--dockerfile", "-f"],
+            help="Path to Dockerfile relative to project dir (auto-detects by default)",
+        ),
+    ] = None,
+    target: Annotated[
+        str | None,
+        cyclopts.Parameter(
+            name=["--target"],
+            help="Build target stage for multi-stage builds (e.g., 'final-s6')",
+        ),
+    ] = None,
+    suffix: Annotated[
+        str | None,
+        cyclopts.Parameter(
+            name=["--suffix"],
+            help="Image name suffix (e.g., '-lite', '-s6')",
         ),
     ] = None,
     platform: Annotated[
@@ -775,10 +822,17 @@ def build(
     versions (0.0.0, -rc0, -dev, -alpha, -beta), appends git hash.
 
     Examples:
+        # Standard build
         ots image build --project-dir ~/src/onetimesecret
-        ots image build -d . --platform linux/amd64
+
+        # Build lite variant
+        ots image build -d . -f docker/variants/lite.dockerfile --suffix -lite
+
+        # Build s6 multi-process variant
+        ots image build -d . --target final-s6 --suffix -s6
+
+        # Build and push to registry
         ots image build -d . --push --registry registry.example.com
-        ots image build -d . --tag v0.23.0-custom
     """
     cfg = Config()
 
@@ -786,31 +840,66 @@ def build(
     proj_dir = Path(project_dir) if project_dir else Path.cwd()
     proj_dir = proj_dir.resolve()
 
-    # Validate project structure
-    _validate_project_dir(proj_dir)
+    # Validate project structure (skip dockerfile check if custom dockerfile specified)
+    _validate_project_dir(proj_dir, skip_dockerfile_check=dockerfile is not None)
+
+    # Resolve dockerfile path
+    if dockerfile:
+        dockerfile_path = proj_dir / dockerfile
+        if not dockerfile_path.exists():
+            raise SystemExit(f"Dockerfile not found: {dockerfile_path}")
+    else:
+        dockerfile_path = None  # Let podman auto-detect
 
     # Determine build tag
     build_tag = _determine_build_tag(proj_dir, tag)
 
-    # Local image name
-    local_image = f"onetimesecret:{build_tag}"
+    # Get git hash and version for build args (used by Dockerfile)
+    git_hash = _get_git_hash(proj_dir, required=False)
+    pkg_version = _read_package_version(proj_dir)
+
+    # Image name with optional suffix
+    image_name = f"onetimesecret{suffix or ''}"
+    local_image = f"{image_name}:{build_tag}"
 
     if not quiet:
         print(f"Building {local_image}")
         print(f"  Project: {proj_dir}")
+        if dockerfile:
+            print(f"  Dockerfile: {dockerfile}")
+        if target:
+            print(f"  Target: {target}")
         print(f"  Platform: {platform}")
+        print(f"  Version: {pkg_version}")
+        print(f"  Commit: {git_hash or 'N/A (no git)'}")
 
     # Build the image
     try:
-        # Use buildx for multi-platform builds
-        podman.buildx.build(
-            str(proj_dir),
-            platform=platform,
-            tag=local_image,
-            check=True,
-            capture_output=quiet,
-            text=True,
-        )
+        # Pass VERSION and COMMIT_HASH for the Dockerfile to embed in the image
+        build_args = [f"VERSION={pkg_version}"]
+        if git_hash:
+            build_args.append(f"COMMIT_HASH={git_hash}")
+
+        # Build kwargs
+        build_kwargs: dict = {
+            "platform": platform,
+            "tag": local_image,
+            "build_arg": build_args,
+            "check": True,
+            "capture_output": quiet,
+            "text": True,
+        }
+
+        # Add optional dockerfile path
+        if dockerfile_path:
+            build_kwargs["file"] = str(dockerfile_path)
+
+        # Add optional target stage
+        if target:
+            build_kwargs["target"] = target
+
+        podman.buildx.build(str(proj_dir), **build_kwargs)
+
         if not quiet:
             print(f"Successfully built {local_image}")
     except Exception as e:
@@ -820,10 +909,11 @@ def build(
     # Record the build action
     db.record_deployment(
         cfg.db_path,
-        image="onetimesecret",
+        image=image_name,
         tag=build_tag,
         action="build",
         success=True,
+        notes=f"target={target}" if target else None,
     )
 
     # Push if requested
@@ -834,7 +924,7 @@ def build(
             print("Error: --push requires --registry or OTS_REGISTRY env var")
             raise SystemExit(1)
 
-        target_image = f"{reg}/onetimesecret:{build_tag}"
+        target_image = f"{reg}/{image_name}:{build_tag}"
 
         if not quiet:
             print(f"Tagging {local_image} -> {target_image}")
@@ -873,7 +963,7 @@ def build(
         # Record the push
         db.record_deployment(
             cfg.db_path,
-            image=f"{reg}/onetimesecret",
+            image=f"{reg}/{image_name}",
             tag=build_tag,
             action="push",
             success=True,

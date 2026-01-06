@@ -112,27 +112,42 @@ def run(
             help="Image tag to run (default: from TAG env or 'current' alias)",
         ),
     ] = None,
+    remote: Annotated[
+        bool,
+        cyclopts.Parameter(
+            name=["--remote", "-r"],
+            help="Pull from registry instead of using local image",
+        ),
+    ] = False,
 ):
     """Run a container directly with podman (no systemd).
 
-    By default runs with minimal config for quick testing.
+    By default uses local images (from 'ots image build').
     If .env exists in current directory, it will be used.
+    Use --remote to pull from registry instead.
     Use --production to include system env file, secrets, and volumes.
 
     Examples:
-        ots instance run 7143              # quick test (uses .env if present)
-        ots instance run 7143 -d           # detached
-        ots instance run 7143 --tag v0.19.0  # specific tag
-        ots instance run 7143 --production # full production config
+        ots instance run 7143 --tag plop-2   # local build (default)
+        ots instance run 7143 -d             # detached
+        ots instance run 7143 --remote --tag v0.19.0  # from registry
+        ots instance run 7143 --production   # full production config
     """
     cfg = Config()
 
-    # Resolve image/tag (--tag overrides config)
-    if tag:
-        image = cfg.image
-        resolved_tag = tag
+    # Resolve image/tag
+    # Default: local images (from 'ots image build')
+    # --remote: pull from registry (ghcr.io or OTS_REGISTRY)
+    if remote:
+        if tag:
+            image = cfg.image
+            resolved_tag = tag
+        else:
+            image, resolved_tag = cfg.resolve_image_tag()
     else:
-        image, resolved_tag = cfg.resolve_image_tag()
+        # Local is the default
+        image = "onetimesecret"  # localhost/onetimesecret
+        resolved_tag = tag or cfg.tag
     full_image = f"{image}:{resolved_tag}"
 
     # Container name
@@ -147,7 +162,7 @@ def run(
         cmd.append("--rm")
 
     cmd.extend(["--name", container_name])
-    cmd.append("--network=host")
+    cmd.extend(["-p", f"{port}:{port}"])
     cmd.extend(["-e", f"PORT={port}"])
 
     # Check for local .env file in current directory

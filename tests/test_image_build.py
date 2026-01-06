@@ -92,28 +92,34 @@ class TestReadPackageVersion:
 
 
 class TestGetGitHash:
-    """Test git hash retrieval."""
+    """Test git hash retrieval with dirty indicator."""
 
-    def test_gets_short_hash(self, mocker, tmp_path):
-        """Should return 8-character git hash."""
+    def test_gets_short_hash_clean(self, mocker, tmp_path):
+        """Should return 8-character git hash for clean working tree."""
         mock_run = mocker.patch("subprocess.run")
-        mock_run.return_value = subprocess.CompletedProcess(
-            args=[],
-            returncode=0,
-            stdout="a1b2c3d4\n",
-            stderr="",
-        )
+        # First call: git rev-parse, Second call: git status (clean)
+        mock_run.side_effect = [
+            subprocess.CompletedProcess([], 0, stdout="a1b2c3d4\n", stderr=""),
+            subprocess.CompletedProcess([], 0, stdout="", stderr=""),  # Clean
+        ]
 
         result = _get_git_hash(tmp_path)
 
         assert result == "a1b2c3d4"
-        mock_run.assert_called_once_with(
-            ["git", "rev-parse", "--short=8", "HEAD"],
-            cwd=tmp_path,
-            capture_output=True,
-            text=True,
-            check=True,
-        )
+        assert mock_run.call_count == 2
+
+    def test_gets_hash_with_dirty_indicator(self, mocker, tmp_path):
+        """Should return git hash with * suffix when working tree is dirty."""
+        mock_run = mocker.patch("subprocess.run")
+        # First call: git rev-parse, Second call: git status (dirty)
+        mock_run.side_effect = [
+            subprocess.CompletedProcess([], 0, stdout="a1b2c3d4\n", stderr=""),
+            subprocess.CompletedProcess([], 0, stdout="M file.txt\n", stderr=""),  # Dirty
+        ]
+
+        result = _get_git_hash(tmp_path)
+
+        assert result == "a1b2c3d4*"
 
     def test_exits_on_git_failure(self, mocker, tmp_path):
         """Should exit with error message on git failure."""
@@ -195,12 +201,11 @@ class TestDetermineBuildTag:
         (tmp_path / "package.json").write_text('{"version": "0.0.0-rc0"}')
 
         mock_run = mocker.patch("subprocess.run")
-        mock_run.return_value = subprocess.CompletedProcess(
-            args=[],
-            returncode=0,
-            stdout="deadbeef\n",
-            stderr="",
-        )
+        # First call: git rev-parse, Second call: git status (clean)
+        mock_run.side_effect = [
+            subprocess.CompletedProcess([], 0, stdout="deadbeef\n", stderr=""),
+            subprocess.CompletedProcess([], 0, stdout="", stderr=""),  # Clean
+        ]
 
         tag = _determine_build_tag(tmp_path, None)
         assert tag == "v0.0.0-rc0-deadbeef"

@@ -32,9 +32,13 @@ class TestBuildVersionDetection:
         var_dir = tmp_path / "var"
         var_dir.mkdir()
 
-        # Mock subprocess.run for podman buildx
-        mock_run = mocker.patch("subprocess.run")
-        mock_run.return_value = subprocess.CompletedProcess([], 0)
+        # Mock subprocess.run for git and podman
+        def mock_run_factory(cmd, *args, **kwargs):
+            if "git" in cmd:
+                return subprocess.CompletedProcess(cmd, 0, stdout="abc12345\n", stderr="")
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+        mock_run = mocker.patch("subprocess.run", side_effect=mock_run_factory)
 
         # Mock Config
         mocker.patch(
@@ -71,15 +75,15 @@ class TestBuildVersionDetection:
         var_dir = tmp_path / "var"
         var_dir.mkdir()
 
-        # Mock git rev-parse to return a commit hash
+        # Mock git rev-parse and status to return a commit hash
         git_hash = "abc12345"
 
         def mock_run_side_effect(cmd, *args, **kwargs):
             if "git" in cmd and "rev-parse" in cmd:
-                result = subprocess.CompletedProcess(cmd, 0)
-                result.stdout = git_hash + "\n"
-                return result
-            return subprocess.CompletedProcess(cmd, 0)
+                return subprocess.CompletedProcess(cmd, 0, stdout=git_hash + "\n", stderr="")
+            if "git" in cmd and "status" in cmd:
+                return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")  # Clean
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
 
         mock_run = mocker.patch("subprocess.run", side_effect=mock_run_side_effect)
 
@@ -97,7 +101,7 @@ class TestBuildVersionDetection:
 
         # Verify the git hash was used in the tag
         calls = [str(call) for call in mock_run.call_args_list]
-        # Should have both git rev-parse and buildx calls
+        # Should have git rev-parse, status, and buildx calls
         assert any("rev-parse" in c for c in calls)
         buildx_calls = [c for c in calls if "buildx" in c]
         assert len(buildx_calls) >= 1
@@ -159,8 +163,12 @@ class TestBuildPodmanInvocation:
         var_dir = tmp_path / "var"
         var_dir.mkdir()
 
-        mock_run = mocker.patch("subprocess.run")
-        mock_run.return_value = subprocess.CompletedProcess([], 0)
+        def mock_run_factory(cmd, *args, **kwargs):
+            if "git" in cmd:
+                return subprocess.CompletedProcess(cmd, 0, stdout="abc12345\n", stderr="")
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+        mock_run = mocker.patch("subprocess.run", side_effect=mock_run_factory)
 
         mocker.patch(
             "ots_containers.commands.image.app.Config",
@@ -196,8 +204,12 @@ class TestBuildPodmanInvocation:
         var_dir = tmp_path / "var"
         var_dir.mkdir()
 
-        mock_run = mocker.patch("subprocess.run")
-        mock_run.return_value = subprocess.CompletedProcess([], 0)
+        def mock_run_factory(cmd, *args, **kwargs):
+            if "git" in cmd:
+                return subprocess.CompletedProcess(cmd, 0, stdout="abc12345\n", stderr="")
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+        mocker.patch("subprocess.run", side_effect=mock_run_factory)
 
         mocker.patch(
             "ots_containers.commands.image.app.Config",
@@ -229,8 +241,12 @@ class TestBuildPodmanInvocation:
         var_dir = tmp_path / "var"
         var_dir.mkdir()
 
-        mock_run = mocker.patch("subprocess.run")
-        mock_run.return_value = subprocess.CompletedProcess([], 0)
+        def mock_run_factory(cmd, *args, **kwargs):
+            if "git" in cmd:
+                return subprocess.CompletedProcess(cmd, 0, stdout="abc12345\n", stderr="")
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+        mock_run = mocker.patch("subprocess.run", side_effect=mock_run_factory)
 
         mocker.patch(
             "ots_containers.commands.image.app.Config",
@@ -263,8 +279,12 @@ class TestBuildPodmanInvocation:
         var_dir = tmp_path / "var"
         var_dir.mkdir()
 
-        mock_run = mocker.patch("subprocess.run")
-        mock_run.return_value = subprocess.CompletedProcess([], 0)
+        def mock_run_factory(cmd, *args, **kwargs):
+            if "git" in cmd:
+                return subprocess.CompletedProcess(cmd, 0, stdout="abc12345\n", stderr="")
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+        mock_run = mocker.patch("subprocess.run", side_effect=mock_run_factory)
 
         mocker.patch(
             "ots_containers.commands.image.app.Config",
@@ -300,8 +320,12 @@ class TestBuildPodmanInvocation:
         var_dir = tmp_path / "var"
         var_dir.mkdir()
 
-        mock_run = mocker.patch("subprocess.run")
-        mock_run.return_value = subprocess.CompletedProcess([], 0)
+        def mock_run_factory(cmd, *args, **kwargs):
+            if "git" in cmd:
+                return subprocess.CompletedProcess(cmd, 0, stdout="abc12345\n", stderr="")
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+        mock_run = mocker.patch("subprocess.run", side_effect=mock_run_factory)
 
         mocker.patch(
             "ots_containers.commands.image.app.Config",
@@ -345,8 +369,12 @@ class TestBuildDefaultBehavior:
         # Change to the project directory
         monkeypatch.chdir(project_dir)
 
-        mock_run = mocker.patch("subprocess.run")
-        mock_run.return_value = subprocess.CompletedProcess([], 0)
+        def mock_run_factory(cmd, *args, **kwargs):
+            if "git" in cmd:
+                return subprocess.CompletedProcess(cmd, 0, stdout="abc12345\n", stderr="")
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+        mock_run = mocker.patch("subprocess.run", side_effect=mock_run_factory)
 
         mocker.patch(
             "ots_containers.commands.image.app.Config",
@@ -377,8 +405,12 @@ class TestBuildDefaultBehavior:
         var_dir = tmp_path / "var"
         var_dir.mkdir()
 
-        mock_run = mocker.patch("subprocess.run")
-        mock_run.return_value = subprocess.CompletedProcess([], 0)
+        def mock_run_factory(cmd, *args, **kwargs):
+            if "git" in cmd:
+                return subprocess.CompletedProcess(cmd, 0, stdout="abc12345\n", stderr="")
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+        mock_run = mocker.patch("subprocess.run", side_effect=mock_run_factory)
 
         mocker.patch(
             "ots_containers.commands.image.app.Config",
@@ -415,8 +447,12 @@ class TestBuildDefaultBehavior:
         var_dir = tmp_path / "var"
         var_dir.mkdir()
 
-        mock_run = mocker.patch("subprocess.run")
-        mock_run.return_value = subprocess.CompletedProcess([], 0)
+        def mock_run_factory(cmd, *args, **kwargs):
+            if "git" in cmd:
+                return subprocess.CompletedProcess(cmd, 0, stdout="abc12345\n", stderr="")
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+        mock_run = mocker.patch("subprocess.run", side_effect=mock_run_factory)
 
         mocker.patch(
             "ots_containers.commands.image.app.Config",
@@ -502,3 +538,174 @@ class TestBuildErrorHandling:
         with pytest.raises(SystemExit) as exc:
             build(project_dir=project_dir)
         assert "No 'version' field" in str(exc.value)
+
+
+class TestBuildVariants:
+    """Test building image variants (lite, s6)."""
+
+    def test_build_lite_variant_with_custom_dockerfile(self, mocker, tmp_path):
+        """build -f docker/variants/lite.dockerfile --suffix -lite should work."""
+        project_dir = tmp_path / "onetimesecret"
+        project_dir.mkdir()
+
+        package_json = project_dir / "package.json"
+        package_json.write_text(json.dumps({"version": "0.25.0"}))
+
+        # Create the lite dockerfile in a subdirectory
+        docker_dir = project_dir / "docker" / "variants"
+        docker_dir.mkdir(parents=True)
+        lite_dockerfile = docker_dir / "lite.dockerfile"
+        lite_dockerfile.write_text("FROM ruby:3.2-slim\n")
+
+        var_dir = tmp_path / "var"
+        var_dir.mkdir()
+
+        def mock_run_factory(cmd, *args, **kwargs):
+            if "git" in cmd:
+                return subprocess.CompletedProcess(cmd, 0, stdout="abc12345\n", stderr="")
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+        mock_run = mocker.patch("subprocess.run", side_effect=mock_run_factory)
+
+        mocker.patch(
+            "ots_containers.commands.image.app.Config",
+            return_value=mocker.Mock(
+                db_path=var_dir / "deployments.db",
+                registry=None,
+                registry_auth_file=tmp_path / "auth.json",
+            ),
+        )
+        mocker.patch("ots_containers.commands.image.app.db.record_deployment")
+
+        build(
+            project_dir=project_dir,
+            dockerfile="docker/variants/lite.dockerfile",
+            suffix="-lite",
+            quiet=True,
+        )
+
+        mock_run.assert_called()
+        call_args = mock_run.call_args[0][0]
+
+        # Should include --file flag
+        assert "--file" in call_args
+        file_idx = call_args.index("--file")
+        assert "lite.dockerfile" in call_args[file_idx + 1]
+
+        # Should use -lite suffix in image name
+        assert "--tag" in call_args
+        tag_idx = call_args.index("--tag")
+        assert "onetimesecret-lite:" in call_args[tag_idx + 1]
+
+    def test_build_s6_variant_with_target(self, mocker, tmp_path):
+        """build --target final-s6 --suffix -s6 should work."""
+        project_dir = tmp_path / "onetimesecret"
+        project_dir.mkdir()
+
+        package_json = project_dir / "package.json"
+        package_json.write_text(json.dumps({"version": "0.25.0"}))
+
+        # Main Dockerfile with multi-stage
+        dockerfile = project_dir / "Dockerfile"
+        dockerfile.write_text("FROM ruby:3.2 AS base\nFROM base AS final-s6\n")
+
+        var_dir = tmp_path / "var"
+        var_dir.mkdir()
+
+        def mock_run_factory(cmd, *args, **kwargs):
+            if "git" in cmd:
+                return subprocess.CompletedProcess(cmd, 0, stdout="abc12345\n", stderr="")
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+        mock_run = mocker.patch("subprocess.run", side_effect=mock_run_factory)
+
+        mocker.patch(
+            "ots_containers.commands.image.app.Config",
+            return_value=mocker.Mock(
+                db_path=var_dir / "deployments.db",
+                registry=None,
+                registry_auth_file=tmp_path / "auth.json",
+            ),
+        )
+        mocker.patch("ots_containers.commands.image.app.db.record_deployment")
+
+        build(
+            project_dir=project_dir,
+            target="final-s6",
+            suffix="-s6",
+            quiet=True,
+        )
+
+        mock_run.assert_called()
+        call_args = mock_run.call_args[0][0]
+
+        # Should include --target flag
+        assert "--target" in call_args
+        target_idx = call_args.index("--target")
+        assert call_args[target_idx + 1] == "final-s6"
+
+        # Should use -s6 suffix in image name
+        assert "--tag" in call_args
+        tag_idx = call_args.index("--tag")
+        assert "onetimesecret-s6:" in call_args[tag_idx + 1]
+
+    def test_build_custom_dockerfile_not_found(self, mocker, tmp_path):
+        """build with non-existent dockerfile should error."""
+        project_dir = tmp_path / "onetimesecret"
+        project_dir.mkdir()
+
+        package_json = project_dir / "package.json"
+        package_json.write_text(json.dumps({"version": "0.25.0"}))
+
+        # No Dockerfile created
+
+        with pytest.raises(SystemExit) as exc:
+            build(
+                project_dir=project_dir,
+                dockerfile="nonexistent.dockerfile",
+            )
+        assert "Dockerfile not found" in str(exc.value)
+
+    def test_build_variant_push_with_suffix(self, mocker, tmp_path):
+        """build --push with suffix should push suffixed image name."""
+        project_dir = tmp_path / "onetimesecret"
+        project_dir.mkdir()
+
+        package_json = project_dir / "package.json"
+        package_json.write_text(json.dumps({"version": "0.25.0"}))
+
+        dockerfile = project_dir / "Dockerfile"
+        dockerfile.write_text("FROM ruby:3.2\n")
+
+        var_dir = tmp_path / "var"
+        var_dir.mkdir()
+
+        def mock_run_factory(cmd, *args, **kwargs):
+            if "git" in cmd:
+                return subprocess.CompletedProcess(cmd, 0, stdout="abc12345\n", stderr="")
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+        mock_run = mocker.patch("subprocess.run", side_effect=mock_run_factory)
+
+        mocker.patch(
+            "ots_containers.commands.image.app.Config",
+            return_value=mocker.Mock(
+                db_path=var_dir / "deployments.db",
+                registry="registry.example.com",
+                registry_auth_file=tmp_path / "auth.json",
+            ),
+        )
+        mocker.patch("ots_containers.commands.image.app.db.record_deployment")
+
+        build(
+            project_dir=project_dir,
+            suffix="-lite",
+            push=True,
+            quiet=True,
+        )
+
+        # Verify the push command uses suffixed image name
+        calls = [str(call) for call in mock_run.call_args_list]
+        push_calls = [c for c in calls if "push" in c]
+        assert len(push_calls) >= 1
+        assert any("onetimesecret-lite" in c for c in push_calls)
