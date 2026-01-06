@@ -13,6 +13,7 @@ Maintains CURRENT and ROLLBACK aliases in SQLite database for:
   - Full audit trail
 """
 
+from pathlib import Path
 from typing import Annotated
 
 import cyclopts
@@ -547,3 +548,259 @@ def logout(
         print(f"Logged out from {reg}")
     except Exception as e:
         print(f"Logout failed: {e}")
+
+
+# --- Build Commands ---
+
+
+def _is_dev_version(version: str) -> bool:
+    """Check if version is a development placeholder.
+
+    Returns True for versions that should include git hash:
+    - Starts with 0.0.0
+    - Ends with -rc0, -dev, -alpha, -beta
+    """
+    import re
+
+    if re.match(r"^0\.0\.0", version):
+        return True
+    if re.search(r"-(rc0|dev|alpha|beta)$", version):
+        return True
+    return False
+
+
+def _get_git_hash(project_dir: Path) -> str:
+    """Get short git commit hash from project directory."""
+    import subprocess
+
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--short=8", "HEAD"],
+            cwd=project_dir,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        return result.stdout.strip()
+    except subprocess.CalledProcessError as e:
+        raise SystemExit(f"Failed to get git hash: {e.stderr}") from e
+
+
+def _read_package_version(project_dir: Path) -> str:
+    """Read version from package.json in project directory."""
+    import json
+
+    package_json = project_dir / "package.json"
+    if not package_json.exists():
+        raise SystemExit(f"package.json not found in {project_dir}")
+
+    try:
+        with package_json.open() as f:
+            data = json.load(f)
+        version = data.get("version")
+        if not version:
+            raise SystemExit("No 'version' field in package.json")
+        return version
+    except json.JSONDecodeError as e:
+        raise SystemExit(f"Invalid package.json: {e}") from e
+
+
+def _determine_build_tag(project_dir: Path, override_tag: str | None) -> str:
+    """Determine the build tag based on version and git state.
+
+    Logic:
+    1. If override_tag provided, use it as-is
+    2. Read version from package.json
+    3. If version is a dev placeholder (0.0.0*, -rc0, -dev, -alpha, -beta):
+       - Append git hash: v{version}-{hash}
+    4. Otherwise use version directly: v{version}
+    """
+    if override_tag:
+        return override_tag
+
+    version = _read_package_version(project_dir)
+
+    if _is_dev_version(version):
+        git_hash = _get_git_hash(project_dir)
+        return f"v{version}-{git_hash}"
+    else:
+        return f"v{version}"
+
+
+def _validate_project_dir(project_dir: Path) -> None:
+    """Validate that project directory has required build files."""
+    if not project_dir.is_dir():
+        raise SystemExit(f"Project directory not found: {project_dir}")
+
+    has_containerfile = (project_dir / "Containerfile").exists()
+    has_dockerfile = (project_dir / "Dockerfile").exists()
+
+    if not has_containerfile and not has_dockerfile:
+        raise SystemExit(f"No Containerfile or Dockerfile found in {project_dir}")
+
+    if not (project_dir / "package.json").exists():
+        raise SystemExit(f"No package.json found in {project_dir}")
+
+
+@app.command
+def build(
+    project_dir: Annotated[
+        Path | None,
+        cyclopts.Parameter(
+            name=["--project-dir", "-d"],
+            help="Path to onetimesecret checkout (default: current directory)",
+        ),
+    ] = None,
+    platform: Annotated[
+        str,
+        cyclopts.Parameter(
+            name=["--platform"],
+            help="Build platforms, comma-separated",
+        ),
+    ] = "linux/amd64,linux/arm64",
+    push: Annotated[
+        bool,
+        cyclopts.Parameter(
+            name=["--push"],
+            help="Push to registry after building",
+        ),
+    ] = False,
+    registry: Annotated[
+        str | None,
+        cyclopts.Parameter(
+            name=["--registry", "-r"],
+            help="Override registry URL (or OTS_REGISTRY env var)",
+        ),
+    ] = None,
+    tag: Annotated[
+        str | None,
+        cyclopts.Parameter(
+            name=["--tag", "-t"],
+            help="Override version tag (auto-detected from package.json)",
+        ),
+    ] = None,
+    quiet: Annotated[
+        bool,
+        cyclopts.Parameter(
+            name=["--quiet", "-q"],
+            help="Suppress progress output",
+        ),
+    ] = False,
+):
+    """Build container image from onetimesecret source.
+
+    Automatically determines version tag from package.json. For development
+    versions (0.0.0, -rc0, -dev, -alpha, -beta), appends git hash.
+
+    Examples:
+        ots image build --project-dir ~/src/onetimesecret
+        ots image build -d . --platform linux/amd64
+        ots image build -d . --push --registry registry.example.com
+        ots image build -d . --tag v0.23.0-custom
+    """
+    cfg = Config()
+
+    # Resolve project directory
+    proj_dir = Path(project_dir) if project_dir else Path.cwd()
+    proj_dir = proj_dir.resolve()
+
+    # Validate project structure
+    _validate_project_dir(proj_dir)
+
+    # Determine build tag
+    build_tag = _determine_build_tag(proj_dir, tag)
+
+    # Local image name
+    local_image = f"onetimesecret:{build_tag}"
+
+    if not quiet:
+        print(f"Building {local_image}")
+        print(f"  Project: {proj_dir}")
+        print(f"  Platform: {platform}")
+
+    # Build the image
+    try:
+        # Use buildx for multi-platform builds
+        podman.buildx.build(
+            str(proj_dir),
+            platform=platform,
+            tag=local_image,
+            check=True,
+            capture_output=quiet,
+            text=True,
+        )
+        if not quiet:
+            print(f"Successfully built {local_image}")
+    except Exception as e:
+        print(f"Build failed: {e}")
+        raise SystemExit(1)
+
+    # Record the build action
+    db.record_deployment(
+        cfg.db_path,
+        image="onetimesecret",
+        tag=build_tag,
+        action="build",
+        success=True,
+    )
+
+    # Push if requested
+    if push:
+        # Resolve registry from arg or config
+        reg = registry or cfg.registry
+        if not reg:
+            print("Error: --push requires --registry or OTS_REGISTRY env var")
+            raise SystemExit(1)
+
+        target_image = f"{reg}/onetimesecret:{build_tag}"
+
+        if not quiet:
+            print(f"Tagging {local_image} -> {target_image}")
+
+        # Tag for registry
+        try:
+            podman.tag(
+                local_image,
+                target_image,
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+        except Exception as e:
+            print(f"Failed to tag image: {e}")
+            raise SystemExit(1)
+
+        if not quiet:
+            print(f"Pushing {target_image}...")
+
+        # Push to registry
+        try:
+            podman.push(
+                target_image,
+                authfile=str(cfg.registry_auth_file),
+                check=True,
+                capture_output=quiet,
+                text=True,
+            )
+            if not quiet:
+                print(f"Successfully pushed {target_image}")
+        except Exception as e:
+            print(f"Failed to push {target_image}: {e}")
+            raise SystemExit(1)
+
+        # Record the push
+        db.record_deployment(
+            cfg.db_path,
+            image=f"{reg}/onetimesecret",
+            tag=build_tag,
+            action="push",
+            success=True,
+        )
+
+    # Print summary
+    if not quiet:
+        print()
+        print("Build complete:")
+        print(f"  Local:  {local_image}")
+        if push:
+            print(f"  Remote: {target_image}")
