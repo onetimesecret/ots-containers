@@ -52,8 +52,8 @@ class Config:
         1. Explicit override via _registry_auth_file
         2. REGISTRY_AUTH_FILE env var
         3. XDG_RUNTIME_DIR/containers/auth.json (if exists)
-        4. ~/.config/containers/auth.json (macOS default, user-level)
-        5. /etc/containers/auth.json (Linux system-level)
+        4. ~/.config/containers/auth.json (non-root user, macOS)
+        5. /etc/containers/auth.json (root on Linux only)
         """
         import sys
 
@@ -66,19 +66,22 @@ class Config:
         if env_path:
             return Path(env_path)
 
-        # XDG_RUNTIME_DIR (podman's default on Linux)
+        # XDG_RUNTIME_DIR (podman's default on Linux with user session)
         xdg_runtime = os.environ.get("XDG_RUNTIME_DIR")
         if xdg_runtime:
             runtime_auth = Path(xdg_runtime) / "containers" / "auth.json"
             if runtime_auth.exists():
                 return runtime_auth
 
-        # User config (works on macOS and Linux without root)
+        # User config - preferred for non-root users and macOS
         user_auth = Path.home() / ".config" / "containers" / "auth.json"
-        if user_auth.exists() or sys.platform == "darwin":
+        is_root = os.geteuid() == 0 if hasattr(os, "geteuid") else False
+
+        if sys.platform == "darwin" or not is_root:
+            # Non-root users should use their own config dir
             return user_auth
 
-        # System path (Linux with root)
+        # System path (root on Linux only)
         return Path("/etc/containers/auth.json")
 
     @property
