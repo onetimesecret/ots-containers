@@ -111,8 +111,8 @@ class TestRunCommand:
         assert "--network=host" in cmd
         assert "onetimesecret:v0.23.0" in cmd
 
-    def test_run_includes_secrets_from_env_file(self, mocker, tmp_path):
-        """run should include secrets from env file."""
+    def test_run_includes_secrets_with_production_flag(self, mocker, tmp_path):
+        """run --production should include secrets from env file."""
         import subprocess
 
         # Mock Config
@@ -147,14 +147,37 @@ class TestRunCommand:
         mock_run = mocker.patch("subprocess.run")
         mock_run.return_value = subprocess.CompletedProcess([], 0, stdout="abc123")
 
-        # Call run command
-        instance.run(port=7143, detach=True, quiet=True)
+        # Call run command with production flag
+        instance.run(port=7143, detach=True, quiet=True, production=True)
 
         # Verify secrets were included
         cmd = mock_run.call_args[0][0]
         cmd_str = " ".join(cmd)
         assert "--secret" in cmd_str
         assert "ots_hmac_secret" in cmd_str
+
+    def test_run_minimal_without_production_flag(self, mocker, tmp_path):
+        """run without --production should be minimal (no secrets/volumes)."""
+        import subprocess
+
+        # Mock Config
+        mock_config = mocker.MagicMock()
+        mock_config.resolve_image_tag.return_value = ("onetimesecret", "latest")
+        mocker.patch("ots_containers.commands.instance.app.Config", return_value=mock_config)
+
+        # Mock subprocess.run
+        mock_run = mocker.patch("subprocess.run")
+        mock_run.return_value = subprocess.CompletedProcess([], 0, stdout="abc123")
+
+        # Call run command without production flag
+        instance.run(port=7143, detach=True, quiet=True)
+
+        # Verify minimal command (no secrets, no volumes)
+        cmd = mock_run.call_args[0][0]
+        cmd_str = " ".join(cmd)
+        assert "--secret" not in cmd_str
+        assert "-v" not in cmd_str
+        assert "--env-file" not in cmd_str
 
     def test_run_prints_command_when_not_quiet(self, mocker, tmp_path, capsys):
         """run should print command when not in quiet mode."""

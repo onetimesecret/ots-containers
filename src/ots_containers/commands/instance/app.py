@@ -87,6 +87,13 @@ def run(
             help="Remove container when it exits",
         ),
     ] = True,
+    production: Annotated[
+        bool,
+        cyclopts.Parameter(
+            name=["--production", "-p"],
+            help="Include env file, secrets, and volumes (like deploy)",
+        ),
+    ] = False,
     name: Annotated[
         str | None,
         cyclopts.Parameter(
@@ -101,16 +108,15 @@ def run(
 ):
     """Run a container directly with podman (no systemd).
 
-    Useful for quick testing without full deployment. Uses the same
-    configuration as deploy (env file, secrets, volumes).
+    By default runs with minimal config for quick testing.
+    If .env exists in current directory, it will be used.
+    Use --production to include system env file, secrets, and volumes.
 
     Examples:
-        ots instance run 7143
-        ots instance run 7143 -d        # detached
-        ots instance run 7143 --no-rm   # keep container after exit
+        ots instance run 7143              # quick test (uses .env if present)
+        ots instance run 7143 -d           # detached
+        ots instance run 7143 --production # full production config
     """
-    from ots_containers.environment_file import get_secrets_from_env_file
-
     cfg = Config()
 
     # Resolve image/tag
@@ -119,14 +125,6 @@ def run(
 
     # Container name
     container_name = name or f"onetimesecret-{port}"
-
-    # Get secrets from env file
-    env_file = quadlet.DEFAULT_ENV_FILE
-    secrets = []
-    if env_file.exists():
-        secret_specs = get_secrets_from_env_file(env_file)
-        for spec in secret_specs:
-            secrets.append(f"{spec.secret_name},type=env,target={spec.env_var_name}")
 
     # Build podman run command
     cmd = ["podman", "run"]
@@ -140,29 +138,41 @@ def run(
     cmd.append("--network=host")
     cmd.extend(["-e", f"PORT={port}"])
 
-    # Environment file
-    if env_file.exists():
-        cmd.extend(["--env-file", str(env_file)])
+    # Check for local .env file in current directory
+    from pathlib import Path
 
-    # Secrets
-    for secret in secrets:
-        cmd.extend(["--secret", secret])
+    local_env = Path.cwd() / ".env"
+    if local_env.exists():
+        cmd.extend(["--env-file", str(local_env)])
 
-    # Volumes
-    cmd.extend(["-v", f"{cfg.config_dir}:/app/etc:ro"])
-    cmd.extend(["-v", "static_assets:/app/public:ro"])
+    # Production mode: add env file, secrets, and volumes
+    if production:
+        from ots_containers.environment_file import get_secrets_from_env_file
 
-    # Auth file for private registry
-    if cfg.registry:
-        cmd.extend(["--authfile", str(cfg.registry_auth_file)])
+        env_file = quadlet.DEFAULT_ENV_FILE
+
+        # Environment file
+        if env_file.exists():
+            cmd.extend(["--env-file", str(env_file)])
+
+            # Secrets
+            secret_specs = get_secrets_from_env_file(env_file)
+            for spec in secret_specs:
+                cmd.extend(["--secret", f"{spec.secret_name},type=env,target={spec.env_var_name}"])
+
+        # Volumes
+        cmd.extend(["-v", f"{cfg.config_dir}:/app/etc:ro"])
+        cmd.extend(["-v", "static_assets:/app/public:ro"])
+
+        # Auth file for private registry
+        if cfg.registry:
+            cmd.extend(["--authfile", str(cfg.registry_auth_file)])
 
     # Image
     cmd.append(full_image)
 
     if not quiet:
-        # Print command (mask secrets)
-        display_cmd = " ".join(cmd)
-        print(f"$ {display_cmd}")
+        print(f"$ {' '.join(cmd)}")
         print()
 
     # Run it
