@@ -9,7 +9,7 @@ import cyclopts
 from ots_containers import assets, db, quadlet, systemd
 from ots_containers.config import Config
 
-from ._helpers import for_each, for_each_worker, resolve_ports
+from ._helpers import for_each, for_each_worker, format_command, resolve_ports
 from .annotations import Delay, InstanceType, OptionalPorts
 
 app = cyclopts.App(
@@ -105,6 +105,13 @@ def run(
         bool,
         cyclopts.Parameter(name=["--quiet", "-q"], help="Don't print the command"),
     ] = False,
+    tag: Annotated[
+        str | None,
+        cyclopts.Parameter(
+            name=["--tag", "-t"],
+            help="Image tag to run (default: from TAG env or 'current' alias)",
+        ),
+    ] = None,
 ):
     """Run a container directly with podman (no systemd).
 
@@ -115,13 +122,18 @@ def run(
     Examples:
         ots instance run 7143              # quick test (uses .env if present)
         ots instance run 7143 -d           # detached
+        ots instance run 7143 --tag v0.19.0  # specific tag
         ots instance run 7143 --production # full production config
     """
     cfg = Config()
 
-    # Resolve image/tag
-    image, tag = cfg.resolve_image_tag()
-    full_image = f"{image}:{tag}"
+    # Resolve image/tag (--tag overrides config)
+    if tag:
+        image = cfg.image
+        resolved_tag = tag
+    else:
+        image, resolved_tag = cfg.resolve_image_tag()
+    full_image = f"{image}:{resolved_tag}"
 
     # Container name
     container_name = name or f"onetimesecret-{port}"
@@ -172,7 +184,7 @@ def run(
     cmd.append(full_image)
 
     if not quiet:
-        print(f"$ {' '.join(cmd)}")
+        print(format_command(cmd))
         print()
 
     # Run it

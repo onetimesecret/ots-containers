@@ -9,6 +9,35 @@ requiring actual podman/systemd infrastructure.
 import pytest
 
 from ots_containers.commands import instance
+from ots_containers.commands.instance._helpers import format_command
+
+
+class TestFormatCommand:
+    """Test command formatting for copy-paste usage."""
+
+    def test_simple_command(self):
+        """Simple commands should join with spaces."""
+        cmd = ["podman", "run", "--rm", "image:tag"]
+        assert format_command(cmd) == "podman run --rm image:tag"
+
+    def test_arguments_with_spaces_are_quoted(self):
+        """Arguments containing spaces should be quoted."""
+        cmd = ["podman", "run", "--env-file", "/path/with spaces/file.env"]
+        result = format_command(cmd)
+        assert "'/path/with spaces/file.env'" in result
+
+    def test_empty_arguments_are_quoted(self):
+        """Empty arguments should be quoted."""
+        cmd = ["echo", ""]
+        result = format_command(cmd)
+        assert "''" in result
+
+    def test_special_characters_are_quoted(self):
+        """Arguments with shell special characters should be quoted."""
+        cmd = ["echo", "hello$world", "foo;bar"]
+        result = format_command(cmd)
+        # shlex.quote should protect these
+        assert "$" not in result or "'" in result
 
 
 class TestInstanceImports:
@@ -204,9 +233,42 @@ class TestRunCommand:
         # Call run command without quiet
         instance.run(port=7143, detach=True, quiet=False)
 
-        # Verify command was printed
+        # Verify command was printed (copy-pasteable format without $ prefix)
         captured = capsys.readouterr()
-        assert "$ podman run" in captured.out
+        assert "podman run" in captured.out
+        assert captured.out.startswith("podman")  # Starts on its own line
+
+    def test_run_uses_tag_override(self, mocker, tmp_path):
+        """run --tag should override the resolved tag."""
+        import subprocess
+
+        # Mock Config
+        mock_config = mocker.MagicMock()
+        mock_config.image = "ghcr.io/onetimesecret/onetimesecret"
+        mock_config.resolve_image_tag.return_value = ("onetimesecret", "current")
+        mock_config.config_dir = tmp_path / "etc"
+        mock_config.config_dir.mkdir()
+        mock_config.registry = None
+        mocker.patch("ots_containers.commands.instance.app.Config", return_value=mock_config)
+
+        # Mock env file not existing
+        mocker.patch(
+            "ots_containers.commands.instance.app.quadlet.DEFAULT_ENV_FILE",
+            tmp_path / "nonexistent",
+        )
+
+        # Mock subprocess.run
+        mock_run = mocker.patch("subprocess.run")
+        mock_run.return_value = subprocess.CompletedProcess([], 0, stdout="abc123")
+
+        # Call run with explicit tag
+        instance.run(port=7143, detach=True, quiet=True, tag="v0.19.0")
+
+        # Verify the overridden tag was used, not the resolved one
+        cmd = mock_run.call_args[0][0]
+        cmd_str = " ".join(cmd)
+        assert "v0.19.0" in cmd_str
+        assert "current" not in cmd_str
 
 
 class TestDeployCommand:

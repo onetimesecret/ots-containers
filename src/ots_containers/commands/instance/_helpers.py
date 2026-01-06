@@ -1,9 +1,19 @@
 # src/ots_containers/commands/instance/_helpers.py
 """Internal helper functions for instance commands."""
 
-from collections.abc import Callable
+import shlex
+from collections.abc import Callable, Sequence
 
 from ots_containers import systemd
+
+
+def format_command(cmd: Sequence[str]) -> str:
+    """Format command list as a copy-pasteable shell string.
+
+    Arguments containing spaces, special characters, or that are empty
+    will be properly quoted using shlex.quote.
+    """
+    return " ".join(shlex.quote(arg) for arg in cmd)
 
 
 def resolve_ports(
