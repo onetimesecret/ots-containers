@@ -1,4 +1,4 @@
-# deployment/>=v0.23/ots-containers/pyproject.toml
+# pyproject.toml
 #
 # Installation:
 #   pipx install .                    # Recommended: isolated environment
