@@ -23,9 +23,9 @@ CONTAINER_TEMPLATE = """\
 #
 # PREREQUISITES (one-time setup):
 #
-# 0. (Private registry only) Authenticate with registry:
-#    ots image login --username <user>
-#    # Credentials stored in /etc/containers/auth.json
+# 0. (Private registry only) Pull image with authentication:
+#    ots-containers image pull --tag <tag>
+#    # Uses credentials from /etc/containers/auth.json
 #
 # 1. Process environment file to create podman secrets:
 #    ots env process /etc/default/onetimesecret
@@ -63,9 +63,6 @@ RestartSec=5
 [Container]
 Image={image}
 Network=host
-
-# Auth file for private registry pulls (created via: ots image login)
-GlobalArgs=--authfile=/etc/containers/auth.json
 
 # Port is derived from instance name: onetime@7043 -> PORT=7043
 Environment=PORT=%i
@@ -144,9 +141,9 @@ WORKER_TEMPLATE = """\
 #
 # PREREQUISITES (one-time setup):
 #
-# 0. (Private registry only) Authenticate with registry:
-#    ots image login --username <user>
-#    # Credentials stored in /etc/containers/auth.json
+# 0. (Private registry only) Pull image with authentication:
+#    ots-containers image pull --tag <tag>
+#    # Uses credentials from /etc/containers/auth.json
 #
 # 1. Process environment file to create podman secrets:
 #    ots env process /etc/default/onetimesecret
@@ -190,9 +187,6 @@ TimeoutStopSec=90
 [Container]
 Image={image}
 Network=host
-
-# Auth file for private registry pulls (created via: ots image login)
-GlobalArgs=--authfile=/etc/containers/auth.json
 
 # Worker ID is derived from instance name: onetime-worker@1 -> WORKER_ID=1
 Environment=WORKER_ID=%i
