@@ -429,14 +429,25 @@ def redeploy(
     Note: Always recreates containers (stop+start) to ensure quadlet changes
     (volume mounts, image, etc.) are applied.
 
+    When no ports specified, redeploys all running web AND worker instances.
+
     Examples:
         ots instance redeploy
         ots instance redeploy -p 7043 7044
         ots instance redeploy --force
     """
-    ports = resolve_ports(ports)
-    if not ports:
+    # Track if user explicitly specified ports
+    explicit_ports = bool(ports)
+
+    ports = resolve_ports(ports, running_only=True)
+    worker_ids: tuple[str, ...] = ()
+    if not explicit_ports:
+        worker_ids = resolve_worker_ids((), running_only=True)
+
+    # Early return if nothing to redeploy
+    if not ports and not worker_ids:
         return
+
     cfg = Config()
     cfg.validate()
 
@@ -450,7 +461,10 @@ def redeploy(
 
     if dry_run:
         verb = "force redeploy" if force else "redeploy"
-        print(f"[dry-run] Would {verb} ports:", ports)
+        if ports:
+            print(f"[dry-run] Would {verb} ports:", ports)
+        if worker_ids:
+            print(f"[dry-run] Would {verb} workers:", worker_ids)
         return
 
     assets.update(cfg, create_volume=force)
@@ -499,7 +513,51 @@ def redeploy(
             raise
 
     verb = "Force redeploying" if force else "Redeploying"
-    for_each(ports, delay, do_redeploy, verb)
+    if ports:
+        for_each(ports, delay, do_redeploy, verb)
+
+    # Also redeploy workers when no specific ports given
+    if worker_ids:
+        print(f"Writing worker quadlet files to {cfg.worker_template_path.parent}")
+        quadlet.write_worker_template(cfg)
+
+        def do_redeploy_worker(worker_id: str) -> None:
+            unit = f"onetime-worker@{worker_id}"
+
+            if force:
+                print(f"Stopping {unit}")
+                systemd.stop(unit)
+
+            try:
+                if force or not systemd.container_exists(unit):
+                    print(f"Starting {unit}")
+                    systemd.start(unit)
+                else:
+                    print(f"Recreating {unit}")
+                    systemd.recreate(unit)
+
+                db.record_deployment(
+                    cfg.db_path,
+                    image=image,
+                    tag=tag,
+                    action="redeploy-worker",
+                    port=0,
+                    success=True,
+                    notes=f"worker_id={worker_id}" + (", force" if force else ""),
+                )
+            except Exception as e:
+                db.record_deployment(
+                    cfg.db_path,
+                    image=image,
+                    tag=tag,
+                    action="redeploy-worker",
+                    port=0,
+                    success=False,
+                    notes=f"worker_id={worker_id}: {e}",
+                )
+                raise
+
+        for_each_worker(worker_ids, delay, do_redeploy_worker, verb)
 
 
 @app.command
@@ -513,17 +571,32 @@ def undeploy(
 
     Stops systemd service. Records action to timeline for audit.
 
+    When no ports specified, undeploys all running web AND worker instances.
+
     Examples:
         ots instance undeploy
         ots instance undeploy -p 7043 7044
         ots instance undeploy -y  # Skip confirmation
     """
-    ports = resolve_ports(ports)
-    if not ports:
+    # Track if user explicitly specified ports
+    explicit_ports = bool(ports)
+
+    ports = resolve_ports(ports, running_only=True)
+    worker_ids: tuple[str, ...] = ()
+    if not explicit_ports:
+        worker_ids = resolve_worker_ids((), running_only=True)
+
+    if not ports and not worker_ids:
+        print("No running instances found")
         return
 
     if not yes and not dry_run:
-        print(f"This will stop instances: {', '.join(str(p) for p in ports)}")
+        items = []
+        if ports:
+            items.append(f"web: {', '.join(str(p) for p in ports)}")
+        if worker_ids:
+            items.append(f"workers: {', '.join(worker_ids)}")
+        print(f"This will stop instances: {'; '.join(items)}")
         response = input("Continue? [y/N] ")
         if response.lower() not in ("y", "yes"):
             print("Aborted")
@@ -531,6 +604,8 @@ def undeploy(
 
     if dry_run:
         print("[dry-run] Would undeploy ports:", ports)
+        if worker_ids:
+            print("[dry-run] Would undeploy workers:", worker_ids)
         return
 
     cfg = Config()
@@ -563,7 +638,39 @@ def undeploy(
             )
             raise
 
-    for_each(ports, delay, do_undeploy, "Undeploying")
+    if ports:
+        for_each(ports, delay, do_undeploy, "Undeploying")
+
+    # Also undeploy workers when no specific ports given
+    if worker_ids:
+
+        def do_undeploy_worker(worker_id: str) -> None:
+            unit = f"onetime-worker@{worker_id}"
+            print(f"Stopping {unit}")
+            try:
+                systemd.stop(unit)
+                db.record_deployment(
+                    cfg.db_path,
+                    image=image,
+                    tag=tag,
+                    action="undeploy-worker",
+                    port=0,
+                    success=True,
+                    notes=f"worker_id={worker_id}",
+                )
+            except Exception as e:
+                db.record_deployment(
+                    cfg.db_path,
+                    image=image,
+                    tag=tag,
+                    action="undeploy-worker",
+                    port=0,
+                    success=False,
+                    notes=f"worker_id={worker_id}: {e}",
+                )
+                raise
+
+        for_each_worker(worker_ids, delay, do_undeploy_worker, "Undeploying")
 
 
 @app.command
@@ -572,16 +679,29 @@ def start(ports: OptionalPorts = ()):
 
     Does NOT regenerate quadlet - use 'redeploy' for that.
 
+    When no ports specified, starts all configured web AND worker instances.
+
     Examples:
         ots instance start
         ots instance start -p 7043 7044
     """
+    # Track if user explicitly specified ports
+    explicit_ports = bool(ports)
+
     ports = resolve_ports(ports)
-    if not ports:
+    if not ports and explicit_ports:
         return
     for port in ports:
         systemd.start(f"onetime@{port}")
         print(f"Started onetime@{port}")
+
+    # Also start workers when no specific ports given
+    if not explicit_ports:
+        worker_ids = resolve_worker_ids((), running_only=False)
+        for worker_id in worker_ids:
+            unit = f"onetime-worker@{worker_id}"
+            systemd.start(unit)
+            print(f"Started {unit}")
 
 
 @app.command
@@ -651,13 +771,18 @@ def enable(ports: OptionalPorts = ()):
 
     Does not start the instance - use 'start' for that.
 
+    When no ports specified, enables all configured web AND worker instances.
+
     Examples:
         ots instance enable
         ots instance enable -p 7043 7044
     """
+    explicit_ports = bool(ports)
+
     ports = resolve_ports(ports)
-    if not ports:
+    if not ports and explicit_ports:
         return
+
     for port in ports:
         unit = f"onetime@{port}"
         try:
@@ -671,6 +796,22 @@ def enable(ports: OptionalPorts = ()):
         except subprocess.CalledProcessError as e:
             print(f"Failed to enable {unit}: {e.stderr}")
 
+    # Also enable workers when no specific ports given
+    if not explicit_ports:
+        worker_ids = resolve_worker_ids((), running_only=False)
+        for worker_id in worker_ids:
+            unit = f"onetime-worker@{worker_id}"
+            try:
+                subprocess.run(
+                    ["systemctl", "enable", unit],
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                )
+                print(f"Enabled {unit}")
+            except subprocess.CalledProcessError as e:
+                print(f"Failed to enable {unit}: {e.stderr}")
+
 
 @app.command
 def disable(
@@ -681,16 +822,29 @@ def disable(
 
     Does not stop the instance - use 'stop' for that.
 
+    When no ports specified, disables all configured web AND worker instances.
+
     Examples:
         ots instance disable
         ots instance disable -p 7043 7044 -y
     """
+    explicit_ports = bool(ports)
+
     ports = resolve_ports(ports)
-    if not ports:
+    worker_ids: tuple[str, ...] = ()
+    if not explicit_ports:
+        worker_ids = resolve_worker_ids((), running_only=False)
+
+    if not ports and not worker_ids:
         return
 
     if not yes:
-        print(f"This will disable boot startup for: {', '.join(str(p) for p in ports)}")
+        items = []
+        if ports:
+            items.append(f"web: {', '.join(str(p) for p in ports)}")
+        if worker_ids:
+            items.append(f"workers: {', '.join(worker_ids)}")
+        print(f"This will disable boot startup for: {'; '.join(items)}")
         response = input("Continue? [y/N] ")
         if response.lower() not in ("y", "yes"):
             print("Aborted")
@@ -709,21 +863,48 @@ def disable(
         except subprocess.CalledProcessError as e:
             print(f"Failed to disable {unit}: {e.stderr}")
 
+    # Also disable workers when no specific ports given
+    if worker_ids:
+        for worker_id in worker_ids:
+            unit = f"onetime-worker@{worker_id}"
+            try:
+                subprocess.run(
+                    ["systemctl", "disable", unit],
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                )
+                print(f"Disabled {unit}")
+            except subprocess.CalledProcessError as e:
+                print(f"Failed to disable {unit}: {e.stderr}")
+
 
 @app.command
 def status(ports: OptionalPorts = ()):
     """Show systemd status for instance(s).
 
+    When no ports specified, shows status for all configured web AND worker instances.
+
     Examples:
         ots instance status
         ots instance status -p 7043 7044
     """
+    explicit_ports = bool(ports)
+
     ports = resolve_ports(ports)
-    if not ports:
+    if not ports and explicit_ports:
         return
+
     for port in ports:
         systemd.status(f"onetime@{port}")
         print()
+
+    # Also show worker status when no specific ports given
+    if not explicit_ports:
+        worker_ids = resolve_worker_ids((), running_only=False)
+        for worker_id in worker_ids:
+            systemd.status(f"onetime-worker@{worker_id}")
+            print()
 
 
 @app.command
@@ -813,7 +994,7 @@ def exec_shell(
 ):
     """Run interactive shell in container(s).
 
-    When no ports specified, iterates through all running instances sequentially.
+    When no ports specified, iterates through all running web AND worker instances.
     Uses $SHELL environment variable or /bin/sh as fallback.
 
     Examples:
@@ -823,8 +1004,10 @@ def exec_shell(
     """
     import os
 
+    explicit_ports = bool(ports)
+
     ports = resolve_ports(ports, running_only=True)
-    if not ports:
+    if not ports and explicit_ports:
         return
 
     shell = command or os.environ.get("SHELL", "/bin/sh")
@@ -835,3 +1018,12 @@ def exec_shell(
         # Interactive exec requires subprocess.run with no capture
         subprocess.run(["podman", "exec", "-it", container, shell])
         print()
+
+    # Also exec into workers when no specific ports given
+    if not explicit_ports:
+        worker_ids = resolve_worker_ids((), running_only=True)
+        for worker_id in worker_ids:
+            container = f"onetime-worker@{worker_id}"
+            print(f"=== Entering {container} ===")
+            subprocess.run(["podman", "exec", "-it", container, shell])
+            print()

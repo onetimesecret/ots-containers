@@ -518,11 +518,16 @@ class TestRedeployCommand:
             "ots_containers.commands.instance._helpers.systemd.discover_instances",
             return_value=[],
         )
+        mocker.patch(
+            "ots_containers.commands.instance._helpers.systemd.discover_worker_instances",
+            return_value=[],
+        )
 
         instance.redeploy(ports=())
 
         captured = capsys.readouterr()
-        assert "No configured instances found" in captured.out
+        # When no web or worker instances found, prints message for web (first discovery)
+        assert "No running instances found" in captured.out
 
     def test_redeploy_uses_cfg_template_path(self, mocker, tmp_path):
         """redeploy should use cfg.template_path (not quadlet.template_path)."""
@@ -539,6 +544,10 @@ class TestRedeployCommand:
         mocker.patch(
             "ots_containers.commands.instance._helpers.systemd.discover_instances",
             return_value=[7143],
+        )
+        mocker.patch(
+            "ots_containers.commands.instance._helpers.systemd.discover_worker_instances",
+            return_value=[],
         )
         mocker.patch("ots_containers.commands.instance.app.assets.update")
         mocker.patch("ots_containers.commands.instance.app.quadlet.write_template")
@@ -571,6 +580,10 @@ class TestRedeployCommand:
         mocker.patch(
             "ots_containers.commands.instance._helpers.systemd.discover_instances",
             return_value=[7143],
+        )
+        mocker.patch(
+            "ots_containers.commands.instance._helpers.systemd.discover_worker_instances",
+            return_value=[],
         )
         mocker.patch("ots_containers.commands.instance.app.assets.update")
         mocker.patch("ots_containers.commands.instance.app.quadlet.write_template")
@@ -663,6 +676,10 @@ class TestExecCommand:
             "ots_containers.commands.instance._helpers.systemd.discover_instances",
             return_value=[],
         )
+        mocker.patch(
+            "ots_containers.commands.instance._helpers.systemd.discover_worker_instances",
+            return_value=[],
+        )
         instance.exec_shell(ports=())
         captured = capsys.readouterr()
         assert "No running instances found" in captured.out
@@ -689,6 +706,31 @@ class TestExecCommand:
         mock_run.assert_called_once()
         call_args = mock_run.call_args[0][0]
         assert "/bin/sh" in call_args
+
+    def test_exec_includes_workers_when_no_ports(self, mocker, capsys):
+        """exec with no ports should exec into both web and worker instances."""
+        mocker.patch(
+            "ots_containers.commands.instance._helpers.systemd.discover_instances",
+            return_value=[7043],
+        )
+        mocker.patch(
+            "ots_containers.commands.instance._helpers.systemd.discover_worker_instances",
+            return_value=["1"],
+        )
+        mock_run = mocker.patch("ots_containers.commands.instance.app.subprocess.run")
+        mocker.patch.dict("os.environ", {"SHELL": "/bin/bash"})
+
+        instance.exec_shell(ports=())
+
+        # Should be called twice: once for web, once for worker
+        assert mock_run.call_count == 2
+        calls = [call[0][0] for call in mock_run.call_args_list]
+        assert any("onetime@7043" in call for call in calls)
+        assert any("onetime-worker@1" in call for call in calls)
+
+        captured = capsys.readouterr()
+        assert "Entering onetime@7043" in captured.out
+        assert "Entering onetime-worker@1" in captured.out
 
 
 class TestListInstancesCommand:
@@ -861,11 +903,39 @@ class TestEnableCommand:
             "ots_containers.commands.instance._helpers.systemd.discover_instances",
             return_value=[],
         )
+        mocker.patch(
+            "ots_containers.commands.instance._helpers.systemd.discover_worker_instances",
+            return_value=[],
+        )
 
         instance.enable(ports=())
 
         captured = capsys.readouterr()
         assert "No" in captured.out or captured.out == ""
+
+    def test_enable_includes_workers_when_no_ports(self, mocker, capsys):
+        """enable with no ports should enable both web and worker instances."""
+        mocker.patch(
+            "ots_containers.commands.instance._helpers.systemd.discover_instances",
+            return_value=[7043],
+        )
+        mocker.patch(
+            "ots_containers.commands.instance._helpers.systemd.discover_worker_instances",
+            return_value=["1"],
+        )
+        mock_run = mocker.patch("ots_containers.commands.instance.app.subprocess.run")
+
+        instance.enable(ports=())
+
+        # Should be called twice: once for web, once for worker
+        assert mock_run.call_count == 2
+        calls = [call[0][0] for call in mock_run.call_args_list]
+        assert any("onetime@7043" in call for call in calls)
+        assert any("onetime-worker@1" in call for call in calls)
+
+        captured = capsys.readouterr()
+        assert "Enabled onetime@7043" in captured.out
+        assert "Enabled onetime-worker@1" in captured.out
 
     def test_enable_handles_error(self, mocker, capsys):
         """enable should handle systemctl errors gracefully."""
@@ -874,6 +944,10 @@ class TestEnableCommand:
         mocker.patch(
             "ots_containers.commands.instance._helpers.systemd.discover_instances",
             return_value=[7043],
+        )
+        mocker.patch(
+            "ots_containers.commands.instance._helpers.systemd.discover_worker_instances",
+            return_value=[],
         )
         mocker.patch(
             "ots_containers.commands.instance.app.subprocess.run",
@@ -1126,12 +1200,40 @@ class TestDisableCommand:
             "ots_containers.commands.instance._helpers.systemd.discover_instances",
             return_value=[7043],
         )
+        mocker.patch(
+            "ots_containers.commands.instance._helpers.systemd.discover_worker_instances",
+            return_value=[],
+        )
         mocker.patch("builtins.input", return_value="n")
 
-        instance.disable(ports=(7043,), yes=False)
+        instance.disable(ports=(), yes=False)
 
         captured = capsys.readouterr()
         assert "Aborted" in captured.out
+
+    def test_disable_includes_workers_when_no_ports(self, mocker, capsys):
+        """disable with no ports should disable both web and worker instances."""
+        mocker.patch(
+            "ots_containers.commands.instance._helpers.systemd.discover_instances",
+            return_value=[7043],
+        )
+        mocker.patch(
+            "ots_containers.commands.instance._helpers.systemd.discover_worker_instances",
+            return_value=["1"],
+        )
+        mock_run = mocker.patch("ots_containers.commands.instance.app.subprocess.run")
+
+        instance.disable(ports=(), yes=True)
+
+        # Should be called twice: once for web, once for worker
+        assert mock_run.call_count == 2
+        calls = [call[0][0] for call in mock_run.call_args_list]
+        assert any("onetime@7043" in call for call in calls)
+        assert any("onetime-worker@1" in call for call in calls)
+
+        captured = capsys.readouterr()
+        assert "Disabled onetime@7043" in captured.out
+        assert "Disabled onetime-worker@1" in captured.out
 
     def test_disable_calls_systemctl(self, mocker, capsys):
         """disable should call systemctl disable with --yes."""
