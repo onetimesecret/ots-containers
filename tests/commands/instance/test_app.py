@@ -886,6 +886,71 @@ class TestEnableCommand:
         assert "Failed" in captured.out
 
 
+class TestRestartCommand:
+    """Test restart command."""
+
+    def test_restart_function_exists(self):
+        """restart command should be defined."""
+        assert hasattr(instance, "restart")
+        assert callable(instance.restart)
+
+    def test_restart_calls_systemd_restart(self, mocker, capsys):
+        """restart should call systemd.restart for each port."""
+        mock_restart = mocker.patch("ots_containers.commands.instance.app.systemd.restart")
+
+        instance.restart(ports=(7043,))
+
+        mock_restart.assert_called_once_with("onetime@7043")
+        captured = capsys.readouterr()
+        assert "Restarted onetime@7043" in captured.out
+
+    def test_restart_multiple_ports(self, mocker, capsys):
+        """restart should call systemd.restart for each port."""
+        mock_restart = mocker.patch("ots_containers.commands.instance.app.systemd.restart")
+
+        instance.restart(ports=(7043, 7044, 7045))
+
+        assert mock_restart.call_count == 3
+        calls = [c[0][0] for c in mock_restart.call_args_list]
+        assert "onetime@7043" in calls
+        assert "onetime@7044" in calls
+        assert "onetime@7045" in calls
+
+        captured = capsys.readouterr()
+        assert "Restarted onetime@7043" in captured.out
+        assert "Restarted onetime@7044" in captured.out
+        assert "Restarted onetime@7045" in captured.out
+
+    def test_restart_discovers_instances_when_no_ports(self, mocker):
+        """restart with no ports should discover instances and restart them."""
+        mocker.patch(
+            "ots_containers.commands.instance._helpers.systemd.discover_instances",
+            return_value=[7043, 7044],
+        )
+        mock_restart = mocker.patch("ots_containers.commands.instance.app.systemd.restart")
+
+        instance.restart(ports=())
+
+        assert mock_restart.call_count == 2
+        calls = [c[0][0] for c in mock_restart.call_args_list]
+        assert "onetime@7043" in calls
+        assert "onetime@7044" in calls
+
+    def test_restart_with_no_running_instances(self, mocker, capsys):
+        """restart with no running instances should print message and return."""
+        mocker.patch(
+            "ots_containers.commands.instance._helpers.systemd.discover_instances",
+            return_value=[],
+        )
+        mock_restart = mocker.patch("ots_containers.commands.instance.app.systemd.restart")
+
+        instance.restart(ports=())
+
+        mock_restart.assert_not_called()
+        captured = capsys.readouterr()
+        assert "No configured instances found" in captured.out
+
+
 class TestDisableCommand:
     """Test disable command."""
 
