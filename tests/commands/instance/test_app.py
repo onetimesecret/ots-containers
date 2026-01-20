@@ -1045,6 +1045,73 @@ class TestRestartCommand:
         mock_restart.assert_called_once_with("onetime@7043")
 
 
+class TestLogsCommand:
+    """Test logs command."""
+
+    def test_logs_function_exists(self):
+        """logs command should be defined."""
+        assert hasattr(instance, "logs")
+        assert callable(instance.logs)
+
+    def test_logs_discovers_all_instances_when_no_ports(self, mocker):
+        """logs with no ports should discover web and worker instances."""
+        mocker.patch(
+            "ots_containers.commands.instance._helpers.systemd.discover_instances",
+            return_value=[7043, 7044],
+        )
+        mocker.patch(
+            "ots_containers.commands.instance._helpers.systemd.discover_worker_instances",
+            return_value=["1"],
+        )
+        mock_run = mocker.patch("ots_containers.commands.instance.app.subprocess.run")
+
+        instance.logs(ports=())
+
+        mock_run.assert_called_once()
+        cmd = mock_run.call_args[0][0]
+        assert "journalctl" in cmd
+        assert "-u" in cmd
+        # Should include both web and worker units
+        unit_args = [cmd[i + 1] for i, arg in enumerate(cmd) if arg == "-u"]
+        assert "onetime@7043" in unit_args
+        assert "onetime@7044" in unit_args
+        assert "onetime-worker@1" in unit_args
+
+    def test_logs_with_specific_ports_skips_workers(self, mocker):
+        """logs with explicit ports should only show those, not workers."""
+        mocker.patch(
+            "ots_containers.commands.instance._helpers.systemd.discover_worker_instances",
+            return_value=["1"],
+        )
+        mock_run = mocker.patch("ots_containers.commands.instance.app.subprocess.run")
+
+        instance.logs(ports=(7043,))
+
+        mock_run.assert_called_once()
+        cmd = mock_run.call_args[0][0]
+        unit_args = [cmd[i + 1] for i, arg in enumerate(cmd) if arg == "-u"]
+        assert "onetime@7043" in unit_args
+        assert "onetime-worker@1" not in unit_args
+
+    def test_logs_with_no_instances(self, mocker, capsys):
+        """logs with no instances should print message and return."""
+        mocker.patch(
+            "ots_containers.commands.instance._helpers.systemd.discover_instances",
+            return_value=[],
+        )
+        mocker.patch(
+            "ots_containers.commands.instance._helpers.systemd.discover_worker_instances",
+            return_value=[],
+        )
+        mock_run = mocker.patch("ots_containers.commands.instance.app.subprocess.run")
+
+        instance.logs(ports=())
+
+        mock_run.assert_not_called()
+        captured = capsys.readouterr()
+        assert "No instances found" in captured.out
+
+
 class TestDisableCommand:
     """Test disable command."""
 

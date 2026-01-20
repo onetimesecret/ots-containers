@@ -88,6 +88,23 @@ class TestContainerTemplate:
         # Uses fixed path for infrastructure config (not per-instance)
         assert "EnvironmentFile=/etc/default/onetimesecret" in content
 
+    def test_write_template_includes_syslog_tag(self, mocker, tmp_path):
+        """Container quadlet should include syslog tag for unified log filtering."""
+        mocker.patch("ots_containers.quadlet.systemd.daemon_reload")
+        from ots_containers import quadlet
+        from ots_containers.config import Config
+
+        cfg = Config(
+            template_path=tmp_path / "onetime@.container",
+            var_dir=tmp_path / "var",
+        )
+
+        quadlet.write_template(cfg)
+
+        content = cfg.template_path.read_text()
+        # Syslog tag allows: journalctl -t onetime -f
+        assert "PodmanArgs=--log-opt tag=onetime" in content
+
     def test_write_template_includes_volumes(self, mocker, tmp_path):
         """Container quadlet should mount config directory and static assets."""
         mocker.patch("ots_containers.quadlet.systemd.daemon_reload")
@@ -273,6 +290,23 @@ class TestWorkerTemplate:
 
         content = cfg.worker_template_path.read_text()
         assert "Network=host" in content
+
+    def test_write_worker_template_includes_syslog_tag(self, mocker, tmp_path):
+        """Worker quadlet should include syslog tag for unified log filtering."""
+        mocker.patch("ots_containers.quadlet.systemd.daemon_reload")
+        from ots_containers import quadlet
+        from ots_containers.config import Config
+
+        cfg = Config(
+            worker_template_path=tmp_path / "onetime-worker@.container",
+            var_dir=tmp_path / "var",
+        )
+
+        quadlet.write_worker_template(cfg)
+
+        content = cfg.worker_template_path.read_text()
+        # Syslog tag allows: journalctl -t onetime -f
+        assert "PodmanArgs=--log-opt tag=onetime" in content
 
     def test_write_worker_template_sets_worker_id_env_var(self, mocker, tmp_path):
         """Worker quadlet should set WORKER_ID env var from instance."""

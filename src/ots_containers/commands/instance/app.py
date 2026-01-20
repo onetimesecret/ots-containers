@@ -734,15 +734,29 @@ def logs(
 ):
     """Show logs for instance(s).
 
+    When no ports specified, shows logs for all web AND worker instances.
+
     Examples:
-        ots instance logs
-        ots instance logs -p 7043 -f
-        ots instance logs -n 100
+        ots instance logs                    # All instances (web + workers)
+        ots instance logs -p 7043 -f         # Specific port, follow
+        ots instance logs -n 100             # Last 100 lines
     """
+    # Track if user explicitly specified ports
+    explicit_ports = bool(ports)
+
     ports = resolve_ports(ports)
-    if not ports:
-        return
     units = [f"onetime@{port}" for port in ports]
+
+    # Also include workers when no specific ports given
+    if not explicit_ports:
+        worker_ids = resolve_worker_ids((), running_only=False)
+        for worker_id in worker_ids:
+            units.append(f"onetime-worker@{worker_id}")
+
+    if not units:
+        print("No instances found")
+        return
+
     cmd = ["sudo", "journalctl", "--no-pager", f"-n{lines}"]
     if follow:
         cmd.append("-f")
