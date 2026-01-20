@@ -346,7 +346,7 @@ class TestRunCommand:
 
 
 class TestDeployCommand:
-    """Test deploy command execution with mocked dependencies."""
+    """Test deploy command with mocked dependencies."""
 
     def test_deploy_validates_config(self, mocker):
         """deploy should validate config before proceeding."""
@@ -356,7 +356,7 @@ class TestDeployCommand:
         )
 
         with pytest.raises(SystemExit):
-            instance.deploy(ids=("7143",))
+            instance.deploy(ports=(7143,))
 
         mock_validate.assert_called_once()
 
@@ -382,7 +382,7 @@ class TestDeployCommand:
         mock_config.env_template.read_text.return_value = "PORT=${PORT}"
         mock_config.var_dir.mkdir = mocker.MagicMock()
 
-        instance.deploy(ids=("7143",))
+        instance.deploy(ports=(7143,))
 
         mock_assets.assert_called_once_with(mock_config, create_volume=True)
         mock_quadlet.assert_called_once_with(mock_config)
@@ -410,7 +410,7 @@ class TestDeployWorkerCommand:
         mocker.patch("ots_containers.commands.instance.app.systemd.start")
         mocker.patch("ots_containers.commands.instance.app.db.record_deployment")
 
-        instance.deploy(ids=("1",), instance_type=InstanceType.WORKER)
+        instance.deploy(ports=(1,), instance_type=InstanceType.WORKER)
 
         mock_quadlet.assert_called_once_with(mock_config)
 
@@ -432,12 +432,12 @@ class TestDeployWorkerCommand:
         mocker.patch("ots_containers.commands.instance.app.systemd.start")
         mocker.patch("ots_containers.commands.instance.app.db.record_deployment")
 
-        instance.deploy(ids=("1",), instance_type=InstanceType.WORKER)
+        instance.deploy(ports=(1,), instance_type=InstanceType.WORKER)
 
         mock_assets.assert_not_called()
 
     def test_deploy_worker_starts_worker_unit(self, mocker, tmp_path):
-        """deploy --type worker should start onetime-worker@{id} unit."""
+        """deploy --type worker should start onetime-worker unit."""
         from ots_containers.commands.instance.annotations import InstanceType
 
         mock_config = mocker.MagicMock()
@@ -453,28 +453,8 @@ class TestDeployWorkerCommand:
         mock_start = mocker.patch("ots_containers.commands.instance.app.systemd.start")
         mocker.patch("ots_containers.commands.instance.app.db.record_deployment")
 
-        instance.deploy(ids=("billing",), instance_type=InstanceType.WORKER)
-
-        mock_start.assert_called_once_with("onetime-worker@billing")
-
-    def test_deploy_worker_with_numeric_id(self, mocker, tmp_path):
-        """deploy --type worker 1 should start onetime-worker@1 unit."""
-        from ots_containers.commands.instance.annotations import InstanceType
-
-        mock_config = mocker.MagicMock()
-        mock_config.config_dir = mocker.MagicMock()
-        mock_config.config_yaml = mocker.MagicMock()
-        mock_config.var_dir = mocker.MagicMock()
-        mock_config.worker_template_path = mocker.MagicMock()
-        mock_config.worker_template_path.parent = mocker.MagicMock()
-        mock_config.db_path = tmp_path / "test.db"
-        mock_config.resolve_image_tag.return_value = ("ghcr.io/test/image", "v1.0.0")
-        mocker.patch("ots_containers.commands.instance.app.Config", return_value=mock_config)
-        mocker.patch("ots_containers.commands.instance.app.quadlet.write_worker_template")
-        mock_start = mocker.patch("ots_containers.commands.instance.app.systemd.start")
-        mocker.patch("ots_containers.commands.instance.app.db.record_deployment")
-
-        instance.deploy(ids=("1",), instance_type=InstanceType.WORKER)
+        # Note: Worker IDs are now numeric (ports) converted to strings internally
+        instance.deploy(ports=(1,), instance_type=InstanceType.WORKER)
 
         mock_start.assert_called_once_with("onetime-worker@1")
 
@@ -495,16 +475,16 @@ class TestDeployWorkerCommand:
         mocker.patch("ots_containers.commands.instance.app.systemd.start")
         mock_record = mocker.patch("ots_containers.commands.instance.app.db.record_deployment")
 
-        instance.deploy(ids=("billing",), instance_type=InstanceType.WORKER)
+        instance.deploy(ports=(1,), instance_type=InstanceType.WORKER)
 
         mock_record.assert_called_once()
         call_kwargs = mock_record.call_args[1]
         assert call_kwargs["action"] == "deploy-worker"
         assert call_kwargs["port"] == 0
-        assert "worker_id=billing" in call_kwargs["notes"]
+        assert "worker_id=1" in call_kwargs["notes"]
 
     def test_deploy_multiple_workers(self, mocker, tmp_path):
-        """deploy --type worker 1 2 billing should deploy multiple workers."""
+        """deploy --type worker with multiple ports should deploy multiple workers."""
         from ots_containers.commands.instance.annotations import InstanceType
 
         mock_config = mocker.MagicMock()
@@ -520,17 +500,17 @@ class TestDeployWorkerCommand:
         mock_start = mocker.patch("ots_containers.commands.instance.app.systemd.start")
         mocker.patch("ots_containers.commands.instance.app.db.record_deployment")
 
-        instance.deploy(ids=("1", "2", "billing"), instance_type=InstanceType.WORKER, delay=0)
+        instance.deploy(ports=(1, 2, 3), instance_type=InstanceType.WORKER, delay=0)
 
         assert mock_start.call_count == 3
         calls = [c[0][0] for c in mock_start.call_args_list]
         assert "onetime-worker@1" in calls
         assert "onetime-worker@2" in calls
-        assert "onetime-worker@billing" in calls
+        assert "onetime-worker@3" in calls
 
 
 class TestRedeployCommand:
-    """Test redeploy command execution with mocked dependencies."""
+    """Test redeploy command with mocked dependencies."""
 
     def test_redeploy_with_no_instances_found(self, mocker, capsys):
         """redeploy with no ports should discover all configured instances."""
@@ -614,16 +594,16 @@ class TestRedeployCommand:
         mock_recreate.assert_not_called()
 
 
-class TestEnvCommand:
-    """Test env command - displays shared /etc/default/onetimesecret."""
+class TestShowEnvCommand:
+    """Test show_env command - displays shared /etc/default/onetimesecret."""
 
-    def test_env_function_exists(self):
-        """env command should be defined."""
-        assert hasattr(instance, "env")
-        assert callable(instance.env)
+    def test_show_env_function_exists(self):
+        """show_env command should be defined."""
+        assert hasattr(instance, "show_env")
+        assert callable(instance.show_env)
 
-    def test_env_displays_shared_env_file(self, mocker, capsys, tmp_path):
-        """env should display the shared /etc/default/onetimesecret file."""
+    def test_show_env_displays_shared_env_file(self, mocker, capsys, tmp_path):
+        """show_env should display the shared /etc/default/onetimesecret file."""
         from pathlib import Path
 
         # Create test env file
@@ -640,7 +620,7 @@ class TestEnvCommand:
 
         mocker.patch("pathlib.Path", side_effect=mock_path)
 
-        instance.env()
+        instance.show_env()
 
         captured = capsys.readouterr()
         lines = captured.out.strip().split("\n")
@@ -648,8 +628,8 @@ class TestEnvCommand:
         env_lines = [line for line in lines if "=" in line and not line.startswith("===")]
         assert env_lines == ["AAA_VAR=first", "MMM_VAR=middle", "ZZZ_VAR=last"]
 
-    def test_env_handles_missing_file(self, mocker, capsys, tmp_path):
-        """env should handle missing env file gracefully."""
+    def test_show_env_handles_missing_file(self, mocker, capsys, tmp_path):
+        """show_env should handle missing env file gracefully."""
         from pathlib import Path
 
         # Point to non-existent file
@@ -663,14 +643,14 @@ class TestEnvCommand:
 
         mocker.patch("pathlib.Path", side_effect=mock_path)
 
-        instance.env()
+        instance.show_env()
 
         captured = capsys.readouterr()
         assert "(file not found)" in captured.out
 
 
 class TestExecCommand:
-    """Test exec command."""
+    """Test the exec command."""
 
     def test_exec_shell_function_exists(self):
         """exec_shell command should be defined."""
@@ -721,7 +701,7 @@ class TestListInstancesCommand:
     def test_list_with_no_instances(self, mocker, capsys):
         """list should print message when no instances found."""
         mocker.patch(
-            "ots_containers.commands.instance.app.systemd.discover_instances",
+            "ots_containers.commands.instance._helpers.systemd.discover_instances",
             return_value=[],
         )
 
@@ -733,7 +713,7 @@ class TestListInstancesCommand:
     def test_list_displays_header(self, mocker, capsys, tmp_path):
         """list should display table header."""
         mocker.patch(
-            "ots_containers.commands.instance.app.systemd.discover_instances",
+            "ots_containers.commands.instance._helpers.systemd.discover_instances",
             return_value=[7043],
         )
         mocker.patch(
@@ -767,7 +747,7 @@ class TestListInstancesCommand:
     def test_list_shows_instance_details(self, mocker, capsys, tmp_path):
         """list should show instance details from systemd and database."""
         mocker.patch(
-            "ots_containers.commands.instance.app.systemd.discover_instances",
+            "ots_containers.commands.instance._helpers.systemd.discover_instances",
             return_value=[7043],
         )
         mocker.patch(
@@ -815,7 +795,7 @@ class TestListInstancesCommand:
     def test_list_handles_missing_deployment_data(self, mocker, capsys, tmp_path):
         """list should handle instances without deployment data."""
         mocker.patch(
-            "ots_containers.commands.instance.app.systemd.discover_instances",
+            "ots_containers.commands.instance._helpers.systemd.discover_instances",
             return_value=[7043],
         )
         mocker.patch(

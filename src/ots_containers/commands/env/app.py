@@ -18,6 +18,8 @@ from ots_containers.environment_file import (
 )
 from ots_containers.quadlet import DEFAULT_ENV_FILE
 
+from ..common import DryRun, JsonOutput
+
 app = cyclopts.App(
     name="env",
     help="Manage environment files and secrets.",
@@ -33,13 +35,7 @@ def process(
             help="Path to environment file",
         ),
     ] = None,
-    dry_run: Annotated[
-        bool,
-        cyclopts.Parameter(
-            name=["--dry-run", "-n"],
-            help="Show what would be done without making changes",
-        ),
-    ] = False,
+    dry_run: DryRun = False,
     skip_secrets: Annotated[
         bool,
         cyclopts.Parameter(
@@ -59,11 +55,8 @@ def process(
 
     This command is idempotent - safe to run multiple times.
 
-    Example:
-        # Process default env file
+    Examples:
         ots env process
-
-        # Process specific file with dry-run
         ots env process -f /path/to/envfile -n
     """
     path = env_file or DEFAULT_ENV_FILE
@@ -130,6 +123,7 @@ def process(
     return 0
 
 
+@app.default
 @app.command
 def show(
     env_file: Annotated[
@@ -139,11 +133,17 @@ def show(
             help="Path to environment file",
         ),
     ] = None,
+    json_output: JsonOutput = False,
 ):
     """Show secrets configuration from environment file.
 
     Displays SECRET_VARIABLE_NAMES and the status of each secret
     (whether it exists in podman, is processed in env file, etc.).
+
+    Examples:
+        ots env show
+        ots env show -f /path/to/envfile
+        ots env show --json
     """
     path = env_file or DEFAULT_ENV_FILE
 
@@ -154,9 +154,58 @@ def show(
     parsed = EnvFile.parse(path)
 
     if not parsed.secret_variable_names:
-        print(f"File: {path}")
-        print("Warning: No SECRET_VARIABLE_NAMES defined.")
-        print("Add a line like: SECRET_VARIABLE_NAMES=VAR1,VAR2,VAR3")
+        if json_output:
+            import json
+
+            print(
+                json.dumps(
+                    {
+                        "file": str(path),
+                        "secrets": [],
+                        "warning": "No SECRET_VARIABLE_NAMES defined",
+                    }
+                )
+            )
+        else:
+            print(f"File: {path}")
+            print("Warning: No SECRET_VARIABLE_NAMES defined.")
+            print("Add a line like: SECRET_VARIABLE_NAMES=VAR1,VAR2,VAR3")
+        return 0
+
+    secrets, messages = extract_secrets(parsed)
+
+    if json_output:
+        import json
+
+        data = {
+            "file": str(path),
+            "secret_variable_names": parsed.secret_variable_names,
+            "secrets": [],
+        }
+        for spec in secrets:
+            processed_key = f"_{spec.env_var_name}"
+            if parsed.has(processed_key):
+                actual_secret_name = parsed.get(processed_key)
+                env_status = "processed"
+            elif parsed.has(spec.env_var_name):
+                actual_secret_name = spec.secret_name
+                value = parsed.get(spec.env_var_name)
+                env_status = "has value" if value else "empty"
+            else:
+                actual_secret_name = spec.secret_name
+                env_status = "not in file"
+
+            podman_status = "exists" if secret_exists(actual_secret_name) else "missing"
+
+            data["secrets"].append(
+                {
+                    "env_var": spec.env_var_name,
+                    "secret_name": actual_secret_name,
+                    "env_status": env_status,
+                    "podman_status": podman_status,
+                }
+            )
+        print(json.dumps(data, indent=2))
         return 0
 
     print(f"File: {path}")
@@ -164,8 +213,6 @@ def show(
     print()
     print("Secret Status:")
     print("-" * 60)
-
-    secrets, messages = extract_secrets(parsed)
 
     for spec in secrets:
         processed_key = f"_{spec.env_var_name}"
@@ -199,7 +246,7 @@ def show(
     return 0
 
 
-@app.command
+@app.command(name="quadlet-lines")
 def quadlet_lines(
     env_file: Annotated[
         Path | None,
@@ -213,6 +260,10 @@ def quadlet_lines(
 
     Outputs the Secret= directives that should be included in the
     quadlet container template based on SECRET_VARIABLE_NAMES.
+
+    Examples:
+        ots env quadlet-lines
+        ots env quadlet-lines -f /path/to/envfile
     """
     path = env_file or DEFAULT_ENV_FILE
 
@@ -257,6 +308,10 @@ def verify(
 
     Checks that each secret defined in SECRET_VARIABLE_NAMES has
     a corresponding podman secret created. Useful before deployment.
+
+    Examples:
+        ots env verify
+        ots env verify -f /path/to/envfile
     """
     path = env_file or DEFAULT_ENV_FILE
 
