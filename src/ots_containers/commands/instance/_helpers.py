@@ -2,9 +2,12 @@
 """Internal helper functions for instance commands."""
 
 import shlex
+import time
 from collections.abc import Callable, Sequence
 
 from ots_containers import systemd
+
+from .annotations import InstanceType
 
 
 def format_command(cmd: Sequence[str]) -> str:
@@ -16,83 +19,103 @@ def format_command(cmd: Sequence[str]) -> str:
     return " ".join(shlex.quote(arg) for arg in cmd)
 
 
-def resolve_ports(
-    ports: tuple[int, ...],
+def resolve_identifiers(
+    identifiers: tuple[str, ...],
+    instance_type: InstanceType | None,
     running_only: bool = False,
-) -> tuple[int, ...]:
-    """Return provided ports, or discover instances if none given.
+) -> dict[InstanceType, list[str]]:
+    """Resolve instance identifiers from explicit args or auto-discovery.
 
     Args:
-        ports: Explicitly provided ports. If non-empty, returned as-is.
+        identifiers: Explicitly provided identifiers. If non-empty, requires instance_type.
+        instance_type: Required when identifiers provided. If None with no identifiers,
+                      discovers all types.
         running_only: If True, only discover running instances.
-                      If False (default), discover all loaded units.
+
+    Returns:
+        Dict mapping InstanceType to list of identifiers (as strings).
+
+    Raises:
+        SystemExit: If identifiers provided without instance_type.
     """
+    # If identifiers provided, type is required
+    if identifiers:
+        if instance_type is None:
+            raise SystemExit(
+                "Instance type required when identifiers are specified. "
+                "Use --web, --worker, or --scheduler."
+            )
+        return {instance_type: list(identifiers)}
+
+    # No identifiers: discover based on type filter
+    result: dict[InstanceType, list[str]] = {}
+
+    # If type specified, only discover that type
+    if instance_type is not None:
+        if instance_type == InstanceType.WEB:
+            ports = systemd.discover_web_instances(running_only=running_only)
+            if ports:
+                result[InstanceType.WEB] = [str(p) for p in ports]
+        elif instance_type == InstanceType.WORKER:
+            workers = systemd.discover_worker_instances(running_only=running_only)
+            if workers:
+                result[InstanceType.WORKER] = workers
+        elif instance_type == InstanceType.SCHEDULER:
+            schedulers = systemd.discover_scheduler_instances(running_only=running_only)
+            if schedulers:
+                result[InstanceType.SCHEDULER] = schedulers
+        return result
+
+    # No type: discover ALL types
+    ports = systemd.discover_web_instances(running_only=running_only)
     if ports:
-        return ports
-    discovered = systemd.discover_instances(running_only=running_only)
-    if not discovered:
-        msg = "No running instances found" if running_only else "No configured instances found"
-        print(msg)
-        return ()
-    return tuple(discovered)
+        result[InstanceType.WEB] = [str(p) for p in ports]
+
+    workers = systemd.discover_worker_instances(running_only=running_only)
+    if workers:
+        result[InstanceType.WORKER] = workers
+
+    schedulers = systemd.discover_scheduler_instances(running_only=running_only)
+    if schedulers:
+        result[InstanceType.SCHEDULER] = schedulers
+
+    return result
 
 
-def resolve_worker_ids(
-    worker_ids: tuple[str, ...],
-    running_only: bool = False,
-) -> tuple[str, ...]:
-    """Return provided worker IDs, or discover worker instances if none given.
+def for_each_instance(
+    instances: dict[InstanceType, list[str]],
+    delay: int,
+    action: Callable[[InstanceType, str], None],
+    verb: str,
+) -> int:
+    """Run action for each instance with delay between.
 
     Args:
-        worker_ids: Explicitly provided worker IDs. If non-empty, returned as-is.
-        running_only: If True, only discover running instances.
-                      If False (default), discover all loaded units.
+        instances: Dict mapping InstanceType to list of identifiers
+        delay: Seconds to wait between operations
+        action: Callable taking (instance_type, identifier)
+        verb: Present participle for logging (e.g., "Restarting")
+
+    Returns:
+        Total number of instances processed.
     """
-    if worker_ids:
-        return worker_ids
-    discovered = systemd.discover_worker_instances(running_only=running_only)
-    if not discovered:
-        if running_only:
-            print("No running worker instances found")
-        else:
-            print("No configured worker instances found")
-        return ()
-    return tuple(discovered)
+    # Flatten to list of (type, id) tuples
+    items: list[tuple[InstanceType, str]] = []
+    for itype, ids in instances.items():
+        for id_ in ids:
+            items.append((itype, id_))
 
+    total = len(items)
+    if total == 0:
+        return 0
 
-def for_each(
-    ports: tuple[int, ...],
-    delay: int,
-    action: Callable[[int], None],
-    verb: str,
-) -> None:
-    """Run action for each port with delay between."""
-    import time
-
-    total = len(ports)
-    for i, port in enumerate(ports, 1):
-        print(f"[{i}/{total}] {verb} container on port {port}...")
-        action(port)
+    for i, (itype, id_) in enumerate(items, 1):
+        unit = systemd.unit_name(itype.value, id_)
+        print(f"[{i}/{total}] {verb} {unit}...")
+        action(itype, id_)
         if i < total and delay > 0:
             print(f"Waiting {delay}s...")
             time.sleep(delay)
-    print(f"Processed {total} container(s)")
 
-
-def for_each_worker(
-    worker_ids: tuple[str, ...],
-    delay: int,
-    action: Callable[[str], None],
-    verb: str,
-) -> None:
-    """Run action for each worker ID with delay between."""
-    import time
-
-    total = len(worker_ids)
-    for i, worker_id in enumerate(worker_ids, 1):
-        print(f"[{i}/{total}] {verb} worker {worker_id}...")
-        action(worker_id)
-        if i < total and delay > 0:
-            print(f"Waiting {delay}s...")
-            time.sleep(delay)
-    print(f"Processed {total} worker(s)")
+    print(f"Processed {total} instance(s)")
+    return total

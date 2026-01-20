@@ -4,21 +4,34 @@ import re
 import subprocess
 
 
-def discover_instances(running_only: bool = False) -> list[int]:
-    """Find onetime@* units and return their ports.
+def unit_name(instance_type: str, identifier: str) -> str:
+    """Build a systemd unit name for an OTS instance.
+
+    Args:
+        instance_type: One of "web", "worker", "scheduler"
+        identifier: Port number (for web) or ID (for worker/scheduler)
+
+    Returns:
+        Unit name like "onetime-web@7043" or "onetime-worker@billing"
+    """
+    return f"onetime-{instance_type}@{identifier}"
+
+
+def discover_web_instances(running_only: bool = False) -> list[int]:
+    """Find onetime-web@* units and return their ports.
 
     Args:
         running_only: If True, only return units that are active and running.
                       If False (default), return all loaded units regardless of state.
     """
     result = subprocess.run(
-        ["systemctl", "list-units", "onetime@*", "--plain", "--no-legend", "--all"],
+        ["systemctl", "list-units", "onetime-web@*", "--plain", "--no-legend", "--all"],
         capture_output=True,
         text=True,
     )
     ports = []
     for line in result.stdout.strip().splitlines():
-        # Format: onetime@7043.service loaded active running Description...
+        # Format: onetime-web@7043.service loaded active running Description...
         # Columns: UNIT LOAD ACTIVE SUB DESCRIPTION
         parts = line.split()
         if len(parts) < 4:
@@ -30,7 +43,7 @@ def discover_instances(running_only: bool = False) -> list[int]:
         # If running_only, filter to active+running
         if running_only and (active != "active" or sub != "running"):
             continue
-        match = re.match(r"onetime@(\d+)\.service", unit)
+        match = re.match(r"onetime-web@(\d+)\.service", unit)
         if match:
             ports.append(int(match.group(1)))
     return sorted(ports)
@@ -71,6 +84,41 @@ def discover_worker_instances(running_only: bool = False) -> list[str]:
     return sorted(instances)
 
 
+def discover_scheduler_instances(running_only: bool = False) -> list[str]:
+    """Find onetime-scheduler@* units and return their instance IDs.
+
+    Scheduler instance IDs can be numeric (1, 2) or named (main, cron).
+
+    Args:
+        running_only: If True, only return units that are active and running.
+                      If False (default), return all loaded units regardless of state.
+    """
+    result = subprocess.run(
+        ["systemctl", "list-units", "onetime-scheduler@*", "--plain", "--no-legend", "--all"],
+        capture_output=True,
+        text=True,
+    )
+    instances = []
+    for line in result.stdout.strip().splitlines():
+        # Format: onetime-scheduler@main.service loaded active running Description...
+        # Columns: UNIT LOAD ACTIVE SUB DESCRIPTION
+        parts = line.split()
+        if len(parts) < 4:
+            continue
+        unit, load, active, sub = parts[:4]
+        # Skip units that aren't loaded
+        if load != "loaded":
+            continue
+        # If running_only, filter to active+running
+        if running_only and (active != "active" or sub != "running"):
+            continue
+        # Match both numeric and named instances
+        match = re.match(r"onetime-scheduler@([^.]+)\.service", unit)
+        if match:
+            instances.append(match.group(1))
+    return sorted(instances)
+
+
 def daemon_reload() -> None:
     cmd = ["sudo", "systemctl", "daemon-reload"]
     print(f"  $ {' '.join(cmd)}")
@@ -99,7 +147,7 @@ def unit_to_container_name(unit: str) -> str:
     """Convert systemd unit name to Quadlet container name.
 
     Quadlet names containers as: systemd-{unit_with_underscores}
-    Example: onetime@7044 -> systemd-onetime_7044
+    Example: onetime-web@7044 -> systemd-onetime-web_7044
     """
     # Remove .service suffix if present
     name = unit.removesuffix(".service")

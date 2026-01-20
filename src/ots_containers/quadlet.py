@@ -17,9 +17,9 @@ from .environment_file import generate_quadlet_secret_lines, get_secrets_from_en
 DEFAULT_ENV_FILE = Path("/etc/default/onetimesecret")
 
 # Quadlet template with {secrets_section} placeholder for dynamic generation
-CONTAINER_TEMPLATE = """\
-# OneTimeSecret Quadlet - Systemd-managed Podman container
-# Location: /etc/containers/systemd/onetime@.container
+WEB_TEMPLATE = """\
+# OneTimeSecret Web Quadlet - Systemd-managed Podman container
+# Location: /etc/containers/systemd/onetime-web@.container
 #
 # PREREQUISITES (one-time setup):
 #
@@ -36,23 +36,23 @@ CONTAINER_TEMPLATE = """\
 #    config.yaml, auth.yaml, logging.yaml, billing.yaml
 #
 # OPERATIONS:
-#   Start:    systemctl start onetime@7043
-#   Stop:     systemctl stop onetime@7043
-#   Logs:     journalctl -u onetime@7043 -f
-#   Status:   systemctl status onetime@7043
+#   Start:    systemctl start onetime-web@7043
+#   Stop:     systemctl stop onetime-web@7043
+#   Logs:     journalctl -u onetime-web@7043 -f
+#   Status:   systemctl status onetime-web@7043
 #
 # SECRET ROTATION:
 #   podman secret rm ots_hmac_secret
 #   openssl rand -hex 32 | podman secret create ots_hmac_secret -
-#   systemctl restart onetime@7043
+#   systemctl restart onetime-web@7043
 #
 # TROUBLESHOOTING:
 #   List secrets:  podman secret ls
 #   Inspect:       podman secret inspect ots_hmac_secret
-#   Container:     podman exec -it systemd-onetime@7043 /bin/sh
+#   Container:     podman exec -it systemd-onetime-web_7043 /bin/sh
 
 [Unit]
-Description=OneTimeSecret Container %i
+Description=OneTimeSecret Web Container %i
 After=local-fs.target network-online.target
 Wants=network-online.target
 
@@ -67,7 +67,7 @@ Network=host
 # Syslog tag for unified log filtering: journalctl -t onetime -f
 PodmanArgs=--log-opt tag=onetime
 
-# Port is derived from instance name: onetime@7043 -> PORT=7043
+# Port is derived from instance name: onetime-web@7043 -> PORT=7043
 Environment=PORT=%i
 
 # Infrastructure config (connection strings, log level)
@@ -118,8 +118,8 @@ def get_secrets_section(env_file_path: Path | None = None) -> str:
     return generate_quadlet_secret_lines(secrets)
 
 
-def write_template(cfg: Config, env_file_path: Path | None = None) -> None:
-    """Write the container quadlet template.
+def write_web_template(cfg: Config, env_file_path: Path | None = None) -> None:
+    """Write the web container quadlet template.
 
     Args:
         cfg: Configuration object with image and paths
@@ -127,13 +127,13 @@ def write_template(cfg: Config, env_file_path: Path | None = None) -> None:
     """
     secrets_section = get_secrets_section(env_file_path)
 
-    content = CONTAINER_TEMPLATE.format(
+    content = WEB_TEMPLATE.format(
         image=cfg.resolved_image_with_tag,
         config_dir=cfg.config_dir,
         secrets_section=secrets_section,
     )
-    cfg.template_path.parent.mkdir(parents=True, exist_ok=True)
-    cfg.template_path.write_text(content)
+    cfg.web_template_path.parent.mkdir(parents=True, exist_ok=True)
+    cfg.web_template_path.write_text(content)
     systemd.daemon_reload()
 
 
@@ -236,4 +236,106 @@ def write_worker_template(cfg: Config, env_file_path: Path | None = None) -> Non
     )
     cfg.worker_template_path.parent.mkdir(parents=True, exist_ok=True)
     cfg.worker_template_path.write_text(content)
+    systemd.daemon_reload()
+
+
+# Scheduler quadlet template - for cron-like job scheduling
+SCHEDULER_TEMPLATE = """\
+# OneTimeSecret Scheduler Quadlet - Systemd-managed Podman container for job scheduling
+# Location: /etc/containers/systemd/onetime-scheduler@.container
+#
+# PREREQUISITES (one-time setup):
+#
+# 0. (Private registry only) Pull image with authentication:
+#    ots-containers image pull --tag <tag>
+#    # Uses credentials from /etc/containers/auth.json
+#
+# 1. Process environment file to create podman secrets:
+#    ots env process /etc/default/onetimesecret
+#    # This reads SECRET_VARIABLE_NAMES from the env file,
+#    # creates podman secrets, and updates the file
+#
+# 2. Place YAML configs in {config_dir}/:
+#    config.yaml, auth.yaml, logging.yaml, billing.yaml
+#
+# OPERATIONS:
+#   Start:    systemctl start onetime-scheduler@main
+#   Stop:     systemctl stop onetime-scheduler@main
+#   Logs:     journalctl -u onetime-scheduler@main -f
+#   Status:   systemctl status onetime-scheduler@main
+#
+# SCHEDULER INSTANCES:
+#   Named:   onetime-scheduler@main, onetime-scheduler@cron
+#   Numeric: onetime-scheduler@1
+#
+# SECRET ROTATION:
+#   podman secret rm ots_hmac_secret
+#   openssl rand -hex 32 | podman secret create ots_hmac_secret -
+#   systemctl restart onetime-scheduler@main
+#
+# TROUBLESHOOTING:
+#   List secrets:  podman secret ls
+#   Inspect:       podman secret inspect ots_hmac_secret
+#   Container:     podman exec -it systemd-onetime-scheduler_main /bin/sh
+
+[Unit]
+Description=OneTimeSecret Scheduler %i
+After=local-fs.target network-online.target
+Wants=network-online.target
+
+[Service]
+Restart=on-failure
+RestartSec=5
+# Allow time for graceful job completion on stop
+TimeoutStopSec=60
+
+[Container]
+Image={image}
+Network=host
+
+# Syslog tag for unified log filtering: journalctl -t onetime -f
+PodmanArgs=--log-opt tag=onetime
+
+# Scheduler ID is derived from instance name: onetime-scheduler@main -> SCHEDULER_ID=main
+Environment=SCHEDULER_ID=%i
+
+# Infrastructure config (connection strings, log level)
+# Edit this file and restart to apply changes
+EnvironmentFile=/etc/default/onetimesecret
+
+{secrets_section}
+
+# Config directory mounted read-only (all YAML configs)
+Volume={config_dir}:/app/etc:ro
+
+# Scheduler entry point - runs scheduled job processor
+Exec=bin/entrypoint.sh bin/ots scheduler
+
+# Health check - verify scheduler process is running
+HealthCmd=pgrep -f "scheduler" || exit 1
+HealthInterval=30s
+HealthRetries=3
+HealthStartPeriod=15s
+
+[Install]
+WantedBy=multi-user.target
+"""
+
+
+def write_scheduler_template(cfg: Config, env_file_path: Path | None = None) -> None:
+    """Write the scheduler container quadlet template.
+
+    Args:
+        cfg: Configuration object with image and paths
+        env_file_path: Optional path to environment file for secret discovery
+    """
+    secrets_section = get_secrets_section(env_file_path)
+
+    content = SCHEDULER_TEMPLATE.format(
+        image=cfg.resolved_image_with_tag,
+        config_dir=cfg.config_dir,
+        secrets_section=secrets_section,
+    )
+    cfg.scheduler_template_path.parent.mkdir(parents=True, exist_ok=True)
+    cfg.scheduler_template_path.write_text(content)
     systemd.daemon_reload()

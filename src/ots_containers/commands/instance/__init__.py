@@ -2,7 +2,16 @@
 
 """Instance management commands for OTS containers."""
 
-from .annotations import Delay, InstanceType, OptionalPorts, Port, Ports, WorkerIds
+from .annotations import (
+    Delay,
+    Identifiers,
+    InstanceType,
+    SchedulerFlag,
+    TypeSelector,
+    WebFlag,
+    WorkerFlag,
+    resolve_instance_type,
+)
 from .app import (
     app,
     deploy,
@@ -23,11 +32,12 @@ from .app import (
 
 __all__ = [
     "Delay",
+    "Identifiers",
     "InstanceType",
-    "OptionalPorts",
-    "Port",
-    "Ports",
-    "WorkerIds",
+    "SchedulerFlag",
+    "TypeSelector",
+    "WebFlag",
+    "WorkerFlag",
     "app",
     "deploy",
     "disable",
@@ -36,6 +46,7 @@ __all__ = [
     "list_instances",
     "logs",
     "redeploy",
+    "resolve_instance_type",
     "restart",
     "run",
     "show_env",

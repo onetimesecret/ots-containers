@@ -155,14 +155,16 @@ def init(
     # 2. System Configuration - quadlet files
     if not quiet or check:
         print("\nSystem Configuration:")
-    quadlet_dir = cfg.template_path.parent
+    quadlet_dir = cfg.web_template_path.parent
     users_dir = quadlet_dir / "users"
+    template_paths = [cfg.web_template_path, cfg.worker_template_path, cfg.scheduler_template_path]
     if check:
-        if cfg.template_path.exists():
-            print(f"  [ok] {cfg.template_path}")
-        else:
-            print(f"  [missing] {cfg.template_path}")
-            all_ok = False
+        for template_path in template_paths:
+            if template_path.exists():
+                print(f"  [ok] {template_path}")
+            else:
+                print(f"  [missing] {template_path}")
+                all_ok = False
         if users_dir.exists():
             if any(users_dir.iterdir()):
                 print(f"  [ok] {users_dir}")
@@ -174,10 +176,11 @@ def init(
         if _create_directory(quadlet_dir, mode=0o755, quiet=True) is None:
             all_ok = False
         if not quiet:
-            if cfg.template_path.exists():
-                print(f"  [ok] {cfg.template_path}")
-            else:
-                print(f"  [missing] {cfg.template_path}")
+            for template_path in template_paths:
+                if template_path.exists():
+                    print(f"  [ok] {template_path}")
+                else:
+                    print(f"  [missing] {template_path}")
             if users_dir.exists():
                 if any(users_dir.iterdir()):
                     print(f"  [ok] {users_dir}")

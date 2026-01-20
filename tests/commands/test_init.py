@@ -183,13 +183,15 @@ class TestInitCommand:
         """Check mode should report missing directories without creating."""
         from ots_containers.commands.init import init
 
+        quadlet_dir = tmp_path / "etc" / "containers" / "systemd"
+
         # Create a mock config pointing to tmp_path subdirs
         mock_config = mocker.MagicMock()
         mock_config.config_dir = tmp_path / "etc" / "onetimesecret"
         mock_config.var_dir = tmp_path / "var" / "lib" / "onetimesecret"
-        mock_config.template_path = (
-            tmp_path / "etc" / "containers" / "systemd" / "onetime@.container"
-        )
+        mock_config.web_template_path = quadlet_dir / "onetime-web@.container"
+        mock_config.worker_template_path = quadlet_dir / "onetime-worker@.container"
+        mock_config.scheduler_template_path = quadlet_dir / "onetime-scheduler@.container"
         mock_config.config_yaml = mock_config.config_dir / "config.yaml"
         mock_config.db_path = mock_config.var_dir / "deployments.db"
 
@@ -221,12 +223,16 @@ class TestInitCommand:
 
         (config_dir / "config.yaml").touch()
         (var_dir / "deployments.db").touch()
-        (quadlet_dir / "onetime@.container").touch()
+        (quadlet_dir / "onetime-web@.container").touch()
+        (quadlet_dir / "onetime-worker@.container").touch()
+        (quadlet_dir / "onetime-scheduler@.container").touch()
 
         mock_config = mocker.MagicMock()
         mock_config.config_dir = config_dir
         mock_config.var_dir = var_dir
-        mock_config.template_path = quadlet_dir / "onetime@.container"
+        mock_config.web_template_path = quadlet_dir / "onetime-web@.container"
+        mock_config.worker_template_path = quadlet_dir / "onetime-worker@.container"
+        mock_config.scheduler_template_path = quadlet_dir / "onetime-scheduler@.container"
         mock_config.config_yaml = config_dir / "config.yaml"
         mock_config.db_path = var_dir / "deployments.db"
 
@@ -243,12 +249,14 @@ class TestInitCommand:
         """Init should continue after permission errors and report failure."""
         from ots_containers.commands.init import init
 
+        quadlet_dir = tmp_path / "etc" / "containers" / "systemd"
+
         mock_config = mocker.MagicMock()
         mock_config.config_dir = tmp_path / "etc" / "onetimesecret"
         mock_config.var_dir = tmp_path / "var" / "lib" / "onetimesecret"
-        mock_config.template_path = (
-            tmp_path / "etc" / "containers" / "systemd" / "onetime@.container"
-        )
+        mock_config.web_template_path = quadlet_dir / "onetime-web@.container"
+        mock_config.worker_template_path = quadlet_dir / "onetime-worker@.container"
+        mock_config.scheduler_template_path = quadlet_dir / "onetime-scheduler@.container"
         mock_config.config_yaml = mock_config.config_dir / "config.yaml"
         mock_config.db_path = mock_config.var_dir / "deployments.db"
 
@@ -276,7 +284,9 @@ class TestInitCommand:
         mock_config = mocker.MagicMock()
         mock_config.config_dir = config_dir
         mock_config.var_dir = var_dir
-        mock_config.template_path = quadlet_dir / "onetime@.container"
+        mock_config.web_template_path = quadlet_dir / "onetime-web@.container"
+        mock_config.worker_template_path = quadlet_dir / "onetime-worker@.container"
+        mock_config.scheduler_template_path = quadlet_dir / "onetime-scheduler@.container"
         mock_config.config_yaml = config_dir / "config.yaml"
         mock_config.db_path = var_dir / "deployments.db"
 
@@ -310,7 +320,9 @@ class TestInitCommand:
         mock_config = mocker.MagicMock()
         mock_config.config_dir = config_dir
         mock_config.var_dir = var_dir
-        mock_config.template_path = quadlet_dir / "onetime@.container"
+        mock_config.web_template_path = quadlet_dir / "onetime-web@.container"
+        mock_config.worker_template_path = quadlet_dir / "onetime-worker@.container"
+        mock_config.scheduler_template_path = quadlet_dir / "onetime-scheduler@.container"
         mock_config.config_yaml = config_dir / "config.yaml"
         mock_config.db_path = var_dir / "deployments.db"
 
@@ -342,7 +354,9 @@ class TestInitCommand:
         mock_config = mocker.MagicMock()
         mock_config.config_dir = config_dir
         mock_config.var_dir = var_dir
-        mock_config.template_path = quadlet_dir / "onetime@.container"
+        mock_config.web_template_path = quadlet_dir / "onetime-web@.container"
+        mock_config.worker_template_path = quadlet_dir / "onetime-worker@.container"
+        mock_config.scheduler_template_path = quadlet_dir / "onetime-scheduler@.container"
         mock_config.config_yaml = config_dir / "config.yaml"
         mock_config.db_path = var_dir / "deployments.db"
         # db_path doesn't exist, so init_db will be called
