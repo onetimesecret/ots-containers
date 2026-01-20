@@ -886,6 +886,77 @@ class TestEnableCommand:
         assert "Failed" in captured.out
 
 
+class TestStopCommand:
+    """Test stop command."""
+
+    def test_stop_function_exists(self):
+        """stop command should be defined."""
+        assert hasattr(instance, "stop")
+        assert callable(instance.stop)
+
+    def test_stop_calls_systemd_stop(self, mocker, capsys):
+        """stop should call systemd.stop for each port."""
+        mock_stop = mocker.patch("ots_containers.commands.instance.app.systemd.stop")
+
+        instance.stop(ports=(7043,))
+
+        mock_stop.assert_called_once_with("onetime@7043")
+        captured = capsys.readouterr()
+        assert "Stopped onetime@7043" in captured.out
+
+    def test_stop_discovers_instances_when_no_ports(self, mocker):
+        """stop with no ports should discover web and worker instances."""
+        mocker.patch(
+            "ots_containers.commands.instance._helpers.systemd.discover_instances",
+            return_value=[7043, 7044],
+        )
+        mocker.patch(
+            "ots_containers.commands.instance._helpers.systemd.discover_worker_instances",
+            return_value=["1"],
+        )
+        mock_stop = mocker.patch("ots_containers.commands.instance.app.systemd.stop")
+
+        instance.stop(ports=())
+
+        assert mock_stop.call_count == 3
+        calls = [c[0][0] for c in mock_stop.call_args_list]
+        assert "onetime@7043" in calls
+        assert "onetime@7044" in calls
+        assert "onetime-worker@1" in calls
+
+    def test_stop_with_no_running_instances(self, mocker, capsys):
+        """stop with no running instances should print message and return."""
+        mocker.patch(
+            "ots_containers.commands.instance._helpers.systemd.discover_instances",
+            return_value=[],
+        )
+        mocker.patch(
+            "ots_containers.commands.instance._helpers.systemd.discover_worker_instances",
+            return_value=[],
+        )
+        mock_stop = mocker.patch("ots_containers.commands.instance.app.systemd.stop")
+
+        instance.stop(ports=())
+
+        mock_stop.assert_not_called()
+        captured = capsys.readouterr()
+        assert "No running instances found" in captured.out
+
+    def test_stop_with_specific_ports_skips_workers(self, mocker):
+        """stop with explicit ports should only stop those, not workers."""
+        mocker.patch(
+            "ots_containers.commands.instance._helpers.systemd.discover_worker_instances",
+            return_value=["1"],
+        )
+        mock_stop = mocker.patch("ots_containers.commands.instance.app.systemd.stop")
+
+        instance.stop(ports=(7043,))
+
+        # Only the specified web container, not the worker
+        assert mock_stop.call_count == 1
+        mock_stop.assert_called_once_with("onetime@7043")
+
+
 class TestRestartCommand:
     """Test restart command."""
 
@@ -922,24 +993,33 @@ class TestRestartCommand:
         assert "Restarted onetime@7045" in captured.out
 
     def test_restart_discovers_instances_when_no_ports(self, mocker):
-        """restart with no ports should discover instances and restart them."""
+        """restart with no ports should discover web and worker instances."""
         mocker.patch(
             "ots_containers.commands.instance._helpers.systemd.discover_instances",
             return_value=[7043, 7044],
+        )
+        mocker.patch(
+            "ots_containers.commands.instance._helpers.systemd.discover_worker_instances",
+            return_value=["1"],
         )
         mock_restart = mocker.patch("ots_containers.commands.instance.app.systemd.restart")
 
         instance.restart(ports=())
 
-        assert mock_restart.call_count == 2
+        assert mock_restart.call_count == 3
         calls = [c[0][0] for c in mock_restart.call_args_list]
         assert "onetime@7043" in calls
         assert "onetime@7044" in calls
+        assert "onetime-worker@1" in calls
 
     def test_restart_with_no_running_instances(self, mocker, capsys):
         """restart with no running instances should print message and return."""
         mocker.patch(
             "ots_containers.commands.instance._helpers.systemd.discover_instances",
+            return_value=[],
+        )
+        mocker.patch(
+            "ots_containers.commands.instance._helpers.systemd.discover_worker_instances",
             return_value=[],
         )
         mock_restart = mocker.patch("ots_containers.commands.instance.app.systemd.restart")
@@ -948,7 +1028,21 @@ class TestRestartCommand:
 
         mock_restart.assert_not_called()
         captured = capsys.readouterr()
-        assert "No configured instances found" in captured.out
+        assert "No running instances found" in captured.out
+
+    def test_restart_with_specific_ports_skips_workers(self, mocker, capsys):
+        """restart with explicit ports should only restart those, not workers."""
+        mocker.patch(
+            "ots_containers.commands.instance._helpers.systemd.discover_worker_instances",
+            return_value=["1"],
+        )
+        mock_restart = mocker.patch("ots_containers.commands.instance.app.systemd.restart")
+
+        instance.restart(ports=(7043,))
+
+        # Only the specified web container, not the worker
+        assert mock_restart.call_count == 1
+        mock_restart.assert_called_once_with("onetime@7043")
 
 
 class TestDisableCommand:

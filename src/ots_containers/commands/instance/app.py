@@ -10,7 +10,13 @@ from ots_containers import assets, db, quadlet, systemd
 from ots_containers.config import Config
 
 from ..common import DryRun, Follow, JsonOutput, Lines, Quiet, Yes
-from ._helpers import for_each, for_each_worker, format_command, resolve_ports
+from ._helpers import (
+    for_each,
+    for_each_worker,
+    format_command,
+    resolve_ports,
+    resolve_worker_ids,
+)
 from .annotations import Delay, InstanceType, OptionalPorts, Port, Ports
 
 app = cyclopts.App(
@@ -583,17 +589,29 @@ def stop(ports: OptionalPorts = ()):
     """Stop systemd unit(s) for instance(s).
 
     Does NOT affect quadlet config.
+    Only stops running instances; already-stopped instances are skipped.
+
+    When no ports specified, stops all running web AND worker instances.
 
     Examples:
-        ots instance stop
-        ots instance stop -p 7043 7044
+        ots instance stop                    # Stop all running instances
+        ots instance stop -p 7043 7044       # Stop specific web instances
     """
-    ports = resolve_ports(ports)
-    if not ports:
-        return
+    # Track if user explicitly specified ports
+    explicit_ports = bool(ports)
+
+    ports = resolve_ports(ports, running_only=True)
     for port in ports:
         systemd.stop(f"onetime@{port}")
         print(f"Stopped onetime@{port}")
+
+    # Also stop workers when no specific ports given
+    if not explicit_ports:
+        worker_ids = resolve_worker_ids((), running_only=True)
+        for worker_id in worker_ids:
+            unit = f"onetime-worker@{worker_id}"
+            systemd.stop(unit)
+            print(f"Stopped {unit}")
 
 
 @app.command
@@ -601,18 +619,30 @@ def restart(ports: OptionalPorts = ()):
     """Restart systemd unit(s) for instance(s).
 
     Does NOT regenerate quadlet - use 'redeploy' for that.
+    Only restarts running instances; stopped instances are skipped.
+
+    When no ports specified, restarts all running web AND worker instances.
 
     Examples:
-        ots instance restart
-        ots instance restart -p 7043 7044
+        ots instance restart                 # Restart all running instances
+        ots instance restart -p 7043 7044    # Restart specific web instances
     """
-    ports = resolve_ports(ports)
-    if not ports:
-        return
+    # Track if user explicitly specified ports
+    explicit_ports = bool(ports)
+
+    ports = resolve_ports(ports, running_only=True)
     for port in ports:
         unit = f"onetime@{port}"
         systemd.restart(unit)
         print(f"Restarted {unit}")
+
+    # Also restart workers when no specific ports given
+    if not explicit_ports:
+        worker_ids = resolve_worker_ids((), running_only=True)
+        for worker_id in worker_ids:
+            unit = f"onetime-worker@{worker_id}"
+            systemd.restart(unit)
+            print(f"Restarted {unit}")
 
 
 @app.command
