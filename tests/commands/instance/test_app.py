@@ -826,3 +826,120 @@ class TestListInstancesCommand:
         assert "inactive" in captured.out
         assert "unknown" in captured.out
         assert "n/a" in captured.out
+
+
+class TestEnableCommand:
+    """Test enable command."""
+
+    def test_enable_function_exists(self):
+        """enable command should be defined."""
+        assert hasattr(instance, "enable")
+        assert callable(instance.enable)
+
+    def test_enable_calls_systemctl(self, mocker, capsys):
+        """enable should call systemctl enable."""
+        mocker.patch(
+            "ots_containers.commands.instance._helpers.systemd.discover_instances",
+            return_value=[7043],
+        )
+        mock_run = mocker.patch("ots_containers.commands.instance.app.subprocess.run")
+
+        instance.enable(ports=(7043,))
+
+        mock_run.assert_called_once()
+        call_args = mock_run.call_args[0][0]
+        assert "systemctl" in call_args
+        assert "enable" in call_args
+        assert "onetime@7043" in call_args
+
+        captured = capsys.readouterr()
+        assert "Enabled" in captured.out
+
+    def test_enable_with_no_instances(self, mocker, capsys):
+        """enable with no ports should discover instances."""
+        mocker.patch(
+            "ots_containers.commands.instance._helpers.systemd.discover_instances",
+            return_value=[],
+        )
+
+        instance.enable(ports=())
+
+        captured = capsys.readouterr()
+        assert "No" in captured.out or captured.out == ""
+
+    def test_enable_handles_error(self, mocker, capsys):
+        """enable should handle systemctl errors gracefully."""
+        import subprocess
+
+        mocker.patch(
+            "ots_containers.commands.instance._helpers.systemd.discover_instances",
+            return_value=[7043],
+        )
+        mocker.patch(
+            "ots_containers.commands.instance.app.subprocess.run",
+            side_effect=subprocess.CalledProcessError(1, "systemctl", stderr="unit not found"),
+        )
+
+        instance.enable(ports=(7043,))
+
+        captured = capsys.readouterr()
+        assert "Failed" in captured.out
+
+
+class TestDisableCommand:
+    """Test disable command."""
+
+    def test_disable_function_exists(self):
+        """disable command should be defined."""
+        assert hasattr(instance, "disable")
+        assert callable(instance.disable)
+
+    def test_disable_aborts_without_confirmation(self, mocker, capsys):
+        """disable should abort without --yes if user declines."""
+        mocker.patch(
+            "ots_containers.commands.instance._helpers.systemd.discover_instances",
+            return_value=[7043],
+        )
+        mocker.patch("builtins.input", return_value="n")
+
+        instance.disable(ports=(7043,), yes=False)
+
+        captured = capsys.readouterr()
+        assert "Aborted" in captured.out
+
+    def test_disable_calls_systemctl(self, mocker, capsys):
+        """disable should call systemctl disable with --yes."""
+        mocker.patch(
+            "ots_containers.commands.instance._helpers.systemd.discover_instances",
+            return_value=[7043],
+        )
+        mock_run = mocker.patch("ots_containers.commands.instance.app.subprocess.run")
+
+        instance.disable(ports=(7043,), yes=True)
+
+        mock_run.assert_called_once()
+        call_args = mock_run.call_args[0][0]
+        assert "systemctl" in call_args
+        assert "disable" in call_args
+        assert "onetime@7043" in call_args
+
+        captured = capsys.readouterr()
+        assert "Disabled" in captured.out
+
+    def test_disable_handles_error(self, mocker, capsys):
+        """disable should handle systemctl errors gracefully."""
+        import subprocess
+
+        mocker.patch(
+            "ots_containers.commands.instance._helpers.systemd.discover_instances",
+            return_value=[7043],
+        )
+        mocker.patch(
+            "ots_containers.commands.instance.app.subprocess.run",
+            side_effect=subprocess.CalledProcessError(1, "systemctl", stderr="unit not found"),
+        )
+
+        instance.disable(ports=(7043,), yes=True)
+
+        captured = capsys.readouterr()
+        assert "Failed" in captured.out
