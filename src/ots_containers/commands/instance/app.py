@@ -611,12 +611,8 @@ def restart(ports: OptionalPorts = ()):
         return
     for port in ports:
         unit = f"onetime@{port}"
-        if systemd.unit_exists(unit):
-            systemd.restart(unit)
-            print(f"Restarted {unit}")
-        else:
-            systemd.start(unit)
-            print(f"Started {unit} (unit was not loaded)")
+        systemd.restart(unit)
+        print(f"Restarted {unit}")
 
 
 @app.command
