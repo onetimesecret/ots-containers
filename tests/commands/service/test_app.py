@@ -4,11 +4,11 @@
 from unittest.mock import MagicMock, patch
 
 from ots_containers.commands.service.app import (
-    _default,
     app,
     disable,
     enable,
     init,
+    list_all,
     list_instances,
     logs,
     restart,
@@ -24,7 +24,8 @@ class TestServiceAppExists:
     def test_app_exists(self):
         """Test service app is defined."""
         assert app is not None
-        assert app.name == ("service",)
+        # Now supports both "service" and "services" as aliases
+        assert "service" in app.name or app.name == ("service", "services")
 
     def test_init_command_exists(self):
         """Test init command is registered."""
@@ -64,12 +65,19 @@ class TestServiceAppExists:
 
 
 class TestDefaultCommand:
-    """Tests for default command."""
+    """Tests for default command (list_all)."""
 
-    def test_default_prints_packages(self, capsys):
-        """Test default command lists available packages."""
-        _default()
+    @patch("ots_containers.commands.service.app.is_service_enabled")
+    @patch("ots_containers.commands.service.app.is_service_active")
+    @patch("subprocess.run")
+    def test_default_no_instances(self, mock_run, mock_active, mock_enabled, capsys):
+        """Test default command when no instances found."""
+        mock_run.return_value = MagicMock(stdout="")
+
+        list_all()
+
         captured = capsys.readouterr()
+        assert "No service instances found" in captured.out
         assert "Available packages:" in captured.out
         assert "valkey" in captured.out
         assert "redis" in captured.out
@@ -267,7 +275,7 @@ class TestDisableCommand:
     @patch("ots_containers.commands.service.app.systemctl")
     def test_disable_calls_systemctl(self, mock_systemctl, capsys):
         """Test disable calls systemctl stop and disable."""
-        disable("valkey", "6379")
+        disable("valkey", "6379", yes=True)
 
         # Should call stop then disable
         assert mock_systemctl.call_count >= 2

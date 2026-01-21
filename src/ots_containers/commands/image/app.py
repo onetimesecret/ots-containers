@@ -22,6 +22,8 @@ from ots_containers import db
 from ots_containers.config import DEFAULT_IMAGE, Config
 from ots_containers.podman import podman
 
+from ..common import JsonOutput, Lines, Quiet, Yes
+
 app = cyclopts.App(
     name=["image", "images"],
     help="Manage container images (pull, aliases, rollback).",
@@ -58,10 +60,7 @@ def pull(
             help="Pull from private registry (uses configured OTS_REGISTRY)",
         ),
     ] = False,
-    quiet: Annotated[
-        bool,
-        cyclopts.Parameter(name=["--quiet", "-q"], help="Suppress progress output"),
-    ] = False,
+    quiet: Quiet = False,
 ):
     """Pull a container image from registry.
 
@@ -127,6 +126,7 @@ def pull(
                 print(f"Set CURRENT to {tag}")
 
 
+@app.default
 @app.command(name="list")
 def ls(
     all_tags: Annotated[
@@ -136,12 +136,39 @@ def ls(
             help="Show all images, not just onetimesecret",
         ),
     ] = False,
+    json_output: JsonOutput = False,
 ):
     """List local container images.
 
     Shows images available locally (already pulled).
+
+    Examples:
+        ots image list
+        ots image list --all
+        ots image list --json
     """
     cfg = Config()
+
+    if json_output:
+        import json as json_module
+
+        result = podman.images(
+            format="json",
+            capture_output=True,
+            text=True,
+        )
+        # Filter if not all_tags
+        if not all_tags:
+            images = json_module.loads(result.stdout)
+            images = [
+                img
+                for img in images
+                if any("onetimesecret" in name for name in img.get("Names", []))
+            ]
+            print(json_module.dumps(images, indent=2))
+        else:
+            print(result.stdout)
+        return
 
     if all_tags:
         result = podman.images(
@@ -184,10 +211,7 @@ def list_remote(
             help="Image name to list tags for",
         ),
     ] = "onetimesecret",
-    quiet: Annotated[
-        bool,
-        cyclopts.Parameter(name=["--quiet", "-q"], help="Suppress command output"),
-    ] = False,
+    quiet: Quiet = False,
 ):
     """List image tags on a remote registry.
 
@@ -292,6 +316,9 @@ def rollback():
 
     The current CURRENT becomes ROLLBACK, and the previous deployment
     becomes the new CURRENT.
+
+    Examples:
+        ots image rollback
     """
     cfg = Config()
 
@@ -326,13 +353,7 @@ def rollback():
 
 @app.command
 def history(
-    limit: Annotated[
-        int,
-        cyclopts.Parameter(
-            name=["--limit", "-n"],
-            help="Number of entries to show",
-        ),
-    ] = 20,
+    limit: Lines = 20,
     port: Annotated[
         int | None,
         cyclopts.Parameter(
@@ -340,10 +361,17 @@ def history(
             help="Filter by port",
         ),
     ] = None,
+    json_output: JsonOutput = False,
 ):
     """Show deployment timeline.
 
     The timeline is an append-only audit trail of all deployment actions.
+
+    Examples:
+        ots image history
+        ots image history -n 50
+        ots image history -p 7043
+        ots image history --json
     """
     cfg = Config()
 
@@ -351,6 +379,25 @@ def history(
 
     if not deployments:
         print("No deployments recorded yet.")
+        return
+
+    if json_output:
+        import json
+
+        data = [
+            {
+                "id": d.id,
+                "timestamp": d.timestamp,
+                "port": d.port,
+                "action": d.action,
+                "image": d.image,
+                "tag": d.tag,
+                "success": d.success,
+                "notes": d.notes,
+            }
+            for d in deployments
+        ]
+        print(json.dumps(data, indent=2))
         return
 
     # Show aliases first
@@ -383,20 +430,40 @@ def history(
 
 
 @app.command
-def aliases():
-    """Show current image aliases (CURRENT, ROLLBACK)."""
+def aliases(json_output: JsonOutput = False):
+    """Show current image aliases (CURRENT, ROLLBACK).
+
+    Examples:
+        ots image aliases
+        ots image aliases --json
+    """
     cfg = Config()
 
-    aliases = db.get_all_aliases(cfg.db_path)
+    aliases_list = db.get_all_aliases(cfg.db_path)
 
-    if not aliases:
+    if json_output:
+        import json
+
+        data = [
+            {
+                "alias": a.alias,
+                "image": a.image,
+                "tag": a.tag,
+                "set_at": a.set_at,
+            }
+            for a in aliases_list
+        ]
+        print(json.dumps(data, indent=2))
+        return
+
+    if not aliases_list:
         print("No aliases configured.")
         print("\nSet an alias with: ots image set-current <tag>")
         return
 
     print("Image aliases:")
     print("-" * 60)
-    for alias in aliases:
+    for alias in aliases_list:
         print(f"  {alias.alias}:")
         print(f"    Image: {alias.image}:{alias.tag}")
         print(f"    Set:   {alias.set_at}")
@@ -435,7 +502,7 @@ def login(
     password: Annotated[
         str | None,
         cyclopts.Parameter(
-            name=["--password", "-p"],
+            name=["--password"],
             help="Registry password (env: OTS_REGISTRY_PASSWORD, or --password-stdin)",
         ),
     ] = None,
@@ -528,10 +595,7 @@ def push(
             help="Target registry URL (or set OTS_REGISTRY env var)",
         ),
     ] = None,
-    quiet: Annotated[
-        bool,
-        cyclopts.Parameter(name=["--quiet", "-q"], help="Suppress progress output"),
-    ] = False,
+    quiet: Quiet = False,
 ):
     """Push an image to a private registry.
 
@@ -630,6 +694,107 @@ def logout(
         print(f"Logged out from {reg}")
     except Exception as e:
         print(f"Logout failed: {e}")
+
+
+@app.command
+def rm(
+    tags: Annotated[
+        tuple[str, ...],
+        cyclopts.Parameter(help="Image tags to remove"),
+    ],
+    force: Annotated[
+        bool,
+        cyclopts.Parameter(
+            name=["--force", "-f"],
+            help="Force removal even if image is in use",
+        ),
+    ] = False,
+    yes: Yes = False,
+):
+    """Remove local image(s) by tag.
+
+    Examples:
+        ots image rm v0.22.0
+        ots image rm v0.21.0 v0.20.0 -y
+        ots image rm v0.22.0 --force
+    """
+    if not tags:
+        print("Error: At least one tag is required")
+        raise SystemExit(1)
+
+    if not yes:
+        print(f"This will remove images: {', '.join(tags)}")
+        response = input("Continue? [y/N] ")
+        if response.lower() not in ("y", "yes"):
+            print("Aborted")
+            return
+
+    for tag in tags:
+        # Try common image patterns
+        images_to_try = [
+            f"onetimesecret:{tag}",
+            f"ghcr.io/onetimesecret/onetimesecret:{tag}",
+            f"localhost/onetimesecret:{tag}",
+        ]
+
+        removed = False
+        for image in images_to_try:
+            try:
+                kwargs = {"check": True, "capture_output": True, "text": True}
+                if force:
+                    kwargs["force"] = True
+                podman.rmi(image, **kwargs)
+                print(f"Removed {image}")
+                removed = True
+                break
+            except Exception:
+                continue
+
+        if not removed:
+            print(f"Image not found: {tag}")
+
+
+@app.command
+def prune(
+    all_images: Annotated[
+        bool,
+        cyclopts.Parameter(
+            name=["--all", "-a"],
+            help="Remove all unused images, not just dangling",
+        ),
+    ] = False,
+    yes: Yes = False,
+):
+    """Remove unused images.
+
+    By default removes dangling images (untagged). Use --all to remove
+    all unused images.
+
+    Examples:
+        ots image prune
+        ots image prune --all
+        ots image prune -a -y
+    """
+    if not yes:
+        if all_images:
+            print("This will remove all unused images")
+        else:
+            print("This will remove dangling (untagged) images")
+        response = input("Continue? [y/N] ")
+        if response.lower() not in ("y", "yes"):
+            print("Aborted")
+            return
+
+    try:
+        kwargs = {"check": True, "capture_output": True, "text": True}
+        if all_images:
+            kwargs["all"] = True
+        result = podman.image.prune(**kwargs)
+        print("Pruned images:")
+        print(result.stdout)
+    except Exception as e:
+        print(f"Prune failed: {e}")
+        raise SystemExit(1)
 
 
 # --- Build Commands ---
@@ -808,13 +973,7 @@ def build(
             help="Override version tag (auto-detected from package.json)",
         ),
     ] = None,
-    quiet: Annotated[
-        bool,
-        cyclopts.Parameter(
-            name=["--quiet", "-q"],
-            help="Suppress progress output",
-        ),
-    ] = False,
+    quiet: Quiet = False,
 ):
     """Build container image from onetimesecret source.
 

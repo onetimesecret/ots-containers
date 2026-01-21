@@ -64,6 +64,9 @@ RestartSec=5
 Image={image}
 Network=host
 
+# Syslog tag for unified log filtering: journalctl -t onetime -f
+PodmanArgs=--log-opt tag=onetime
+
 # Port is derived from instance name: onetime@7043 -> PORT=7043
 Environment=PORT=%i
 
@@ -187,6 +190,9 @@ TimeoutStopSec=90
 [Container]
 Image={image}
 Network=host
+
+# Syslog tag for unified log filtering: journalctl -t onetime -f
+PodmanArgs=--log-opt tag=onetime
 
 # Worker ID is derived from instance name: onetime-worker@1 -> WORKER_ID=1
 Environment=WORKER_ID=%i

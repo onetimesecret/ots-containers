@@ -2,17 +2,19 @@
 
 """Instance management commands for OTS containers."""
 
-from .annotations import Delay, InstanceType, OptionalPorts, Ports, WorkerIds
+from .annotations import Delay, InstanceType, OptionalPorts, Port, Ports, WorkerIds
 from .app import (
     app,
     deploy,
-    env,
+    disable,
+    enable,
     exec_shell,
     list_instances,
     logs,
     redeploy,
     restart,
     run,
+    show_env,
     start,
     status,
     stop,
@@ -23,17 +25,20 @@ __all__ = [
     "Delay",
     "InstanceType",
     "OptionalPorts",
+    "Port",
     "Ports",
     "WorkerIds",
     "app",
     "deploy",
-    "env",
+    "disable",
+    "enable",
     "exec_shell",
     "list_instances",
     "logs",
     "redeploy",
     "restart",
     "run",
+    "show_env",
     "start",
     "status",
     "stop",

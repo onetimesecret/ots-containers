@@ -11,6 +11,7 @@ from typing import Annotated
 
 import cyclopts
 
+from ..common import DryRun, Follow, JsonOutput, Lines, Yes
 from ._helpers import (
     add_secrets_include,
     check_default_service_conflict,
@@ -25,7 +26,7 @@ from ._helpers import (
 from .packages import get_package, list_packages
 
 app = cyclopts.App(
-    name="service",
+    name=["service", "services"],
     help="Manage systemd template services (valkey, redis)",
 )
 
@@ -36,16 +37,87 @@ OptInstance = Annotated[str | None, cyclopts.Parameter(help="Instance identifier
 
 
 @app.default
-def _default():
-    """Show available packages and help."""
-    print("Service management for systemd template services")
-    print()
-    print("Available packages:")
-    for name in list_packages():
-        pkg = get_package(name)
-        print(f"  {name:10} - {pkg.template}.service")
-    print()
-    print("Use 'ots service --help' for commands")
+def list_all(json_output: JsonOutput = False):
+    """List all service instances across all packages.
+
+    Auto-discovers running and configured instances for all supported packages.
+
+    Examples:
+        ots service list
+        ots service list --json
+    """
+    all_instances = []
+
+    for pkg_name in list_packages():
+        pkg = get_package(pkg_name)
+
+        # Find running/enabled units matching the template
+        pattern = f"{pkg.template}*"
+        result = subprocess.run(
+            [
+                "systemctl",
+                "list-units",
+                "--type=service",
+                "--all",
+                pattern,
+                "--no-pager",
+                "--plain",
+            ],
+            capture_output=True,
+            text=True,
+        )
+
+        if result.stdout.strip():
+            for line in result.stdout.splitlines():
+                if pkg.template in line:
+                    parts = line.split()
+                    if parts:
+                        unit_name = parts[0]
+                        if "@" in unit_name and ".service" in unit_name:
+                            instance = unit_name.split("@")[1].replace(".service", "")
+                            active = is_service_active(unit_name)
+                            enabled = is_service_enabled(unit_name)
+                            config_exists = pkg.config_file(instance).exists()
+                            all_instances.append(
+                                {
+                                    "package": pkg_name,
+                                    "instance": instance,
+                                    "unit": unit_name,
+                                    "active": active,
+                                    "enabled": enabled,
+                                    "config_exists": config_exists,
+                                }
+                            )
+
+    if json_output:
+        import json
+
+        print(json.dumps(all_instances, indent=2))
+        return
+
+    if not all_instances:
+        print("No service instances found.")
+        print()
+        print("Available packages:")
+        for name in list_packages():
+            pkg = get_package(name)
+            print(f"  {name:10} - {pkg.template}.service")
+        print()
+        print("Initialize with: ots service init <package> <instance>")
+        return
+
+    print("Service instances:")
+    print("-" * 70)
+    print(f"{'PACKAGE':<10} {'INSTANCE':<10} {'STATUS':<10} {'ENABLED':<10} {'CONFIG':<10}")
+    print("-" * 70)
+
+    for inst in all_instances:
+        status = "active" if inst["active"] else "inactive"
+        enabled = "enabled" if inst["enabled"] else "disabled"
+        config = "ok" if inst["config_exists"] else "missing"
+        print(
+            f"{inst['package']:<10} {inst['instance']:<10} {status:<10} {enabled:<10} {config:<10}"
+        )
 
 
 @app.command
@@ -53,20 +125,52 @@ def init(
     package: Package,
     instance: Instance,
     *,
-    port: Annotated[int | None, cyclopts.Parameter(help="Port number")] = None,
-    bind: Annotated[str, cyclopts.Parameter(help="Bind address")] = "127.0.0.1",
-    no_secrets: Annotated[bool, cyclopts.Parameter(help="Skip secrets file creation")] = False,
-    start: Annotated[bool, cyclopts.Parameter(help="Start service after init")] = True,
-    enable: Annotated[bool, cyclopts.Parameter(help="Enable service at boot")] = True,
+    port: Annotated[
+        int | None,
+        cyclopts.Parameter(
+            name=["--port", "-p"],
+            help="Port number",
+        ),
+    ] = None,
+    bind: Annotated[
+        str,
+        cyclopts.Parameter(
+            name=["--bind", "-b"],
+            help="Bind address",
+        ),
+    ] = "127.0.0.1",
+    no_secrets: Annotated[
+        bool,
+        cyclopts.Parameter(
+            name=["--no-secrets"],
+            help="Skip secrets file creation",
+        ),
+    ] = False,
+    start: Annotated[
+        bool,
+        cyclopts.Parameter(
+            name=["--start", "-s"],
+            help="Start service after init",
+        ),
+    ] = True,
+    enable: Annotated[
+        bool,
+        cyclopts.Parameter(
+            name=["--enable", "-e"],
+            help="Enable service at boot",
+        ),
+    ] = True,
+    dry_run: DryRun = False,
 ):
     """Initialize a new service instance.
 
     Creates config files, sets up directories, optionally starts service.
     Config is copy-on-write from package default to /etc/<pkg>/instances/.
 
-    Example:
+    Examples:
         ots service init valkey 6379
         ots service init redis 6380 --port 6380 --bind 0.0.0.0
+        ots service init valkey 6379 --dry-run
     """
     pkg = get_package(package)
     port_num = port or int(instance)
@@ -76,6 +180,14 @@ def init(
     print(f"  Port: {port_num}")
     print(f"  Bind: {bind}")
     print()
+
+    if dry_run:
+        print("[dry-run] Would create:")
+        print(f"  Config: {pkg.config_file(instance)}")
+        print(f"  Data:   {pkg.data_dir / instance}")
+        if not no_secrets and pkg.secrets:
+            print(f"  Secrets: {pkg.secrets_file(instance)}")
+        return
 
     # Check for default service conflict
     check_default_service_conflict(pkg)
@@ -145,7 +257,7 @@ def init(
 def enable(package: Package, instance: Instance):
     """Enable a service instance to start at boot.
 
-    Example:
+    Examples:
         ots service enable valkey 6379
     """
     pkg = get_package(package)
@@ -160,14 +272,26 @@ def enable(package: Package, instance: Instance):
 
 
 @app.command
-def disable(package: Package, instance: Instance):
+def disable(
+    package: Package,
+    instance: Instance,
+    yes: Yes = False,
+):
     """Disable a service instance and stop it.
 
-    Example:
+    Examples:
         ots service disable valkey 6379
+        ots service disable valkey 6379 -y
     """
     pkg = get_package(package)
     unit = pkg.instance_unit(instance)
+
+    if not yes:
+        print(f"This will disable {unit}")
+        response = input("Continue? [y/N] ")
+        if response.lower() not in ("y", "yes"):
+            print("Aborted")
+            return
 
     print(f"Stopping {unit}...")
     try:
@@ -187,7 +311,7 @@ def disable(package: Package, instance: Instance):
 def status(package: Package, instance: OptInstance = None):
     """Show status of service instance(s).
 
-    Example:
+    Examples:
         ots service status valkey 6379
         ots service status valkey  # Shows all valkey instances
     """
@@ -214,7 +338,7 @@ def status(package: Package, instance: OptInstance = None):
 def start(package: Package, instance: Instance):
     """Start a service instance.
 
-    Example:
+    Examples:
         ots service start valkey 6379
     """
     pkg = get_package(package)
@@ -232,7 +356,7 @@ def start(package: Package, instance: Instance):
 def stop(package: Package, instance: Instance):
     """Stop a service instance.
 
-    Example:
+    Examples:
         ots service stop valkey 6379
     """
     pkg = get_package(package)
@@ -250,7 +374,7 @@ def stop(package: Package, instance: Instance):
 def restart(package: Package, instance: Instance):
     """Restart a service instance.
 
-    Example:
+    Examples:
         ots service restart valkey 6379
     """
     pkg = get_package(package)
@@ -269,12 +393,12 @@ def logs(
     package: Package,
     instance: Instance,
     *,
-    follow: Annotated[bool, cyclopts.Parameter("-f", help="Follow log output")] = False,
-    lines: Annotated[int, cyclopts.Parameter("-n", help="Number of lines")] = 50,
+    follow: Follow = False,
+    lines: Lines = 50,
 ):
     """Show logs for a service instance.
 
-    Example:
+    Examples:
         ots service logs valkey 6379
         ots service logs valkey 6379 -f
         ots service logs valkey 6379 -n 100
@@ -290,18 +414,20 @@ def logs(
 
 
 @app.command(name="list")
-def list_instances(package: Package):
+def list_instances(
+    package: Package,
+    json_output: JsonOutput = False,
+):
     """List all instances of a service package.
 
     Auto-discovers running and enabled instances via systemctl.
 
-    Example:
+    Examples:
         ots service list valkey
+        ots service list valkey --json
     """
     pkg = get_package(package)
-
-    print(f"Instances of {pkg.name} ({pkg.template}):")
-    print("-" * 50)
+    instances = []
 
     # Find running/enabled units matching the template
     pattern = f"{pkg.template}*"
@@ -322,11 +448,34 @@ def list_instances(package: Package):
                     # e.g., valkey-server@6379.service -> 6379
                     if "@" in unit_name and ".service" in unit_name:
                         instance = unit_name.split("@")[1].replace(".service", "")
-                        active = "active" if is_service_active(unit_name) else "inactive"
-                        enabled = "enabled" if is_service_enabled(unit_name) else "disabled"
+                        active = is_service_active(unit_name)
+                        enabled = is_service_enabled(unit_name)
                         config_exists = pkg.config_file(instance).exists()
-                        config_status = "config ok" if config_exists else "no config"
-                        print(f"  {instance:10} {active:10} {enabled:10} {config_status}")
+                        instances.append(
+                            {
+                                "instance": instance,
+                                "unit": unit_name,
+                                "active": active,
+                                "enabled": enabled,
+                                "config_exists": config_exists,
+                            }
+                        )
+
+    if json_output:
+        import json
+
+        print(json.dumps(instances, indent=2))
+        return
+
+    print(f"Instances of {pkg.name} ({pkg.template}):")
+    print("-" * 50)
+
+    if instances:
+        for inst in instances:
+            active = "active" if inst["active"] else "inactive"
+            enabled = "enabled" if inst["enabled"] else "disabled"
+            config_status = "config ok" if inst["config_exists"] else "no config"
+            print(f"  {inst['instance']:10} {active:10} {enabled:10} {config_status}")
 
     # Also check for config files that might not have running services
     config_dir = pkg.instances_dir if pkg.use_instances_subdir else pkg.config_dir
