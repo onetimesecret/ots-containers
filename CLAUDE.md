@@ -17,6 +17,12 @@ pytest tests/test_quadlet.py
 # Run single test by name
 pytest tests/test_quadlet.py -k "test_template"
 
+# Run service management tests
+pytest tests/test_service.py
+
+# Run cloud-init tests
+pytest tests/commands/cloudinit/
+
 # Run tests with coverage (CI threshold: 70%)
 pytest tests/ --cov=ots_containers --cov-report=term-missing --cov-fail-under=70
 
@@ -41,7 +47,9 @@ When running git commands with long output, use `git --no-pager diff` etc.
 
 ## Architecture
 
-This is a CLI tool for managing OneTimeSecret containers via Podman Quadlets (systemd integration).
+This is a dual-purpose service orchestration tool:
+1. **Container management**: OneTimeSecret containers via Podman Quadlets (systemd integration)
+2. **Service management**: Native systemd services for dependencies (Valkey, Redis)
 
 ### Core Modules (`src/ots_containers/`)
 
@@ -54,15 +62,30 @@ This is a CLI tool for managing OneTimeSecret containers via Podman Quadlets (sy
 
 ### Commands (`src/ots_containers/commands/`)
 
+#### Container Commands
 - **instance.py** - Main operations: `deploy`, `redeploy`, `undeploy`, `start`, `stop`, `restart`, `status`, `logs`, `list`
 - **assets.py** - `sync` command for static asset updates
+- **image.py** - Container image management
+- **proxy.py** - Caddy reverse proxy configuration
+
+#### Service Commands (`service/`)
+- **app.py** - Service lifecycle: `init`, `start`, `stop`, `restart`, `status`, `logs`, `enable`, `disable`, `list_instances`
+- **packages.py** - Service package definitions: `VALKEY`, `REDIS` with config paths, secrets handling, systemd templates
+- **_helpers.py** - Shared utilities: config file management, secrets creation, systemctl wrappers
+
+#### Cloud-Init Commands (`cloudinit/`)
+- **app.py** - Cloud-init generation: `generate`, `validate`
+- **templates.py** - DEB822-style apt sources templates for Debian 13 (Trixie), PostgreSQL, and Valkey repositories
 
 ### Key Patterns
 
 - Uses **cyclopts** for CLI framework (decorators like `@app.command()`)
-- Port-based instance identification: each instance runs on a specific port (e.g., 7043)
-- Auto-discovery via `systemd.discover_instances()` - finds running `onetime@*` services
-- Env file templating: `/etc/onetimesecret/.env` → `/var/lib/onetimesecret/.env-{port}` (FHS-compliant)
+- **Port-based instance identification**: Each instance runs on a specific port (e.g., 7043 for containers, 6379 for services)
+- **Container auto-discovery**: `systemd.discover_instances()` finds running `onetime@*` services
+- **Container env templating**: `/etc/onetimesecret/.env` → `/var/lib/onetimesecret/.env-{port}` (FHS-compliant)
+- **Service config copy-on-write**: Package defaults (`/etc/valkey/valkey.conf`) → instance configs (`/etc/valkey/instances/6379.conf`)
+- **Service secrets separation**: Sensitive data in separate files with restricted permissions (mode 0640, owned by service user)
+- **Package-provided templates**: Uses existing systemd templates (`valkey-server@.service`) rather than creating custom units
 - ## Verification
 Don't invent technical rationales. When working with runtime behavior, get or
 ask for actual output (podman ps, systemctl status, etc.) before changing code.

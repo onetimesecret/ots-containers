@@ -60,9 +60,15 @@ class ServicePackage:
     # Base data directory (e.g., /var/lib/valkey)
     data_dir: Path
 
-    # Pattern for instance config files within instances/ subdir
-    # e.g., "{instance}.conf" -> /etc/valkey/instances/6379.conf
+    # Pattern for instance config files
+    # e.g., "{instance}.conf" -> /etc/redis/instances/6379.conf
+    # or "valkey-{instance}.conf" -> /etc/valkey/valkey-6379.conf
     config_file_pattern: str = "{instance}.conf"
+
+    # Whether to place instance configs in instances/ subdirectory
+    # True: /etc/valkey/instances/6379.conf (custom convention)
+    # False: /etc/valkey/valkey-6379.conf (Debian package convention)
+    use_instances_subdir: bool = True
 
     # Default (non-template) service if any (e.g., "valkey-server.service")
     default_service: str | None = None
@@ -111,12 +117,18 @@ class ServicePackage:
 
     def config_file(self, instance: str) -> Path:
         """Get config file path for a specific instance."""
-        return self.instances_dir / self.config_file_pattern.format(instance=instance)
+        config_name = self.config_file_pattern.format(instance=instance)
+        if self.use_instances_subdir:
+            return self.instances_dir / config_name
+        return self.config_dir / config_name
 
     def secrets_file(self, instance: str) -> Path | None:
         """Get secrets file path for a specific instance, if using separate secrets."""
         if self.secrets and self.secrets.secrets_file_pattern:
-            return self.instances_dir / self.secrets.secrets_file_pattern.format(instance=instance)
+            secrets_name = self.secrets.secrets_file_pattern.format(instance=instance)
+            if self.use_instances_subdir:
+                return self.instances_dir / secrets_name
+            return self.config_dir / secrets_name
         return None
 
     def data_path(self, instance: str) -> Path:
@@ -130,7 +142,7 @@ class ServicePackage:
 
 VALKEY_SECRETS = SecretConfig(
     secret_keys=("requirepass", "masterauth"),
-    secrets_file_pattern="{instance}.secrets",
+    secrets_file_pattern="valkey-{instance}.secrets",
     include_directive="include {secrets_path}",
 )
 
@@ -145,7 +157,8 @@ VALKEY = ServicePackage(
     template="valkey-server@",
     config_dir=Path("/etc/valkey"),
     data_dir=Path("/var/lib/valkey"),
-    config_file_pattern="{instance}.conf",
+    config_file_pattern="valkey-{instance}.conf",
+    use_instances_subdir=False,  # Debian convention: /etc/valkey/valkey-{port}.conf
     default_service="valkey-server.service",
     default_config=Path("/etc/valkey/valkey.conf"),
     secrets=VALKEY_SECRETS,

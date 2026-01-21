@@ -191,7 +191,6 @@ class TestInitCommand:
             tmp_path / "etc" / "containers" / "systemd" / "onetime@.container"
         )
         mock_config.config_yaml = mock_config.config_dir / "config.yaml"
-        mock_config.env_template = mock_config.config_dir / ".env"
         mock_config.db_path = mock_config.var_dir / "deployments.db"
 
         mocker.patch("ots_containers.commands.init.Config", return_value=mock_config)
@@ -221,7 +220,6 @@ class TestInitCommand:
         users_dir.mkdir(parents=True)
 
         (config_dir / "config.yaml").touch()
-        (config_dir / ".env").touch()
         (var_dir / "deployments.db").touch()
         (quadlet_dir / "onetime@.container").touch()
 
@@ -230,7 +228,6 @@ class TestInitCommand:
         mock_config.var_dir = var_dir
         mock_config.template_path = quadlet_dir / "onetime@.container"
         mock_config.config_yaml = config_dir / "config.yaml"
-        mock_config.env_template = config_dir / ".env"
         mock_config.db_path = var_dir / "deployments.db"
 
         mocker.patch("ots_containers.commands.init.Config", return_value=mock_config)
@@ -253,7 +250,6 @@ class TestInitCommand:
             tmp_path / "etc" / "containers" / "systemd" / "onetime@.container"
         )
         mock_config.config_yaml = mock_config.config_dir / "config.yaml"
-        mock_config.env_template = mock_config.config_dir / ".env"
         mock_config.db_path = mock_config.var_dir / "deployments.db"
 
         mocker.patch("ots_containers.commands.init.Config", return_value=mock_config)
@@ -282,7 +278,6 @@ class TestInitCommand:
         mock_config.var_dir = var_dir
         mock_config.template_path = quadlet_dir / "onetime@.container"
         mock_config.config_yaml = config_dir / "config.yaml"
-        mock_config.env_template = config_dir / ".env"
         mock_config.db_path = var_dir / "deployments.db"
 
         mocker.patch("ots_containers.commands.init.Config", return_value=mock_config)
@@ -299,14 +294,13 @@ class TestInitCommand:
         assert "Initialization complete" in captured.out
 
     def test_copies_templates_from_source(self, tmp_path, mocker, capsys):
-        """Init should copy templates when --source provided."""
+        """Init should copy config.yaml when --source provided."""
         from ots_containers.commands.init import init
 
         # Create source directory with templates
         source_dir = tmp_path / "source"
         source_dir.mkdir()
         (source_dir / "config.yaml").write_text("site: example")
-        (source_dir / ".env").write_text("SECRET=abc")
 
         # Create target structure
         config_dir = tmp_path / "etc" / "onetimesecret"
@@ -318,7 +312,6 @@ class TestInitCommand:
         mock_config.var_dir = var_dir
         mock_config.template_path = quadlet_dir / "onetime@.container"
         mock_config.config_yaml = config_dir / "config.yaml"
-        mock_config.env_template = config_dir / ".env"
         mock_config.db_path = var_dir / "deployments.db"
 
         mocker.patch("ots_containers.commands.init.Config", return_value=mock_config)
@@ -330,8 +323,6 @@ class TestInitCommand:
         assert result == 0
         assert mock_config.config_yaml.exists()
         assert mock_config.config_yaml.read_text() == "site: example"
-        assert mock_config.env_template.exists()
-        assert mock_config.env_template.read_text() == "SECRET=abc"
         captured = capsys.readouterr()
         assert "[copied]" in captured.out
 
@@ -353,7 +344,6 @@ class TestInitCommand:
         mock_config.var_dir = var_dir
         mock_config.template_path = quadlet_dir / "onetime@.container"
         mock_config.config_yaml = config_dir / "config.yaml"
-        mock_config.env_template = config_dir / ".env"
         mock_config.db_path = var_dir / "deployments.db"
         # db_path doesn't exist, so init_db will be called
 

@@ -9,24 +9,33 @@ from .packages import ServicePackage
 
 
 def ensure_instances_dir(pkg: ServicePackage) -> Path:
-    """Ensure the instances config directory exists with correct ownership.
+    """Ensure the config directory (or instances subdir) exists with correct ownership.
+
+    For packages using instances subdirectory (use_instances_subdir=True):
+        Creates /etc/{pkg}/instances/
+    For packages placing configs directly in config_dir (use_instances_subdir=False):
+        Ensures /etc/{pkg}/ exists (typically already created by package manager)
 
     Args:
         pkg: Service package definition
 
     Returns:
-        Path to the instances directory
+        Path to the directory where instance configs will be placed
     """
-    instances_dir = pkg.instances_dir
-    if not instances_dir.exists():
-        instances_dir.mkdir(parents=True, mode=0o755)
+    if pkg.use_instances_subdir:
+        config_dir = pkg.instances_dir
+    else:
+        config_dir = pkg.config_dir
+
+    if not config_dir.exists():
+        config_dir.mkdir(parents=True, mode=0o755)
         # Set ownership if running as root and service user exists
         if pkg.service_user:
             try:
-                shutil.chown(instances_dir, user=pkg.service_user, group=pkg.service_group)
+                shutil.chown(config_dir, user=pkg.service_user, group=pkg.service_group)
             except (LookupError, PermissionError):
                 pass  # User doesn't exist or not root
-    return instances_dir
+    return config_dir
 
 
 def copy_default_config(pkg: ServicePackage, instance: str) -> Path:
@@ -256,3 +265,30 @@ def is_service_enabled(unit: str) -> bool:
     """Check if a systemd unit is enabled."""
     result = systemctl("is-enabled", unit, check=False)
     return result.returncode == 0
+
+
+def check_default_service_conflict(pkg: ServicePackage) -> bool:
+    """Check if the default (non-template) service is running.
+
+    When using template instances, the default service should be stopped and disabled
+    to avoid port conflicts and configuration confusion.
+
+    Args:
+        pkg: Service package definition
+
+    Returns:
+        True if there's a conflict (default service is active), False otherwise
+    """
+    if not pkg.default_service:
+        return False
+
+    if is_service_active(pkg.default_service):
+        print(f"WARNING: Default service {pkg.default_service} is running!")
+        print(f"  This may conflict with template instances ({pkg.template_unit})")
+        print("  To use multiple instances, stop and disable the default service:")
+        print(f"    sudo systemctl stop {pkg.default_service}")
+        print(f"    sudo systemctl disable {pkg.default_service}")
+        print()
+        return True
+
+    return False

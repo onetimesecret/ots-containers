@@ -86,26 +86,20 @@ class TestConfigPaths:
         cfg = Config(config_dir=Path("/etc/ots"))
         assert cfg.config_yaml == Path("/etc/ots/config.yaml")
 
-    def test_env_template_path(self):
-        """Should return correct path for .env template."""
+    def test_db_path_with_writable_var_dir(self, tmp_path):
+        """Should use system path when var_dir is writable."""
         from ots_containers.config import Config
 
-        cfg = Config(config_dir=Path("/etc/ots"))
-        assert cfg.env_template == Path("/etc/ots/.env")
+        cfg = Config(var_dir=tmp_path)
+        assert cfg.db_path == tmp_path / "deployments.db"
 
-    def test_env_file_path(self):
-        """Should return correct path for given port in var_dir."""
+    def test_db_path_falls_back_to_user_space(self):
+        """Should fall back to ~/.local/share when var_dir not writable."""
         from ots_containers.config import Config
 
-        cfg = Config(var_dir=Path("/var/lib/ots"))
-        assert cfg.env_file(7043) == Path("/var/lib/ots/.env-7043")
-
-    def test_env_file_different_ports(self):
-        """Should return different paths for different ports."""
-        from ots_containers.config import Config
-
-        cfg = Config()
-        assert cfg.env_file(7043) != cfg.env_file(7044)
+        # Non-existent path triggers fallback
+        cfg = Config(var_dir=Path("/nonexistent/path"))
+        assert ".local/share/ots-containers/deployments.db" in str(cfg.db_path)
 
 
 class TestConfigValidate:
@@ -126,7 +120,7 @@ class TestConfigValidate:
         """Should not raise when all required files exist."""
         from ots_containers.config import Config
 
-        (tmp_path / ".env").touch()
+        # Only config.yaml is required now (secrets via Podman, infra env in /etc/default)
         (tmp_path / "config.yaml").touch()
 
         cfg = Config(config_dir=tmp_path)

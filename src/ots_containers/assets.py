@@ -18,7 +18,7 @@ def update(cfg: Config, create_volume: bool = True) -> None:
         raise SystemExit(f"Failed to mount volume 'static_assets': {stderr}")
     assets_dir = Path(result.stdout.strip())
 
-    result = podman.create(cfg.image_with_tag, capture_output=True, text=True, check=True)
+    result = podman.create(cfg.resolved_image_with_tag, capture_output=True, text=True, check=True)
     container_id = result.stdout.strip()
 
     try:

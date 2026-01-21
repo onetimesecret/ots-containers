@@ -7,7 +7,7 @@ import pytest
 
 
 class TestDiscoverInstances:
-    """Test discover_instances function."""
+    """Test discover_instances function for web containers."""
 
     def test_discover_instances_returns_sorted_ports(self, mocker):
         """Should parse systemctl output and return sorted port list."""
@@ -288,6 +288,98 @@ class TestStatus:
         mock_run.assert_called_once()
 
 
+class TestUnitToContainerName:
+    """Test unit_to_container_name function."""
+
+    def test_converts_template_instance_unit(self):
+        """Should convert onetime@7044 to systemd-onetime_7044."""
+        from ots_containers import systemd
+
+        assert systemd.unit_to_container_name("onetime@7044") == "systemd-onetime_7044"
+
+    def test_handles_service_suffix(self):
+        """Should strip .service suffix before converting."""
+        from ots_containers import systemd
+
+        assert systemd.unit_to_container_name("onetime@7043.service") == "systemd-onetime_7043"
+
+    def test_handles_different_ports(self):
+        """Should work with various port numbers."""
+        from ots_containers import systemd
+
+        assert systemd.unit_to_container_name("onetime@3000") == "systemd-onetime_3000"
+        assert systemd.unit_to_container_name("onetime@8080") == "systemd-onetime_8080"
+
+
+class TestRecreate:
+    """Test recreate function."""
+
+    def test_recreate_stops_removes_and_starts(self, mocker):
+        """Should stop unit, remove container, then start unit."""
+        from ots_containers import systemd
+
+        mock_run = mocker.patch("subprocess.run")
+
+        systemd.recreate("onetime@7044")
+
+        assert mock_run.call_count == 3
+        calls = mock_run.call_args_list
+        assert calls[0][0][0] == ["sudo", "systemctl", "stop", "onetime@7044"]
+        assert calls[1][0][0] == ["sudo", "podman", "rm", "--ignore", "systemd-onetime_7044"]
+        assert calls[2][0][0] == ["sudo", "systemctl", "start", "onetime@7044"]
+
+    def test_recreate_raises_on_stop_failure(self, mocker):
+        """Should propagate error if stop fails."""
+        from ots_containers import systemd
+
+        mocker.patch(
+            "subprocess.run",
+            side_effect=subprocess.CalledProcessError(1, "cmd"),
+        )
+
+        with pytest.raises(subprocess.CalledProcessError):
+            systemd.recreate("onetime@7044")
+
+
+class TestContainerExists:
+    """Test container_exists function."""
+
+    def test_container_exists_returns_true_when_found(self, mocker):
+        """Should return True when container exists."""
+        from ots_containers import systemd
+
+        mock_result = mocker.Mock()
+        mock_result.returncode = 0
+        mocker.patch("subprocess.run", return_value=mock_result)
+
+        assert systemd.container_exists("onetime@7044") is True
+
+    def test_container_exists_returns_false_when_not_found(self, mocker):
+        """Should return False when container doesn't exist."""
+        from ots_containers import systemd
+
+        mock_result = mocker.Mock()
+        mock_result.returncode = 1
+        mocker.patch("subprocess.run", return_value=mock_result)
+
+        assert systemd.container_exists("onetime@7044") is False
+
+    def test_container_exists_uses_correct_container_name(self, mocker):
+        """Should convert unit name to container name for podman check."""
+        from ots_containers import systemd
+
+        mock_result = mocker.Mock()
+        mock_result.returncode = 0
+        mock_run = mocker.patch("subprocess.run", return_value=mock_result)
+
+        systemd.container_exists("onetime@7044")
+
+        mock_run.assert_called_once_with(
+            ["podman", "container", "exists", "systemd-onetime_7044"],
+            capture_output=True,
+        )
+
+
 class TestUnitExists:
     """Test unit_exists function."""
 
@@ -331,4 +423,201 @@ class TestUnitExists:
             ],
             capture_output=True,
             text=True,
+        )
+
+
+class TestDiscoverWorkerInstances:
+    """Test discover_worker_instances function for background worker containers."""
+
+    def test_discover_worker_instances_returns_sorted_ids(self, mocker):
+        """Should parse systemctl output and return sorted worker ID list."""
+        from ots_containers import systemd
+
+        mock_result = mocker.Mock()
+        mock_result.stdout = (
+            "onetime-worker@1.service loaded active running OTS Worker 1\n"
+            "onetime-worker@3.service loaded active running OTS Worker 3\n"
+            "onetime-worker@2.service loaded active running OTS Worker 2\n"
+        )
+        mocker.patch("subprocess.run", return_value=mock_result)
+
+        ids = systemd.discover_worker_instances()
+
+        # Numeric IDs should be sorted numerically
+        assert ids == ["1", "2", "3"]
+
+    def test_discover_worker_instances_with_string_ids(self, mocker):
+        """Should correctly parse worker instances with string IDs."""
+        from ots_containers import systemd
+
+        mock_result = mocker.Mock()
+        mock_result.stdout = (
+            "onetime-worker@billing.service loaded active running OTS Worker billing\n"
+            "onetime-worker@emails.service loaded active running OTS Worker emails\n"
+            "onetime-worker@cleanup.service loaded active running OTS Worker cleanup\n"
+        )
+        mocker.patch("subprocess.run", return_value=mock_result)
+
+        ids = systemd.discover_worker_instances()
+
+        # String IDs should be sorted alphabetically
+        assert ids == ["billing", "cleanup", "emails"]
+
+    def test_discover_worker_instances_mixed_ids(self, mocker):
+        """Should handle mix of numeric and string worker IDs."""
+        from ots_containers import systemd
+
+        mock_result = mocker.Mock()
+        mock_result.stdout = (
+            "onetime-worker@1.service loaded active running OTS Worker 1\n"
+            "onetime-worker@billing.service loaded active running OTS Worker billing\n"
+            "onetime-worker@2.service loaded active running OTS Worker 2\n"
+        )
+        mocker.patch("subprocess.run", return_value=mock_result)
+
+        ids = systemd.discover_worker_instances()
+
+        # Should return all IDs as strings, sorted
+        assert "1" in ids
+        assert "2" in ids
+        assert "billing" in ids
+
+    def test_discover_worker_instances_empty_output(self, mocker):
+        """Should return empty list when no worker instances running."""
+        from ots_containers import systemd
+
+        mock_result = mocker.Mock()
+        mock_result.stdout = ""
+        mocker.patch("subprocess.run", return_value=mock_result)
+
+        ids = systemd.discover_worker_instances()
+
+        assert ids == []
+
+    def test_discover_worker_instances_ignores_web_instances(self, mocker):
+        """Should ignore onetime@* (web) units, only return onetime-worker@* units."""
+        from ots_containers import systemd
+
+        mock_result = mocker.Mock()
+        mock_result.stdout = (
+            "onetime-worker@1.service loaded active running OTS Worker 1\n"
+            "onetime@7043.service loaded active running OTS Web 7043\n"
+            "onetime-worker@2.service loaded active running OTS Worker 2\n"
+        )
+        mocker.patch("subprocess.run", return_value=mock_result)
+
+        ids = systemd.discover_worker_instances()
+
+        # Should only include worker instances, not web instances
+        assert ids == ["1", "2"]
+        assert "7043" not in ids
+
+    def test_discover_worker_instances_calls_systemctl_correctly(self, mocker):
+        """Should call systemctl with correct pattern for worker units."""
+        from ots_containers import systemd
+
+        mock_result = mocker.Mock()
+        mock_result.stdout = ""
+        mock_run = mocker.patch("subprocess.run", return_value=mock_result)
+
+        systemd.discover_worker_instances()
+
+        mock_run.assert_called_once_with(
+            ["systemctl", "list-units", "onetime-worker@*", "--plain", "--no-legend", "--all"],
+            capture_output=True,
+            text=True,
+        )
+
+    def test_discover_worker_instances_running_only(self, mocker):
+        """With running_only=True, should only return running worker units."""
+        from ots_containers import systemd
+
+        mock_result = mocker.Mock()
+        mock_result.stdout = (
+            "onetime-worker@1.service loaded active running OTS Worker 1\n"
+            "onetime-worker@2.service loaded failed failed OTS Worker 2\n"
+            "onetime-worker@3.service loaded inactive dead OTS Worker 3\n"
+        )
+        mocker.patch("subprocess.run", return_value=mock_result)
+
+        ids = systemd.discover_worker_instances(running_only=True)
+
+        assert ids == ["1"]
+
+    def test_discover_worker_instances_returns_all_by_default(self, mocker):
+        """Without running_only, should return all loaded worker units."""
+        from ots_containers import systemd
+
+        mock_result = mocker.Mock()
+        mock_result.stdout = (
+            "onetime-worker@1.service loaded active running OTS Worker 1\n"
+            "onetime-worker@2.service loaded failed failed OTS Worker 2\n"
+            "onetime-worker@3.service loaded inactive dead OTS Worker 3\n"
+        )
+        mocker.patch("subprocess.run", return_value=mock_result)
+
+        ids = systemd.discover_worker_instances()
+
+        assert ids == ["1", "2", "3"]
+
+
+class TestWorkerUnitToContainerName:
+    """Test unit_to_container_name for worker units."""
+
+    def test_converts_worker_unit_with_numeric_id(self):
+        """Should convert onetime-worker@1 to systemd-onetime-worker_1."""
+        from ots_containers import systemd
+
+        assert systemd.unit_to_container_name("onetime-worker@1") == "systemd-onetime-worker_1"
+
+    def test_converts_worker_unit_with_string_id(self):
+        """Should convert onetime-worker@billing to systemd-onetime-worker_billing."""
+        from ots_containers import systemd
+
+        assert (
+            systemd.unit_to_container_name("onetime-worker@billing")
+            == "systemd-onetime-worker_billing"
+        )
+
+    def test_handles_worker_service_suffix(self):
+        """Should strip .service suffix from worker units."""
+        from ots_containers import systemd
+
+        assert (
+            systemd.unit_to_container_name("onetime-worker@emails.service")
+            == "systemd-onetime-worker_emails"
+        )
+
+
+class TestWorkerContainerExists:
+    """Test container_exists for worker containers."""
+
+    def test_worker_container_exists_checks_correct_name(self, mocker):
+        """Should check for worker container with correct naming convention."""
+        from ots_containers import systemd
+
+        mock_result = mocker.Mock()
+        mock_result.returncode = 0
+        mock_run = mocker.patch("subprocess.run", return_value=mock_result)
+
+        systemd.container_exists("onetime-worker@billing")
+
+        mock_run.assert_called_once_with(
+            ["podman", "container", "exists", "systemd-onetime-worker_billing"],
+            capture_output=True,
+        )
+
+    def test_worker_container_exists_with_numeric_id(self, mocker):
+        """Should check for worker container with numeric ID."""
+        from ots_containers import systemd
+
+        mock_result = mocker.Mock()
+        mock_result.returncode = 0
+        mock_run = mocker.patch("subprocess.run", return_value=mock_result)
+
+        systemd.container_exists("onetime-worker@1")
+
+        mock_run.assert_called_once_with(
+            ["podman", "container", "exists", "systemd-onetime-worker_1"],
+            capture_output=True,
         )

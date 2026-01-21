@@ -1,4 +1,4 @@
-# deployment/>=v0.23/ots-containers/pyproject.toml
+# pyproject.toml
 #
 # Installation:
 #   pipx install .                    # Recommended: isolated environment
@@ -13,13 +13,13 @@ build-backend = "hatchling.build"
 
 [project]
 name = "ots-containers"
-version = "0.2.0"
-description = "Podman Quadlet container management for OneTimeSecret"
+version = "0.2.1"
+description = "Service orchestration for OneTimeSecret: Podman Quadlets and systemd service management"
 readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"
 authors = [{ name = "OneTime Secret", email = "ops@onetimesecret.com" }]
-keywords = ["podman", "containers", "quadlet", "systemd", "onetimesecret"]
+keywords = ["podman", "containers", "quadlet", "systemd", "onetimesecret", "valkey", "redis", "service-management"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Environment :: Console",
@@ -31,7 +31,7 @@ classifiers = [
     "Programming Language :: Python :: 3.13",
     "Topic :: System :: Systems Administration",
 ]
-dependencies = ["cyclopts>=3.9", "podman>=5.0"]
+dependencies = ["cyclopts>=3.9", "podman>=5.0", "pyyaml>=6.0"]
 
 [project.optional-dependencies]
 dev = ["pre-commit>=3.0", "pyright>=1.1.390"]
