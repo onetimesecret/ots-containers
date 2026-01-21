@@ -1,3 +1,5 @@
 # src/ots_containers/__init__.py
 
-__version__ = "0.2.2"
+from importlib.metadata import version
+
+__version__ = version("ots-containers")
