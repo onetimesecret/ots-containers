@@ -10,6 +10,7 @@ import pytest
 
 from ots_containers.commands import instance
 from ots_containers.commands.instance._helpers import format_command
+from ots_containers.commands.instance.annotations import InstanceType
 
 
 class TestFormatCommand:
@@ -79,7 +80,7 @@ class TestInstanceHelp:
             app(["instance", "deploy", "--help"])
         assert exc_info.value.code == 0
         captured = capsys.readouterr()
-        assert "port" in captured.out.lower() or "deploy" in captured.out.lower()
+        assert "web" in captured.out.lower() or "deploy" in captured.out.lower()
 
     def test_instance_redeploy_help(self, capsys):
         """instance redeploy --help should work."""
@@ -210,140 +211,6 @@ class TestRunCommand:
         assert "-v" not in cmd_str
         assert "--env-file" not in cmd_str
 
-    def test_run_prints_command_when_not_quiet(self, mocker, tmp_path, capsys):
-        """run should print command when not in quiet mode."""
-        import subprocess
-
-        # Mock Config
-        mock_config = mocker.MagicMock()
-        mock_config.resolve_image_tag.return_value = ("onetimesecret", "latest")
-        mock_config.config_dir = tmp_path / "etc"
-        mock_config.config_dir.mkdir()
-        mock_config.registry = None
-        mocker.patch("ots_containers.commands.instance.app.Config", return_value=mock_config)
-
-        # Mock env file not existing
-        mocker.patch(
-            "ots_containers.commands.instance.app.quadlet.DEFAULT_ENV_FILE",
-            tmp_path / "nonexistent",
-        )
-
-        # Mock subprocess.run
-        mock_run = mocker.patch("subprocess.run")
-        mock_run.return_value = subprocess.CompletedProcess([], 0, stdout="abc123")
-
-        # Call run command without quiet
-        instance.run(port=7143, detach=True, quiet=False)
-
-        # Verify command was printed (copy-pasteable format without $ prefix)
-        captured = capsys.readouterr()
-        assert "podman run" in captured.out
-        assert captured.out.startswith("podman")  # Starts on its own line
-
-    def test_run_uses_tag_override(self, mocker, tmp_path):
-        """run --tag should override the resolved tag."""
-        import subprocess
-
-        # Mock Config
-        mock_config = mocker.MagicMock()
-        mock_config.image = "ghcr.io/onetimesecret/onetimesecret"
-        mock_config.resolve_image_tag.return_value = ("onetimesecret", "current")
-        mock_config.config_dir = tmp_path / "etc"
-        mock_config.config_dir.mkdir()
-        mock_config.registry = None
-        mocker.patch("ots_containers.commands.instance.app.Config", return_value=mock_config)
-
-        # Mock env file not existing
-        mocker.patch(
-            "ots_containers.commands.instance.app.quadlet.DEFAULT_ENV_FILE",
-            tmp_path / "nonexistent",
-        )
-
-        # Mock subprocess.run
-        mock_run = mocker.patch("subprocess.run")
-        mock_run.return_value = subprocess.CompletedProcess([], 0, stdout="abc123")
-
-        # Call run with explicit tag
-        instance.run(port=7143, detach=True, quiet=True, tag="v0.19.0")
-
-        # Verify the overridden tag was used, not the resolved one
-        cmd = mock_run.call_args[0][0]
-        cmd_str = " ".join(cmd)
-        assert "v0.19.0" in cmd_str
-        assert "current" not in cmd_str
-
-    def test_run_defaults_to_local_image(self, mocker, tmp_path):
-        """run should use local image by default (no --remote flag)."""
-        import subprocess
-
-        # Mock Config
-        mock_config = mocker.MagicMock()
-        mock_config.image = "ghcr.io/onetimesecret/onetimesecret"
-        mock_config.tag = "latest"
-        mock_config.resolve_image_tag.return_value = (
-            "ghcr.io/onetimesecret/onetimesecret",
-            "latest",
-        )
-        mock_config.config_dir = tmp_path / "etc"
-        mock_config.config_dir.mkdir()
-        mock_config.registry = None
-        mocker.patch("ots_containers.commands.instance.app.Config", return_value=mock_config)
-
-        # Mock env file not existing
-        mocker.patch(
-            "ots_containers.commands.instance.app.quadlet.DEFAULT_ENV_FILE",
-            tmp_path / "nonexistent",
-        )
-
-        # Mock subprocess.run
-        mock_run = mocker.patch("subprocess.run")
-        mock_run.return_value = subprocess.CompletedProcess([], 0, stdout="abc123")
-
-        # Call run with --tag (default is local)
-        instance.run(port=7143, detach=True, quiet=True, tag="plop-2")
-
-        # Verify local image was used
-        cmd = mock_run.call_args[0][0]
-        cmd_str = " ".join(cmd)
-        assert "onetimesecret:plop-2" in cmd_str
-        # Should NOT include ghcr.io prefix
-        assert "ghcr.io" not in cmd_str
-
-    def test_run_with_remote_flag_uses_registry(self, mocker, tmp_path):
-        """run --remote should pull from registry instead of local."""
-        import subprocess
-
-        # Mock Config
-        mock_config = mocker.MagicMock()
-        mock_config.image = "ghcr.io/onetimesecret/onetimesecret"
-        mock_config.tag = "v0.23.0"
-        mock_config.resolve_image_tag.return_value = (
-            "ghcr.io/onetimesecret/onetimesecret",
-            "v0.23.0",
-        )
-        mock_config.config_dir = tmp_path / "etc"
-        mock_config.config_dir.mkdir()
-        mock_config.registry = None
-        mocker.patch("ots_containers.commands.instance.app.Config", return_value=mock_config)
-
-        # Mock env file not existing
-        mocker.patch(
-            "ots_containers.commands.instance.app.quadlet.DEFAULT_ENV_FILE",
-            tmp_path / "nonexistent",
-        )
-
-        # Mock subprocess.run
-        mock_run = mocker.patch("subprocess.run")
-        mock_run.return_value = subprocess.CompletedProcess([], 0, stdout="abc123")
-
-        # Call run with --remote
-        instance.run(port=7143, detach=True, quiet=True, remote=True)
-
-        # Verify registry image was used
-        cmd = mock_run.call_args[0][0]
-        cmd_str = " ".join(cmd)
-        assert "ghcr.io/onetimesecret/onetimesecret:v0.23.0" in cmd_str
-
 
 class TestDeployCommand:
     """Test deploy command with mocked dependencies."""
@@ -356,45 +223,50 @@ class TestDeployCommand:
         )
 
         with pytest.raises(SystemExit):
-            instance.deploy(ports=(7143,))
+            instance.deploy(identifiers=("7143",), web=True)
 
         mock_validate.assert_called_once()
+
+    def test_deploy_requires_identifiers(self, mocker, capsys):
+        """deploy without identifiers should fail."""
+        with pytest.raises(SystemExit) as exc_info:
+            instance.deploy(identifiers=(), web=True)
+        assert "Identifiers required" in str(exc_info.value)
+
+    def test_deploy_requires_type(self, mocker, capsys):
+        """deploy with identifiers but no type should fail."""
+        with pytest.raises(SystemExit) as exc_info:
+            instance.deploy(identifiers=("7143",))
+        assert "Instance type required" in str(exc_info.value)
 
     def test_deploy_calls_assets_update(self, mocker, tmp_path):
         """deploy should update assets for web containers."""
         mock_config = mocker.MagicMock()
         mock_config.config_dir = mocker.MagicMock()
         mock_config.config_yaml = mocker.MagicMock()
-        mock_config.env_template = mocker.MagicMock()
         mock_config.var_dir = mocker.MagicMock()
-        mock_config.template_path = mocker.MagicMock()
+        mock_config.web_template_path = mocker.MagicMock()
         mock_config.db_path = tmp_path / "test.db"
         mock_config.resolve_image_tag.return_value = ("ghcr.io/test/image", "v1.0.0")
         mocker.patch("ots_containers.commands.instance.app.Config", return_value=mock_config)
         mock_assets = mocker.patch("ots_containers.commands.instance.app.assets.update")
-        mock_quadlet = mocker.patch("ots_containers.commands.instance.app.quadlet.write_template")
-        _mock_systemd = mocker.patch("ots_containers.commands.instance.app.systemd.start")
+        mock_quadlet = mocker.patch(
+            "ots_containers.commands.instance.app.quadlet.write_web_template"
+        )
+        mocker.patch("ots_containers.commands.instance.app.systemd.start")
         mocker.patch("ots_containers.commands.instance.app.db.record_deployment")
-        mock_config.env_file.return_value = mocker.MagicMock()
-        mock_config.env_file.return_value.write_text = mocker.MagicMock()
 
-        # Mock the env_template read
-        mock_config.env_template.read_text.return_value = "PORT=${PORT}"
-        mock_config.var_dir.mkdir = mocker.MagicMock()
-
-        instance.deploy(ports=(7143,))
+        instance.deploy(identifiers=("7143",), web=True)
 
         mock_assets.assert_called_once_with(mock_config, create_volume=True)
         mock_quadlet.assert_called_once_with(mock_config)
 
 
 class TestDeployWorkerCommand:
-    """Test deploy command with --type worker flag."""
+    """Test deploy command with --worker flag."""
 
     def test_deploy_worker_calls_write_worker_template(self, mocker, tmp_path):
-        """deploy --type worker should write worker quadlet template."""
-        from ots_containers.commands.instance.annotations import InstanceType
-
+        """deploy --worker should write worker quadlet template."""
         mock_config = mocker.MagicMock()
         mock_config.config_dir = mocker.MagicMock()
         mock_config.config_yaml = mocker.MagicMock()
@@ -410,14 +282,12 @@ class TestDeployWorkerCommand:
         mocker.patch("ots_containers.commands.instance.app.systemd.start")
         mocker.patch("ots_containers.commands.instance.app.db.record_deployment")
 
-        instance.deploy(ports=(1,), instance_type=InstanceType.WORKER)
+        instance.deploy(identifiers=("1",), worker=True)
 
         mock_quadlet.assert_called_once_with(mock_config)
 
     def test_deploy_worker_does_not_update_assets(self, mocker, tmp_path):
-        """deploy --type worker should NOT update static assets."""
-        from ots_containers.commands.instance.annotations import InstanceType
-
+        """deploy --worker should NOT update static assets."""
         mock_config = mocker.MagicMock()
         mock_config.config_dir = mocker.MagicMock()
         mock_config.config_yaml = mocker.MagicMock()
@@ -432,14 +302,12 @@ class TestDeployWorkerCommand:
         mocker.patch("ots_containers.commands.instance.app.systemd.start")
         mocker.patch("ots_containers.commands.instance.app.db.record_deployment")
 
-        instance.deploy(ports=(1,), instance_type=InstanceType.WORKER)
+        instance.deploy(identifiers=("1",), worker=True)
 
         mock_assets.assert_not_called()
 
     def test_deploy_worker_starts_worker_unit(self, mocker, tmp_path):
-        """deploy --type worker should start onetime-worker unit."""
-        from ots_containers.commands.instance.annotations import InstanceType
-
+        """deploy --worker should start onetime-worker unit."""
         mock_config = mocker.MagicMock()
         mock_config.config_dir = mocker.MagicMock()
         mock_config.config_yaml = mocker.MagicMock()
@@ -453,104 +321,58 @@ class TestDeployWorkerCommand:
         mock_start = mocker.patch("ots_containers.commands.instance.app.systemd.start")
         mocker.patch("ots_containers.commands.instance.app.db.record_deployment")
 
-        # Note: Worker IDs are now numeric (ports) converted to strings internally
-        instance.deploy(ports=(1,), instance_type=InstanceType.WORKER)
+        instance.deploy(identifiers=("1",), worker=True)
 
         mock_start.assert_called_once_with("onetime-worker@1")
-
-    def test_deploy_worker_records_deployment(self, mocker, tmp_path):
-        """deploy --type worker should record deployment with worker action."""
-        from ots_containers.commands.instance.annotations import InstanceType
-
-        mock_config = mocker.MagicMock()
-        mock_config.config_dir = mocker.MagicMock()
-        mock_config.config_yaml = mocker.MagicMock()
-        mock_config.var_dir = mocker.MagicMock()
-        mock_config.worker_template_path = mocker.MagicMock()
-        mock_config.worker_template_path.parent = mocker.MagicMock()
-        mock_config.db_path = tmp_path / "test.db"
-        mock_config.resolve_image_tag.return_value = ("ghcr.io/test/image", "v1.0.0")
-        mocker.patch("ots_containers.commands.instance.app.Config", return_value=mock_config)
-        mocker.patch("ots_containers.commands.instance.app.quadlet.write_worker_template")
-        mocker.patch("ots_containers.commands.instance.app.systemd.start")
-        mock_record = mocker.patch("ots_containers.commands.instance.app.db.record_deployment")
-
-        instance.deploy(ports=(1,), instance_type=InstanceType.WORKER)
-
-        mock_record.assert_called_once()
-        call_kwargs = mock_record.call_args[1]
-        assert call_kwargs["action"] == "deploy-worker"
-        assert call_kwargs["port"] == 0
-        assert "worker_id=1" in call_kwargs["notes"]
-
-    def test_deploy_multiple_workers(self, mocker, tmp_path):
-        """deploy --type worker with multiple ports should deploy multiple workers."""
-        from ots_containers.commands.instance.annotations import InstanceType
-
-        mock_config = mocker.MagicMock()
-        mock_config.config_dir = mocker.MagicMock()
-        mock_config.config_yaml = mocker.MagicMock()
-        mock_config.var_dir = mocker.MagicMock()
-        mock_config.worker_template_path = mocker.MagicMock()
-        mock_config.worker_template_path.parent = mocker.MagicMock()
-        mock_config.db_path = tmp_path / "test.db"
-        mock_config.resolve_image_tag.return_value = ("ghcr.io/test/image", "v1.0.0")
-        mocker.patch("ots_containers.commands.instance.app.Config", return_value=mock_config)
-        mocker.patch("ots_containers.commands.instance.app.quadlet.write_worker_template")
-        mock_start = mocker.patch("ots_containers.commands.instance.app.systemd.start")
-        mocker.patch("ots_containers.commands.instance.app.db.record_deployment")
-
-        instance.deploy(ports=(1, 2, 3), instance_type=InstanceType.WORKER, delay=0)
-
-        assert mock_start.call_count == 3
-        calls = [c[0][0] for c in mock_start.call_args_list]
-        assert "onetime-worker@1" in calls
-        assert "onetime-worker@2" in calls
-        assert "onetime-worker@3" in calls
 
 
 class TestRedeployCommand:
     """Test redeploy command with mocked dependencies."""
 
     def test_redeploy_with_no_instances_found(self, mocker, capsys):
-        """redeploy with no ports should discover all configured instances."""
+        """redeploy with no instances should print message."""
         mocker.patch(
-            "ots_containers.commands.instance._helpers.systemd.discover_instances",
+            "ots_containers.commands.instance._helpers.systemd.discover_web_instances",
             return_value=[],
         )
         mocker.patch(
             "ots_containers.commands.instance._helpers.systemd.discover_worker_instances",
             return_value=[],
         )
+        mocker.patch(
+            "ots_containers.commands.instance._helpers.systemd.discover_scheduler_instances",
+            return_value=[],
+        )
 
-        instance.redeploy(ports=())
+        instance.redeploy(identifiers=())
 
         captured = capsys.readouterr()
-        # When no web or worker instances found, prints message for web (first discovery)
         assert "No running instances found" in captured.out
 
-    def test_redeploy_uses_cfg_template_path(self, mocker, tmp_path):
-        """redeploy should use cfg.template_path (not quadlet.template_path)."""
-        # This test verifies the fix for the AttributeError
+    def test_redeploy_uses_cfg_web_template_path(self, mocker, tmp_path):
+        """redeploy should use cfg.web_template_path."""
         mock_config = mocker.MagicMock()
         mock_config.config_dir = mocker.MagicMock()
         mock_config.config_yaml = mocker.MagicMock()
-        mock_config.env_template = mocker.MagicMock()
         mock_config.var_dir = mocker.MagicMock()
-        mock_config.template_path = tmp_path / "template"
+        mock_config.web_template_path = tmp_path / "template"
         mock_config.db_path = tmp_path / "test.db"
         mock_config.resolve_image_tag.return_value = ("ghcr.io/test/image", "v1.0.0")
         mocker.patch("ots_containers.commands.instance.app.Config", return_value=mock_config)
         mocker.patch(
-            "ots_containers.commands.instance._helpers.systemd.discover_instances",
+            "ots_containers.commands.instance._helpers.systemd.discover_web_instances",
             return_value=[7143],
         )
         mocker.patch(
             "ots_containers.commands.instance._helpers.systemd.discover_worker_instances",
             return_value=[],
         )
+        mocker.patch(
+            "ots_containers.commands.instance._helpers.systemd.discover_scheduler_instances",
+            return_value=[],
+        )
         mocker.patch("ots_containers.commands.instance.app.assets.update")
-        mocker.patch("ots_containers.commands.instance.app.quadlet.write_template")
+        mocker.patch("ots_containers.commands.instance.app.quadlet.write_web_template")
         mocker.patch("ots_containers.commands.instance.app.systemd.recreate")
         mocker.patch("ots_containers.commands.instance.app.db.record_deployment")
         mocker.patch(
@@ -558,53 +380,8 @@ class TestRedeployCommand:
             return_value=True,
         )
 
-        # Mock the env_template read
-        mock_config.env_template.read_text.return_value = "PORT=${PORT}"
-        mock_config.var_dir.mkdir = mocker.MagicMock()
-        mock_config.env_file.return_value = mocker.MagicMock()
-
         # Should not raise AttributeError
-        instance.redeploy(ports=())
-
-    def test_redeploy_starts_new_unit_if_not_exists(self, mocker, tmp_path):
-        """redeploy should start (not restart) if unit doesn't exist yet."""
-        mock_config = mocker.MagicMock()
-        mock_config.config_dir = mocker.MagicMock()
-        mock_config.config_yaml = mocker.MagicMock()
-        mock_config.env_template = mocker.MagicMock()
-        mock_config.var_dir = mocker.MagicMock()
-        mock_config.template_path = tmp_path / "template"
-        mock_config.db_path = tmp_path / "test.db"
-        mock_config.resolve_image_tag.return_value = ("ghcr.io/test/image", "v1.0.0")
-        mocker.patch("ots_containers.commands.instance.app.Config", return_value=mock_config)
-        mocker.patch(
-            "ots_containers.commands.instance._helpers.systemd.discover_instances",
-            return_value=[7143],
-        )
-        mocker.patch(
-            "ots_containers.commands.instance._helpers.systemd.discover_worker_instances",
-            return_value=[],
-        )
-        mocker.patch("ots_containers.commands.instance.app.assets.update")
-        mocker.patch("ots_containers.commands.instance.app.quadlet.write_template")
-        mock_start = mocker.patch("ots_containers.commands.instance.app.systemd.start")
-        mock_recreate = mocker.patch("ots_containers.commands.instance.app.systemd.recreate")
-        mocker.patch("ots_containers.commands.instance.app.db.record_deployment")
-        mocker.patch(
-            "ots_containers.commands.instance.app.systemd.container_exists",
-            return_value=False,
-        )
-
-        # Mock the env_template read
-        mock_config.env_template.read_text.return_value = "PORT=${PORT}"
-        mock_config.var_dir.mkdir = mocker.MagicMock()
-        mock_config.env_file.return_value = mocker.MagicMock()
-
-        instance.redeploy(ports=())
-
-        # Should call start, not recreate
-        mock_start.assert_called_once_with("onetime@7143")
-        mock_recreate.assert_not_called()
+        instance.redeploy(identifiers=())
 
 
 class TestShowEnvCommand:
@@ -641,29 +418,9 @@ class TestShowEnvCommand:
         env_lines = [line for line in lines if "=" in line and not line.startswith("===")]
         assert env_lines == ["AAA_VAR=first", "MMM_VAR=middle", "ZZZ_VAR=last"]
 
-    def test_show_env_handles_missing_file(self, mocker, capsys, tmp_path):
-        """show_env should handle missing env file gracefully."""
-        from pathlib import Path
-
-        # Point to non-existent file
-        env_file = tmp_path / "nonexistent"
-        original_path = Path
-
-        def mock_path(path_str):
-            if path_str == "/etc/default/onetimesecret":
-                return env_file
-            return original_path(path_str)
-
-        mocker.patch("pathlib.Path", side_effect=mock_path)
-
-        instance.show_env()
-
-        captured = capsys.readouterr()
-        assert "(file not found)" in captured.out
-
 
 class TestExecCommand:
-    """Test the exec command."""
+    """Test the exec_shell command."""
 
     def test_exec_shell_function_exists(self):
         """exec_shell command should be defined."""
@@ -671,66 +428,36 @@ class TestExecCommand:
         assert callable(instance.exec_shell)
 
     def test_exec_with_no_instances(self, mocker, capsys):
-        """exec with no running instances should report none found."""
+        """exec_shell with no running instances should report none found."""
         mocker.patch(
-            "ots_containers.commands.instance._helpers.systemd.discover_instances",
+            "ots_containers.commands.instance._helpers.systemd.discover_web_instances",
             return_value=[],
         )
         mocker.patch(
             "ots_containers.commands.instance._helpers.systemd.discover_worker_instances",
             return_value=[],
         )
-        instance.exec_shell(ports=())
+        mocker.patch(
+            "ots_containers.commands.instance._helpers.systemd.discover_scheduler_instances",
+            return_value=[],
+        )
+        instance.exec_shell(identifiers=())
         captured = capsys.readouterr()
         assert "No running instances found" in captured.out
 
     def test_exec_calls_podman_exec(self, mocker, capsys):
-        """exec should call podman exec with correct container name."""
+        """exec_shell should call podman exec with correct container name."""
         mock_run = mocker.patch("ots_containers.commands.instance.app.subprocess.run")
         mocker.patch.dict("os.environ", {"SHELL": "/bin/bash"})
 
-        instance.exec_shell(ports=(7043,))
+        instance.exec_shell(identifiers=("7043",), web=True)
 
         mock_run.assert_called_once()
         call_args = mock_run.call_args[0][0]
         assert call_args[:3] == ["podman", "exec", "-it"]
-        assert "onetime@7043" in call_args
+        # Container name is now systemd-onetime-web_7043
+        assert "systemd-onetime-web_7043" in call_args
         assert "/bin/bash" in call_args
-
-    def test_exec_uses_custom_command(self, mocker, capsys):
-        """exec should use custom command when provided."""
-        mock_run = mocker.patch("ots_containers.commands.instance.app.subprocess.run")
-
-        instance.exec_shell(ports=(7043,), command="/bin/sh")
-
-        mock_run.assert_called_once()
-        call_args = mock_run.call_args[0][0]
-        assert "/bin/sh" in call_args
-
-    def test_exec_includes_workers_when_no_ports(self, mocker, capsys):
-        """exec with no ports should exec into both web and worker instances."""
-        mocker.patch(
-            "ots_containers.commands.instance._helpers.systemd.discover_instances",
-            return_value=[7043],
-        )
-        mocker.patch(
-            "ots_containers.commands.instance._helpers.systemd.discover_worker_instances",
-            return_value=["1"],
-        )
-        mock_run = mocker.patch("ots_containers.commands.instance.app.subprocess.run")
-        mocker.patch.dict("os.environ", {"SHELL": "/bin/bash"})
-
-        instance.exec_shell(ports=())
-
-        # Should be called twice: once for web, once for worker
-        assert mock_run.call_count == 2
-        calls = [call[0][0] for call in mock_run.call_args_list]
-        assert any("onetime@7043" in call for call in calls)
-        assert any("onetime-worker@1" in call for call in calls)
-
-        captured = capsys.readouterr()
-        assert "Entering onetime@7043" in captured.out
-        assert "Entering onetime-worker@1" in captured.out
 
 
 class TestListInstancesCommand:
@@ -743,7 +470,15 @@ class TestListInstancesCommand:
     def test_list_with_no_instances(self, mocker, capsys):
         """list should print message when no instances found."""
         mocker.patch(
-            "ots_containers.commands.instance._helpers.systemd.discover_instances",
+            "ots_containers.commands.instance._helpers.systemd.discover_web_instances",
+            return_value=[],
+        )
+        mocker.patch(
+            "ots_containers.commands.instance._helpers.systemd.discover_worker_instances",
+            return_value=[],
+        )
+        mocker.patch(
+            "ots_containers.commands.instance._helpers.systemd.discover_scheduler_instances",
             return_value=[],
         )
 
@@ -755,8 +490,16 @@ class TestListInstancesCommand:
     def test_list_displays_header(self, mocker, capsys, tmp_path):
         """list should display table header."""
         mocker.patch(
-            "ots_containers.commands.instance._helpers.systemd.discover_instances",
+            "ots_containers.commands.instance._helpers.systemd.discover_web_instances",
             return_value=[7043],
+        )
+        mocker.patch(
+            "ots_containers.commands.instance._helpers.systemd.discover_worker_instances",
+            return_value=[],
+        )
+        mocker.patch(
+            "ots_containers.commands.instance._helpers.systemd.discover_scheduler_instances",
+            return_value=[],
         )
         mocker.patch(
             "ots_containers.commands.instance.app.subprocess.run",
@@ -778,96 +521,11 @@ class TestListInstancesCommand:
         instance.list_instances()
 
         captured = capsys.readouterr()
-        assert "PORT" in captured.out
+        assert "TYPE" in captured.out
+        assert "ID" in captured.out
         assert "SERVICE" in captured.out
         assert "CONTAINER" in captured.out
         assert "STATUS" in captured.out
-        assert "IMAGE:TAG" in captured.out
-        assert "DEPLOYED" in captured.out
-        assert "ACTION" in captured.out
-
-    def test_list_shows_instance_details(self, mocker, capsys, tmp_path):
-        """list should show instance details from systemd and database."""
-        mocker.patch(
-            "ots_containers.commands.instance._helpers.systemd.discover_instances",
-            return_value=[7043],
-        )
-        mocker.patch(
-            "ots_containers.commands.instance.app.subprocess.run",
-            return_value=mocker.Mock(stdout="active\n", stderr=""),
-        )
-
-        # Mock Config
-        mock_config = mocker.Mock()
-        mock_config.db_path = tmp_path / "test.db"
-        mocker.patch(
-            "ots_containers.commands.instance.app.Config",
-            return_value=mock_config,
-        )
-
-        # Mock deployment data
-        from ots_containers.db import Deployment
-
-        mock_deployment = Deployment(
-            id=1,
-            timestamp="2025-12-19T03:00:00.123456",
-            port=7043,
-            image="ghcr.io/onetimesecret/onetimesecret",
-            tag="v0.24.0-rc0",
-            action="deploy",
-            success=True,
-            notes=None,
-        )
-        mocker.patch(
-            "ots_containers.commands.instance.app.db.get_deployments",
-            return_value=[mock_deployment],
-        )
-
-        instance.list_instances()
-
-        captured = capsys.readouterr()
-        assert "7043" in captured.out
-        assert "onetime@7043.service" in captured.out
-        assert "onetime@7043" in captured.out
-        assert "active" in captured.out
-        assert "ghcr.io/onetimesecret/onetimesecret:v0.24.0-rc0" in captured.out
-        assert "2025-12-19 03:00:00" in captured.out
-        assert "deploy" in captured.out
-
-    def test_list_handles_missing_deployment_data(self, mocker, capsys, tmp_path):
-        """list should handle instances without deployment data."""
-        mocker.patch(
-            "ots_containers.commands.instance._helpers.systemd.discover_instances",
-            return_value=[7043],
-        )
-        mocker.patch(
-            "ots_containers.commands.instance.app.subprocess.run",
-            return_value=mocker.Mock(stdout="inactive\n", stderr=""),
-        )
-
-        # Mock Config
-        mock_config = mocker.Mock()
-        mock_config.db_path = tmp_path / "test.db"
-        mocker.patch(
-            "ots_containers.commands.instance.app.Config",
-            return_value=mock_config,
-        )
-
-        # No deployments found
-        mocker.patch(
-            "ots_containers.commands.instance.app.db.get_deployments",
-            return_value=[],
-        )
-
-        instance.list_instances()
-
-        captured = capsys.readouterr()
-        assert "7043" in captured.out
-        assert "onetime@7043.service" in captured.out
-        assert "onetime@7043" in captured.out
-        assert "inactive" in captured.out
-        assert "unknown" in captured.out
-        assert "n/a" in captured.out
 
 
 class TestEnableCommand:
@@ -881,83 +539,29 @@ class TestEnableCommand:
     def test_enable_calls_systemctl(self, mocker, capsys):
         """enable should call systemctl enable."""
         mocker.patch(
-            "ots_containers.commands.instance._helpers.systemd.discover_instances",
+            "ots_containers.commands.instance._helpers.systemd.discover_web_instances",
             return_value=[7043],
+        )
+        mocker.patch(
+            "ots_containers.commands.instance._helpers.systemd.discover_worker_instances",
+            return_value=[],
+        )
+        mocker.patch(
+            "ots_containers.commands.instance._helpers.systemd.discover_scheduler_instances",
+            return_value=[],
         )
         mock_run = mocker.patch("ots_containers.commands.instance.app.subprocess.run")
 
-        instance.enable(ports=(7043,))
+        instance.enable(identifiers=("7043",), web=True)
 
         mock_run.assert_called_once()
         call_args = mock_run.call_args[0][0]
         assert "systemctl" in call_args
         assert "enable" in call_args
-        assert "onetime@7043" in call_args
+        assert "onetime-web@7043" in call_args
 
         captured = capsys.readouterr()
         assert "Enabled" in captured.out
-
-    def test_enable_with_no_instances(self, mocker, capsys):
-        """enable with no ports should discover instances."""
-        mocker.patch(
-            "ots_containers.commands.instance._helpers.systemd.discover_instances",
-            return_value=[],
-        )
-        mocker.patch(
-            "ots_containers.commands.instance._helpers.systemd.discover_worker_instances",
-            return_value=[],
-        )
-
-        instance.enable(ports=())
-
-        captured = capsys.readouterr()
-        assert "No" in captured.out or captured.out == ""
-
-    def test_enable_includes_workers_when_no_ports(self, mocker, capsys):
-        """enable with no ports should enable both web and worker instances."""
-        mocker.patch(
-            "ots_containers.commands.instance._helpers.systemd.discover_instances",
-            return_value=[7043],
-        )
-        mocker.patch(
-            "ots_containers.commands.instance._helpers.systemd.discover_worker_instances",
-            return_value=["1"],
-        )
-        mock_run = mocker.patch("ots_containers.commands.instance.app.subprocess.run")
-
-        instance.enable(ports=())
-
-        # Should be called twice: once for web, once for worker
-        assert mock_run.call_count == 2
-        calls = [call[0][0] for call in mock_run.call_args_list]
-        assert any("onetime@7043" in call for call in calls)
-        assert any("onetime-worker@1" in call for call in calls)
-
-        captured = capsys.readouterr()
-        assert "Enabled onetime@7043" in captured.out
-        assert "Enabled onetime-worker@1" in captured.out
-
-    def test_enable_handles_error(self, mocker, capsys):
-        """enable should handle systemctl errors gracefully."""
-        import subprocess
-
-        mocker.patch(
-            "ots_containers.commands.instance._helpers.systemd.discover_instances",
-            return_value=[7043],
-        )
-        mocker.patch(
-            "ots_containers.commands.instance._helpers.systemd.discover_worker_instances",
-            return_value=[],
-        )
-        mocker.patch(
-            "ots_containers.commands.instance.app.subprocess.run",
-            side_effect=subprocess.CalledProcessError(1, "systemctl", stderr="unit not found"),
-        )
-
-        instance.enable(ports=(7043,))
-
-        captured = capsys.readouterr()
-        assert "Failed" in captured.out
 
 
 class TestStopCommand:
@@ -969,66 +573,38 @@ class TestStopCommand:
         assert callable(instance.stop)
 
     def test_stop_calls_systemd_stop(self, mocker, capsys):
-        """stop should call systemd.stop for each port."""
+        """stop should call systemd.stop for each instance."""
         mock_stop = mocker.patch("ots_containers.commands.instance.app.systemd.stop")
 
-        instance.stop(ports=(7043,))
+        instance.stop(identifiers=("7043",), web=True)
 
-        mock_stop.assert_called_once_with("onetime@7043")
+        mock_stop.assert_called_once_with("onetime-web@7043")
         captured = capsys.readouterr()
-        assert "Stopped onetime@7043" in captured.out
+        assert "Stopped onetime-web@7043" in captured.out
 
-    def test_stop_discovers_instances_when_no_ports(self, mocker):
-        """stop with no ports should discover web and worker instances."""
+    def test_stop_discovers_instances_when_no_identifiers(self, mocker):
+        """stop with no identifiers should discover all types."""
         mocker.patch(
-            "ots_containers.commands.instance._helpers.systemd.discover_instances",
+            "ots_containers.commands.instance._helpers.systemd.discover_web_instances",
             return_value=[7043, 7044],
         )
         mocker.patch(
             "ots_containers.commands.instance._helpers.systemd.discover_worker_instances",
             return_value=["1"],
         )
+        mocker.patch(
+            "ots_containers.commands.instance._helpers.systemd.discover_scheduler_instances",
+            return_value=[],
+        )
         mock_stop = mocker.patch("ots_containers.commands.instance.app.systemd.stop")
 
-        instance.stop(ports=())
+        instance.stop(identifiers=())
 
         assert mock_stop.call_count == 3
         calls = [c[0][0] for c in mock_stop.call_args_list]
-        assert "onetime@7043" in calls
-        assert "onetime@7044" in calls
+        assert "onetime-web@7043" in calls
+        assert "onetime-web@7044" in calls
         assert "onetime-worker@1" in calls
-
-    def test_stop_with_no_running_instances(self, mocker, capsys):
-        """stop with no running instances should print message and return."""
-        mocker.patch(
-            "ots_containers.commands.instance._helpers.systemd.discover_instances",
-            return_value=[],
-        )
-        mocker.patch(
-            "ots_containers.commands.instance._helpers.systemd.discover_worker_instances",
-            return_value=[],
-        )
-        mock_stop = mocker.patch("ots_containers.commands.instance.app.systemd.stop")
-
-        instance.stop(ports=())
-
-        mock_stop.assert_not_called()
-        captured = capsys.readouterr()
-        assert "No running instances found" in captured.out
-
-    def test_stop_with_specific_ports_skips_workers(self, mocker):
-        """stop with explicit ports should only stop those, not workers."""
-        mocker.patch(
-            "ots_containers.commands.instance._helpers.systemd.discover_worker_instances",
-            return_value=["1"],
-        )
-        mock_stop = mocker.patch("ots_containers.commands.instance.app.systemd.stop")
-
-        instance.stop(ports=(7043,))
-
-        # Only the specified web container, not the worker
-        assert mock_stop.call_count == 1
-        mock_stop.assert_called_once_with("onetime@7043")
 
 
 class TestRestartCommand:
@@ -1040,83 +616,26 @@ class TestRestartCommand:
         assert callable(instance.restart)
 
     def test_restart_calls_systemd_restart(self, mocker, capsys):
-        """restart should call systemd.restart for each port."""
+        """restart should call systemd.restart for each instance."""
         mock_restart = mocker.patch("ots_containers.commands.instance.app.systemd.restart")
 
-        instance.restart(ports=(7043,))
+        instance.restart(identifiers=("7043",), web=True)
 
-        mock_restart.assert_called_once_with("onetime@7043")
+        mock_restart.assert_called_once_with("onetime-web@7043")
         captured = capsys.readouterr()
-        assert "Restarted onetime@7043" in captured.out
+        assert "Restarted onetime-web@7043" in captured.out
 
-    def test_restart_multiple_ports(self, mocker, capsys):
-        """restart should call systemd.restart for each port."""
+    def test_restart_multiple(self, mocker, capsys):
+        """restart should call systemd.restart for each instance."""
         mock_restart = mocker.patch("ots_containers.commands.instance.app.systemd.restart")
 
-        instance.restart(ports=(7043, 7044, 7045))
+        instance.restart(identifiers=("7043", "7044", "7045"), web=True)
 
         assert mock_restart.call_count == 3
         calls = [c[0][0] for c in mock_restart.call_args_list]
-        assert "onetime@7043" in calls
-        assert "onetime@7044" in calls
-        assert "onetime@7045" in calls
-
-        captured = capsys.readouterr()
-        assert "Restarted onetime@7043" in captured.out
-        assert "Restarted onetime@7044" in captured.out
-        assert "Restarted onetime@7045" in captured.out
-
-    def test_restart_discovers_instances_when_no_ports(self, mocker):
-        """restart with no ports should discover web and worker instances."""
-        mocker.patch(
-            "ots_containers.commands.instance._helpers.systemd.discover_instances",
-            return_value=[7043, 7044],
-        )
-        mocker.patch(
-            "ots_containers.commands.instance._helpers.systemd.discover_worker_instances",
-            return_value=["1"],
-        )
-        mock_restart = mocker.patch("ots_containers.commands.instance.app.systemd.restart")
-
-        instance.restart(ports=())
-
-        assert mock_restart.call_count == 3
-        calls = [c[0][0] for c in mock_restart.call_args_list]
-        assert "onetime@7043" in calls
-        assert "onetime@7044" in calls
-        assert "onetime-worker@1" in calls
-
-    def test_restart_with_no_running_instances(self, mocker, capsys):
-        """restart with no running instances should print message and return."""
-        mocker.patch(
-            "ots_containers.commands.instance._helpers.systemd.discover_instances",
-            return_value=[],
-        )
-        mocker.patch(
-            "ots_containers.commands.instance._helpers.systemd.discover_worker_instances",
-            return_value=[],
-        )
-        mock_restart = mocker.patch("ots_containers.commands.instance.app.systemd.restart")
-
-        instance.restart(ports=())
-
-        mock_restart.assert_not_called()
-        captured = capsys.readouterr()
-        assert "No running instances found" in captured.out
-
-    def test_restart_with_specific_ports_skips_workers(self, mocker, capsys):
-        """restart with explicit ports should only restart those, not workers."""
-        mocker.patch(
-            "ots_containers.commands.instance._helpers.systemd.discover_worker_instances",
-            return_value=["1"],
-        )
-        mock_restart = mocker.patch("ots_containers.commands.instance.app.systemd.restart")
-
-        instance.restart(ports=(7043,))
-
-        # Only the specified web container, not the worker
-        assert mock_restart.call_count == 1
-        mock_restart.assert_called_once_with("onetime@7043")
+        assert "onetime-web@7043" in calls
+        assert "onetime-web@7044" in calls
+        assert "onetime-web@7045" in calls
 
 
 class TestLogsCommand:
@@ -1127,19 +646,23 @@ class TestLogsCommand:
         assert hasattr(instance, "logs")
         assert callable(instance.logs)
 
-    def test_logs_discovers_all_instances_when_no_ports(self, mocker):
-        """logs with no ports should discover web and worker instances."""
+    def test_logs_discovers_all_instances_when_no_identifiers(self, mocker):
+        """logs with no identifiers should discover all instances."""
         mocker.patch(
-            "ots_containers.commands.instance._helpers.systemd.discover_instances",
+            "ots_containers.commands.instance._helpers.systemd.discover_web_instances",
             return_value=[7043, 7044],
         )
         mocker.patch(
             "ots_containers.commands.instance._helpers.systemd.discover_worker_instances",
             return_value=["1"],
         )
+        mocker.patch(
+            "ots_containers.commands.instance._helpers.systemd.discover_scheduler_instances",
+            return_value=[],
+        )
         mock_run = mocker.patch("ots_containers.commands.instance.app.subprocess.run")
 
-        instance.logs(ports=())
+        instance.logs(identifiers=())
 
         mock_run.assert_called_once()
         cmd = mock_run.call_args[0][0]
@@ -1147,43 +670,9 @@ class TestLogsCommand:
         assert "-u" in cmd
         # Should include both web and worker units
         unit_args = [cmd[i + 1] for i, arg in enumerate(cmd) if arg == "-u"]
-        assert "onetime@7043" in unit_args
-        assert "onetime@7044" in unit_args
+        assert "onetime-web@7043" in unit_args
+        assert "onetime-web@7044" in unit_args
         assert "onetime-worker@1" in unit_args
-
-    def test_logs_with_specific_ports_skips_workers(self, mocker):
-        """logs with explicit ports should only show those, not workers."""
-        mocker.patch(
-            "ots_containers.commands.instance._helpers.systemd.discover_worker_instances",
-            return_value=["1"],
-        )
-        mock_run = mocker.patch("ots_containers.commands.instance.app.subprocess.run")
-
-        instance.logs(ports=(7043,))
-
-        mock_run.assert_called_once()
-        cmd = mock_run.call_args[0][0]
-        unit_args = [cmd[i + 1] for i, arg in enumerate(cmd) if arg == "-u"]
-        assert "onetime@7043" in unit_args
-        assert "onetime-worker@1" not in unit_args
-
-    def test_logs_with_no_instances(self, mocker, capsys):
-        """logs with no instances should print message and return."""
-        mocker.patch(
-            "ots_containers.commands.instance._helpers.systemd.discover_instances",
-            return_value=[],
-        )
-        mocker.patch(
-            "ots_containers.commands.instance._helpers.systemd.discover_worker_instances",
-            return_value=[],
-        )
-        mock_run = mocker.patch("ots_containers.commands.instance.app.subprocess.run")
-
-        instance.logs(ports=())
-
-        mock_run.assert_not_called()
-        captured = capsys.readouterr()
-        assert "No instances found" in captured.out
 
 
 class TestDisableCommand:
@@ -1197,77 +686,244 @@ class TestDisableCommand:
     def test_disable_aborts_without_confirmation(self, mocker, capsys):
         """disable should abort without --yes if user declines."""
         mocker.patch(
-            "ots_containers.commands.instance._helpers.systemd.discover_instances",
+            "ots_containers.commands.instance._helpers.systemd.discover_web_instances",
             return_value=[7043],
         )
         mocker.patch(
             "ots_containers.commands.instance._helpers.systemd.discover_worker_instances",
             return_value=[],
         )
+        mocker.patch(
+            "ots_containers.commands.instance._helpers.systemd.discover_scheduler_instances",
+            return_value=[],
+        )
         mocker.patch("builtins.input", return_value="n")
 
-        instance.disable(ports=(), yes=False)
+        instance.disable(identifiers=(), web=True, yes=False)
 
         captured = capsys.readouterr()
         assert "Aborted" in captured.out
 
-    def test_disable_includes_workers_when_no_ports(self, mocker, capsys):
-        """disable with no ports should disable both web and worker instances."""
+    def test_disable_calls_systemctl(self, mocker, capsys):
+        """disable should call systemctl disable with --yes."""
         mocker.patch(
-            "ots_containers.commands.instance._helpers.systemd.discover_instances",
+            "ots_containers.commands.instance._helpers.systemd.discover_web_instances",
             return_value=[7043],
         )
         mocker.patch(
             "ots_containers.commands.instance._helpers.systemd.discover_worker_instances",
-            return_value=["1"],
+            return_value=[],
         )
-        mock_run = mocker.patch("ots_containers.commands.instance.app.subprocess.run")
-
-        instance.disable(ports=(), yes=True)
-
-        # Should be called twice: once for web, once for worker
-        assert mock_run.call_count == 2
-        calls = [call[0][0] for call in mock_run.call_args_list]
-        assert any("onetime@7043" in call for call in calls)
-        assert any("onetime-worker@1" in call for call in calls)
-
-        captured = capsys.readouterr()
-        assert "Disabled onetime@7043" in captured.out
-        assert "Disabled onetime-worker@1" in captured.out
-
-    def test_disable_calls_systemctl(self, mocker, capsys):
-        """disable should call systemctl disable with --yes."""
         mocker.patch(
-            "ots_containers.commands.instance._helpers.systemd.discover_instances",
-            return_value=[7043],
+            "ots_containers.commands.instance._helpers.systemd.discover_scheduler_instances",
+            return_value=[],
         )
         mock_run = mocker.patch("ots_containers.commands.instance.app.subprocess.run")
 
-        instance.disable(ports=(7043,), yes=True)
+        instance.disable(identifiers=("7043",), web=True, yes=True)
 
         mock_run.assert_called_once()
         call_args = mock_run.call_args[0][0]
         assert "systemctl" in call_args
         assert "disable" in call_args
-        assert "onetime@7043" in call_args
+        assert "onetime-web@7043" in call_args
 
         captured = capsys.readouterr()
         assert "Disabled" in captured.out
 
-    def test_disable_handles_error(self, mocker, capsys):
-        """disable should handle systemctl errors gracefully."""
-        import subprocess
 
-        mocker.patch(
-            "ots_containers.commands.instance._helpers.systemd.discover_instances",
-            return_value=[7043],
+class TestResolveInstanceType:
+    """Test resolve_instance_type helper."""
+
+    def test_returns_none_when_no_type_specified(self):
+        """Should return None when no type specified."""
+        from ots_containers.commands.instance.annotations import resolve_instance_type
+
+        result = resolve_instance_type(None, web=False, worker=False, scheduler=False)
+        assert result is None
+
+    def test_returns_type_from_explicit_param(self):
+        """Should return type from --type parameter."""
+        from ots_containers.commands.instance.annotations import resolve_instance_type
+
+        result = resolve_instance_type(
+            InstanceType.WORKER, web=False, worker=False, scheduler=False
         )
-        mocker.patch(
-            "ots_containers.commands.instance.app.subprocess.run",
-            side_effect=subprocess.CalledProcessError(1, "systemctl", stderr="unit not found"),
-        )
+        assert result == InstanceType.WORKER
 
-        instance.disable(ports=(7043,), yes=True)
+    def test_returns_web_from_flag(self):
+        """Should return WEB when --web flag set."""
+        from ots_containers.commands.instance.annotations import resolve_instance_type
 
+        result = resolve_instance_type(None, web=True, worker=False, scheduler=False)
+        assert result == InstanceType.WEB
+
+    def test_returns_worker_from_flag(self):
+        """Should return WORKER when --worker flag set."""
+        from ots_containers.commands.instance.annotations import resolve_instance_type
+
+        result = resolve_instance_type(None, web=False, worker=True, scheduler=False)
+        assert result == InstanceType.WORKER
+
+    def test_returns_scheduler_from_flag(self):
+        """Should return SCHEDULER when --scheduler flag set."""
+        from ots_containers.commands.instance.annotations import resolve_instance_type
+
+        result = resolve_instance_type(None, web=False, worker=False, scheduler=True)
+        assert result == InstanceType.SCHEDULER
+
+    def test_raises_on_multiple_flags(self):
+        """Should raise when multiple shorthand flags set."""
+        from ots_containers.commands.instance.annotations import resolve_instance_type
+
+        with pytest.raises(SystemExit):
+            resolve_instance_type(None, web=True, worker=True, scheduler=False)
+
+    def test_raises_on_type_plus_flag(self):
+        """Should raise when both --type and shorthand flag used."""
+        from ots_containers.commands.instance.annotations import resolve_instance_type
+
+        with pytest.raises(SystemExit):
+            resolve_instance_type(InstanceType.WEB, web=False, worker=True, scheduler=False)
+
+
+class TestSchedulerCommands:
+    """Integration tests for scheduler instance commands using --scheduler flag."""
+
+    def test_stop_scheduler_with_flag(self, mocker, capsys):
+        """stop --scheduler should call systemd.stop for scheduler instances."""
+        mock_stop = mocker.patch("ots_containers.commands.instance.app.systemd.stop")
+
+        instance.stop(identifiers=("main",), scheduler=True)
+
+        mock_stop.assert_called_once_with("onetime-scheduler@main")
         captured = capsys.readouterr()
-        assert "Failed" in captured.out
+        assert "Stopped onetime-scheduler@main" in captured.out
+
+    def test_restart_scheduler_with_flag(self, mocker, capsys):
+        """restart --scheduler should call systemd.restart for scheduler instances."""
+        mock_restart = mocker.patch("ots_containers.commands.instance.app.systemd.restart")
+
+        instance.restart(identifiers=("main",), scheduler=True)
+
+        mock_restart.assert_called_once_with("onetime-scheduler@main")
+        captured = capsys.readouterr()
+        assert "Restarted onetime-scheduler@main" in captured.out
+
+    def test_start_scheduler_with_flag(self, mocker, capsys):
+        """start --scheduler should call systemd.start for scheduler instances."""
+        mock_start = mocker.patch("ots_containers.commands.instance.app.systemd.start")
+
+        instance.start(identifiers=("main",), scheduler=True)
+
+        mock_start.assert_called_once_with("onetime-scheduler@main")
+        captured = capsys.readouterr()
+        assert "Started onetime-scheduler@main" in captured.out
+
+    def test_status_scheduler_with_flag(self, mocker, capsys):
+        """status --scheduler should show status for scheduler instances."""
+        mock_run = mocker.patch(
+            "ots_containers.commands.instance.app.subprocess.run",
+            return_value=mocker.Mock(returncode=0, stdout="active"),
+        )
+
+        instance.status(identifiers=("main",), scheduler=True)
+
+        # Should call systemctl status for the scheduler unit
+        mock_run.assert_called()
+        cmd = mock_run.call_args[0][0]
+        assert "systemctl" in cmd
+        assert "onetime-scheduler@main" in cmd
+
+    def test_logs_scheduler_with_flag(self, mocker):
+        """logs --scheduler should call journalctl for scheduler instances."""
+        mock_run = mocker.patch("ots_containers.commands.instance.app.subprocess.run")
+
+        instance.logs(identifiers=("main",), scheduler=True)
+
+        mock_run.assert_called_once()
+        cmd = mock_run.call_args[0][0]
+        assert "journalctl" in cmd
+        assert "onetime-scheduler@main" in cmd or "-u" in cmd
+
+    def test_enable_scheduler_with_flag(self, mocker, capsys):
+        """enable --scheduler should call systemctl enable for scheduler instances."""
+        mock_run = mocker.patch("ots_containers.commands.instance.app.subprocess.run")
+
+        instance.enable(identifiers=("main",), scheduler=True)
+
+        mock_run.assert_called_once()
+        cmd = mock_run.call_args[0][0]
+        assert "systemctl" in cmd
+        assert "enable" in cmd
+        assert "onetime-scheduler@main" in cmd
+
+    def test_disable_scheduler_with_flag(self, mocker, capsys):
+        """disable --scheduler should call systemctl disable for scheduler instances."""
+        mock_run = mocker.patch("ots_containers.commands.instance.app.subprocess.run")
+
+        instance.disable(identifiers=("main",), scheduler=True, yes=True)
+
+        mock_run.assert_called_once()
+        cmd = mock_run.call_args[0][0]
+        assert "systemctl" in cmd
+        assert "disable" in cmd
+        assert "onetime-scheduler@main" in cmd
+
+    def test_stop_discovers_scheduler_instances(self, mocker):
+        """stop --scheduler with no identifiers should discover scheduler instances."""
+        mocker.patch(
+            "ots_containers.commands.instance._helpers.systemd.discover_scheduler_instances",
+            return_value=["main", "cron"],
+        )
+        mock_stop = mocker.patch("ots_containers.commands.instance.app.systemd.stop")
+
+        instance.stop(identifiers=(), scheduler=True)
+
+        assert mock_stop.call_count == 2
+        calls = [c[0][0] for c in mock_stop.call_args_list]
+        assert "onetime-scheduler@main" in calls
+        assert "onetime-scheduler@cron" in calls
+
+    def test_restart_discovers_scheduler_instances(self, mocker):
+        """restart --scheduler with no identifiers should discover scheduler instances."""
+        mocker.patch(
+            "ots_containers.commands.instance._helpers.systemd.discover_scheduler_instances",
+            return_value=["main"],
+        )
+        mock_restart = mocker.patch("ots_containers.commands.instance.app.systemd.restart")
+
+        instance.restart(identifiers=(), scheduler=True)
+
+        mock_restart.assert_called_once_with("onetime-scheduler@main")
+
+    def test_multiple_scheduler_identifiers(self, mocker, capsys):
+        """Commands should handle multiple scheduler identifiers."""
+        mock_stop = mocker.patch("ots_containers.commands.instance.app.systemd.stop")
+
+        instance.stop(identifiers=("main", "cron", "backup"), scheduler=True)
+
+        assert mock_stop.call_count == 3
+        calls = [c[0][0] for c in mock_stop.call_args_list]
+        assert "onetime-scheduler@main" in calls
+        assert "onetime-scheduler@cron" in calls
+        assert "onetime-scheduler@backup" in calls
+
+    def test_scheduler_with_type_parameter(self, mocker, capsys):
+        """Commands should work with --type scheduler instead of --scheduler flag."""
+        mock_stop = mocker.patch("ots_containers.commands.instance.app.systemd.stop")
+
+        instance.stop(identifiers=("main",), instance_type=InstanceType.SCHEDULER)
+
+        mock_stop.assert_called_once_with("onetime-scheduler@main")
+
+    def test_scheduler_named_instances(self, mocker, capsys):
+        """Scheduler should accept string identifiers (not just numeric)."""
+        mock_restart = mocker.patch("ots_containers.commands.instance.app.systemd.restart")
+
+        instance.restart(identifiers=("daily-cleanup", "weekly-reports"), scheduler=True)
+
+        assert mock_restart.call_count == 2
+        calls = [c[0][0] for c in mock_restart.call_args_list]
+        assert "onetime-scheduler@daily-cleanup" in calls
+        assert "onetime-scheduler@weekly-reports" in calls

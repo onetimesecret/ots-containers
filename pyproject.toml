@@ -13,7 +13,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "ots-containers"
-version = "0.2.2"
+version = "0.3.0"
 description = "Service orchestration for OneTimeSecret: Podman Quadlets and systemd service management"
 readme = "README.md"
 requires-python = ">=3.11"

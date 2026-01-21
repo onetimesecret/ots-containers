@@ -23,12 +23,28 @@ class TestConfigDefaults:
         cfg = Config()
         assert cfg.var_dir == Path("/var/lib/onetimesecret")
 
-    def test_default_template_path(self):
-        """Should default to systemd quadlet location."""
+    def test_default_web_template_path(self):
+        """Should default to systemd quadlet location for web."""
         from ots_containers.config import Config
 
         cfg = Config()
-        assert cfg.template_path == Path("/etc/containers/systemd/onetime@.container")
+        assert cfg.web_template_path == Path("/etc/containers/systemd/onetime-web@.container")
+
+    def test_default_worker_template_path(self):
+        """Should default to systemd quadlet location for worker."""
+        from ots_containers.config import Config
+
+        cfg = Config()
+        assert cfg.worker_template_path == Path("/etc/containers/systemd/onetime-worker@.container")
+
+    def test_default_scheduler_template_path(self):
+        """Should default to systemd quadlet location for scheduler."""
+        from ots_containers.config import Config
+
+        cfg = Config()
+        assert cfg.scheduler_template_path == Path(
+            "/etc/containers/systemd/onetime-scheduler@.container"
+        )
 
 
 class TestConfigImageSettings:

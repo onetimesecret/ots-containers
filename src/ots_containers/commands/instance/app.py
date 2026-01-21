@@ -11,13 +11,20 @@ from ots_containers.config import Config
 
 from ..common import DryRun, Follow, JsonOutput, Lines, Quiet, Yes
 from ._helpers import (
-    for_each,
-    for_each_worker,
+    for_each_instance,
     format_command,
-    resolve_ports,
-    resolve_worker_ids,
+    resolve_identifiers,
 )
-from .annotations import Delay, InstanceType, OptionalPorts, Port, Ports
+from .annotations import (
+    Delay,
+    Identifiers,
+    InstanceType,
+    SchedulerFlag,
+    TypeSelector,
+    WebFlag,
+    WorkerFlag,
+    resolve_instance_type,
+)
 
 app = cyclopts.App(
     name=["instance", "instances"],
@@ -27,20 +34,30 @@ app = cyclopts.App(
 
 @app.default
 def list_instances(
-    ports: OptionalPorts = (),
+    identifiers: Identifiers = (),
+    instance_type: TypeSelector = None,
+    web: WebFlag = False,
+    worker: WorkerFlag = False,
+    scheduler: SchedulerFlag = False,
     json_output: JsonOutput = False,
 ):
     """List instances with status, image, and deployment info.
 
-    Auto-discovers running instances if no ports specified.
+    Auto-discovers all instances if no identifiers specified.
 
     Examples:
-        ots instance list
-        ots instance list -p 7043 7044
-        ots instance list --json
+        ots instances                            # List all instances
+        ots instances --web                      # List web instances only
+        ots instances --web 7043 7044            # List specific web instances
+        ots instances --worker                   # List worker instances
+        ots instances --scheduler                # List scheduler instances
+        ots instances --json                     # JSON output
     """
-    ports = resolve_ports(ports)
-    if not ports:
+    itype = resolve_instance_type(instance_type, web, worker, scheduler)
+    instances = resolve_identifiers(identifiers, itype, running_only=False)
+
+    if not instances:
+        print("No configured instances found")
         return
 
     cfg = Config()
@@ -48,9 +65,67 @@ def list_instances(
     if json_output:
         import json
 
-        instances = []
-        for port in ports:
-            service = f"onetime@{port}.service"
+        output = []
+        for inst_type, ids in instances.items():
+            for id_ in ids:
+                unit = systemd.unit_name(inst_type.value, id_)
+                service = f"{unit}.service"
+                result = subprocess.run(
+                    ["systemctl", "is-active", service],
+                    capture_output=True,
+                    text=True,
+                )
+                status = result.stdout.strip()
+
+                # Get deployment info (only for web instances with port)
+                port = int(id_) if inst_type == InstanceType.WEB else 0
+                deployments = db.get_deployments(cfg.db_path, limit=1, port=port) if port else []
+                if deployments:
+                    dep = deployments[0]
+                    output.append(
+                        {
+                            "type": inst_type.value,
+                            "id": id_,
+                            "service": service,
+                            "container": unit,
+                            "status": status,
+                            "image": dep.image,
+                            "tag": dep.tag,
+                            "deployed": dep.timestamp,
+                            "action": dep.action,
+                        }
+                    )
+                else:
+                    output.append(
+                        {
+                            "type": inst_type.value,
+                            "id": id_,
+                            "service": service,
+                            "container": unit,
+                            "status": status,
+                            "image": None,
+                            "tag": None,
+                            "deployed": None,
+                            "action": None,
+                        }
+                    )
+        print(json.dumps(output, indent=2))
+        return
+
+    # Header
+    header = (
+        f"{'TYPE':<10} {'ID':<10} {'SERVICE':<28} {'CONTAINER':<24} "
+        f"{'STATUS':<12} {'IMAGE:TAG':<38} {'DEPLOYED':<20} {'ACTION':<10}"
+    )
+    print(header)
+    print("-" * 160)
+
+    for inst_type, ids in instances.items():
+        for id_ in ids:
+            unit = systemd.unit_name(inst_type.value, id_)
+            service = f"{unit}.service"
+
+            # Get systemd status
             result = subprocess.run(
                 ["systemctl", "is-active", service],
                 capture_output=True,
@@ -58,80 +133,36 @@ def list_instances(
             )
             status = result.stdout.strip()
 
-            deployments = db.get_deployments(cfg.db_path, limit=1, port=port)
+            # Get last deployment from database (only for web instances)
+            port = int(id_) if inst_type == InstanceType.WEB else 0
+            deployments = db.get_deployments(cfg.db_path, limit=1, port=port) if port else []
             if deployments:
                 dep = deployments[0]
-                instances.append(
-                    {
-                        "port": port,
-                        "service": service,
-                        "container": f"onetime@{port}",
-                        "status": status,
-                        "image": dep.image,
-                        "tag": dep.tag,
-                        "deployed": dep.timestamp,
-                        "action": dep.action,
-                    }
-                )
+                image_tag = f"{dep.image}:{dep.tag}"
+                # Format timestamp - strip microseconds and 'T'
+                deployed = dep.timestamp.split(".")[0].replace("T", " ")
+                action = dep.action
             else:
-                instances.append(
-                    {
-                        "port": port,
-                        "service": service,
-                        "container": f"onetime@{port}",
-                        "status": status,
-                        "image": None,
-                        "tag": None,
-                        "deployed": None,
-                        "action": None,
-                    }
-                )
-        print(json.dumps(instances, indent=2))
-        return
+                image_tag = "unknown"
+                deployed = "n/a"
+                action = "n/a"
 
-    # Header
-    header = (
-        f"{'PORT':<6} {'SERVICE':<22} {'CONTAINER':<16} "
-        f"{'STATUS':<12} {'IMAGE:TAG':<38} {'DEPLOYED':<20} {'ACTION':<10}"
-    )
-    print(header)
-    print("-" * 130)
-
-    for port in ports:
-        service = f"onetime@{port}.service"
-        container = f"onetime@{port}"
-
-        # Get systemd status
-        result = subprocess.run(
-            ["systemctl", "is-active", service],
-            capture_output=True,
-            text=True,
-        )
-        status = result.stdout.strip()
-
-        # Get last deployment from database
-        deployments = db.get_deployments(cfg.db_path, limit=1, port=port)
-        if deployments:
-            dep = deployments[0]
-            image_tag = f"{dep.image}:{dep.tag}"
-            # Format timestamp - strip microseconds and 'T'
-            deployed = dep.timestamp.split(".")[0].replace("T", " ")
-            action = dep.action
-        else:
-            image_tag = "unknown"
-            deployed = "n/a"
-            action = "n/a"
-
-        row = (
-            f"{port:<6} {service:<22} {container:<16} "
-            f"{status:<12} {image_tag:<38} {deployed:<20} {action:<10}"
-        )
-        print(row)
+            row = (
+                f"{inst_type.value:<10} {id_:<10} {service:<28} {unit:<24} "
+                f"{status:<12} {image_tag:<38} {deployed:<20} {action:<10}"
+            )
+            print(row)
 
 
 @app.command
 def run(
-    port: Port,
+    port: Annotated[
+        int,
+        cyclopts.Parameter(
+            name=["--port", "-p"],
+            help="Container port to run on",
+        ),
+    ],
     detach: Annotated[
         bool,
         cyclopts.Parameter(
@@ -277,15 +308,12 @@ def run(
 
 @app.command
 def deploy(
-    ports: Ports,
+    identifiers: Identifiers = (),
+    instance_type: TypeSelector = None,
+    web: WebFlag = False,
+    worker: WorkerFlag = False,
+    scheduler: SchedulerFlag = False,
     delay: Delay = 5,
-    instance_type: Annotated[
-        InstanceType,
-        cyclopts.Parameter(
-            name=["--type", "-t"],
-            help="Container type: 'web' (default) or 'worker'",
-        ),
-    ] = InstanceType.WEB,
     dry_run: DryRun = False,
     quiet: Quiet = False,
 ):
@@ -296,10 +324,21 @@ def deploy(
     Records deployment to timeline for audit and rollback support.
 
     Examples:
-        ots instance deploy -p 7043 7044       # Deploy web containers on ports
-        ots instance deploy --type worker -w 1 2  # Deploy worker containers 1, 2
-        ots instance deploy -t worker -w billing  # Deploy 'billing' queue worker
+        ots instances deploy --web 7043 7044        # Deploy web on ports
+        ots instances deploy --worker 1 2           # Deploy workers 1, 2
+        ots instances deploy --worker billing       # Deploy 'billing' worker
+        ots instances deploy --scheduler main       # Deploy scheduler
     """
+    itype = resolve_instance_type(instance_type, web, worker, scheduler)
+
+    # Deploy requires identifiers AND type
+    if not identifiers:
+        raise SystemExit(
+            "Identifiers required for deploy. Example: ots instances deploy --web 7043"
+        )
+    if itype is None:
+        raise SystemExit("Instance type required for deploy. Use --web, --worker, or --scheduler.")
+
     cfg = Config()
     cfg.validate()
 
@@ -307,108 +346,63 @@ def deploy(
     image, tag = cfg.resolve_image_tag()
     if not quiet:
         print(f"Image: {image}:{tag}")
-
-    if not quiet:
         print(f"Reading config from {cfg.config_yaml}")
 
     if dry_run:
-        print("[dry-run] Would deploy to ports:", ports)
+        print(f"[dry-run] Would deploy {itype.value}: {', '.join(identifiers)}")
         return
 
-    if instance_type == InstanceType.WORKER:
-        # Convert ports to strings for worker IDs
-        worker_ids = tuple(str(p) for p in ports)
-        _deploy_workers(cfg, worker_ids, delay, image, tag)
-    else:
-        _deploy_web(cfg, ports, delay, image, tag)
+    # Write appropriate quadlet template
+    if itype == InstanceType.WEB:
+        assets.update(cfg, create_volume=True)
+        print(f"Writing quadlet files to {cfg.web_template_path.parent}")
+        quadlet.write_web_template(cfg)
+    elif itype == InstanceType.WORKER:
+        print(f"Writing quadlet files to {cfg.worker_template_path.parent}")
+        quadlet.write_worker_template(cfg)
+    elif itype == InstanceType.SCHEDULER:
+        print(f"Writing quadlet files to {cfg.scheduler_template_path.parent}")
+        quadlet.write_scheduler_template(cfg)
 
-
-def _deploy_web(
-    cfg: Config,
-    ports: tuple[int, ...],
-    delay: int,
-    image: str,
-    tag: str,
-) -> None:
-    """Deploy web container instances."""
-    assets.update(cfg, create_volume=True)
-    print(f"Writing quadlet files to {cfg.template_path.parent}")
-    quadlet.write_template(cfg)
-
-    def do_deploy(port: int) -> None:
-        print(f"Starting onetime@{port}")
+    def do_deploy(inst_type: InstanceType, id_: str) -> None:
+        unit = systemd.unit_name(inst_type.value, id_)
         try:
-            systemd.start(f"onetime@{port}")
+            systemd.start(unit)
             # Record successful deployment
+            port = int(id_) if inst_type == InstanceType.WEB else 0
             db.record_deployment(
                 cfg.db_path,
                 image=image,
                 tag=tag,
-                action="deploy",
+                action=f"deploy-{inst_type.value}",
                 port=port,
                 success=True,
+                notes=None if inst_type == InstanceType.WEB else f"{inst_type.value}_id={id_}",
             )
         except Exception as e:
-            # Record failed deployment
+            port = int(id_) if inst_type == InstanceType.WEB else 0
             db.record_deployment(
                 cfg.db_path,
                 image=image,
                 tag=tag,
-                action="deploy",
+                action=f"deploy-{inst_type.value}",
                 port=port,
                 success=False,
                 notes=str(e),
             )
             raise
 
-    for_each(ports, delay, do_deploy, "Deploying")
-
-
-def _deploy_workers(
-    cfg: Config,
-    worker_ids: tuple[str, ...],
-    delay: int,
-    image: str,
-    tag: str,
-) -> None:
-    """Deploy worker container instances."""
-    print(f"Writing worker quadlet files to {cfg.worker_template_path.parent}")
-    quadlet.write_worker_template(cfg)
-
-    def do_deploy(worker_id: str) -> None:
-        unit = f"onetime-worker@{worker_id}"
-        print(f"Starting {unit}")
-        try:
-            systemd.start(unit)
-            # Record successful deployment (use worker_id as port field for tracking)
-            db.record_deployment(
-                cfg.db_path,
-                image=image,
-                tag=tag,
-                action="deploy-worker",
-                port=0,  # Workers don't have ports
-                success=True,
-                notes=f"worker_id={worker_id}",
-            )
-        except Exception as e:
-            # Record failed deployment
-            db.record_deployment(
-                cfg.db_path,
-                image=image,
-                tag=tag,
-                action="deploy-worker",
-                port=0,
-                success=False,
-                notes=f"worker_id={worker_id}: {e}",
-            )
-            raise
-
-    for_each_worker(worker_ids, delay, do_deploy, "Deploying")
+    instances = {itype: list(identifiers)}
+    for_each_instance(instances, delay, do_deploy, "Deploying")
 
 
 @app.command
 def redeploy(
-    ports: OptionalPorts = (),
+    identifiers: Identifiers = (),
+    instance_type: TypeSelector = None,
+    web: WebFlag = False,
+    worker: WorkerFlag = False,
+    scheduler: SchedulerFlag = False,
     delay: Delay = 5,
     force: Annotated[
         bool,
@@ -429,23 +423,18 @@ def redeploy(
     Note: Always recreates containers (stop+start) to ensure quadlet changes
     (volume mounts, image, etc.) are applied.
 
-    When no ports specified, redeploys all running web AND worker instances.
-
     Examples:
-        ots instance redeploy
-        ots instance redeploy -p 7043 7044
-        ots instance redeploy --force
+        ots instances redeploy                      # Redeploy all running
+        ots instances redeploy --web                # Redeploy web instances
+        ots instances redeploy --web 7043 7044      # Redeploy specific web
+        ots instances redeploy --scheduler main     # Redeploy specific scheduler
+        ots instances redeploy --force              # Force teardown+recreate
     """
-    # Track if user explicitly specified ports
-    explicit_ports = bool(ports)
+    itype = resolve_instance_type(instance_type, web, worker, scheduler)
+    instances = resolve_identifiers(identifiers, itype, running_only=True)
 
-    ports = resolve_ports(ports, running_only=True)
-    worker_ids: tuple[str, ...] = ()
-    if not explicit_ports:
-        worker_ids = resolve_worker_ids((), running_only=True)
-
-    # Early return if nothing to redeploy
-    if not ports and not worker_ids:
+    if not instances:
+        print("No running instances found")
         return
 
     cfg = Config()
@@ -455,57 +444,60 @@ def redeploy(
     image, tag = cfg.resolve_image_tag()
     if not quiet:
         print(f"Image: {image}:{tag}")
-
-    if not quiet:
         print(f"Reading config from {cfg.config_yaml}")
 
     if dry_run:
         verb = "force redeploy" if force else "redeploy"
-        if ports:
-            print(f"[dry-run] Would {verb} ports:", ports)
-        if worker_ids:
-            print(f"[dry-run] Would {verb} workers:", worker_ids)
+        for inst_type, ids in instances.items():
+            print(f"[dry-run] Would {verb} {inst_type.value}: {', '.join(ids)}")
         return
 
-    assets.update(cfg, create_volume=force)
-    print(f"Writing quadlet files to {cfg.template_path.parent}")
-    quadlet.write_template(cfg)
+    # Write quadlet templates for each type being redeployed
+    if InstanceType.WEB in instances:
+        assets.update(cfg, create_volume=force)
+        print(f"Writing quadlet files to {cfg.web_template_path.parent}")
+        quadlet.write_web_template(cfg)
+    if InstanceType.WORKER in instances:
+        print(f"Writing quadlet files to {cfg.worker_template_path.parent}")
+        quadlet.write_worker_template(cfg)
+    if InstanceType.SCHEDULER in instances:
+        print(f"Writing quadlet files to {cfg.scheduler_template_path.parent}")
+        quadlet.write_scheduler_template(cfg)
 
-    def do_redeploy(port: int) -> None:
-        unit = f"onetime@{port}"
+    def do_redeploy(inst_type: InstanceType, id_: str) -> None:
+        unit = systemd.unit_name(inst_type.value, id_)
 
         if force:
-            # Teardown: stop container
             print(f"Stopping {unit}")
             systemd.stop(unit)
 
         try:
             if force or not systemd.container_exists(unit):
-                # Fresh deployment (no existing container)
                 print(f"Starting {unit}")
                 systemd.start(unit)
             else:
-                # Recreate existing container (stop+start to apply quadlet changes)
                 print(f"Recreating {unit}")
                 systemd.recreate(unit)
 
-            # Record successful redeploy
+            port = int(id_) if inst_type == InstanceType.WEB else 0
             db.record_deployment(
                 cfg.db_path,
                 image=image,
                 tag=tag,
-                action="redeploy",
+                action=f"redeploy-{inst_type.value}",
                 port=port,
                 success=True,
-                notes="force" if force else None,
+                notes=("force" if force else None)
+                if inst_type == InstanceType.WEB
+                else f"{inst_type.value}_id={id_}" + (", force" if force else ""),
             )
         except Exception as e:
-            # Record failed redeploy
+            port = int(id_) if inst_type == InstanceType.WEB else 0
             db.record_deployment(
                 cfg.db_path,
                 image=image,
                 tag=tag,
-                action="redeploy",
+                action=f"redeploy-{inst_type.value}",
                 port=port,
                 success=False,
                 notes=str(e),
@@ -513,56 +505,16 @@ def redeploy(
             raise
 
     verb = "Force redeploying" if force else "Redeploying"
-    if ports:
-        for_each(ports, delay, do_redeploy, verb)
-
-    # Also redeploy workers when no specific ports given
-    if worker_ids:
-        print(f"Writing worker quadlet files to {cfg.worker_template_path.parent}")
-        quadlet.write_worker_template(cfg)
-
-        def do_redeploy_worker(worker_id: str) -> None:
-            unit = f"onetime-worker@{worker_id}"
-
-            if force:
-                print(f"Stopping {unit}")
-                systemd.stop(unit)
-
-            try:
-                if force or not systemd.container_exists(unit):
-                    print(f"Starting {unit}")
-                    systemd.start(unit)
-                else:
-                    print(f"Recreating {unit}")
-                    systemd.recreate(unit)
-
-                db.record_deployment(
-                    cfg.db_path,
-                    image=image,
-                    tag=tag,
-                    action="redeploy-worker",
-                    port=0,
-                    success=True,
-                    notes=f"worker_id={worker_id}" + (", force" if force else ""),
-                )
-            except Exception as e:
-                db.record_deployment(
-                    cfg.db_path,
-                    image=image,
-                    tag=tag,
-                    action="redeploy-worker",
-                    port=0,
-                    success=False,
-                    notes=f"worker_id={worker_id}: {e}",
-                )
-                raise
-
-        for_each_worker(worker_ids, delay, do_redeploy_worker, verb)
+    for_each_instance(instances, delay, do_redeploy, verb)
 
 
 @app.command
 def undeploy(
-    ports: OptionalPorts = (),
+    identifiers: Identifiers = (),
+    instance_type: TypeSelector = None,
+    web: WebFlag = False,
+    worker: WorkerFlag = False,
+    scheduler: SchedulerFlag = False,
     delay: Delay = 5,
     dry_run: DryRun = False,
     yes: Yes = False,
@@ -571,31 +523,24 @@ def undeploy(
 
     Stops systemd service. Records action to timeline for audit.
 
-    When no ports specified, undeploys all running web AND worker instances.
-
     Examples:
-        ots instance undeploy
-        ots instance undeploy -p 7043 7044
-        ots instance undeploy -y  # Skip confirmation
+        ots instances undeploy                      # Undeploy all running
+        ots instances undeploy --web                # Undeploy web instances
+        ots instances undeploy --web 7043 7044      # Undeploy specific web
+        ots instances undeploy --scheduler main     # Undeploy specific scheduler
+        ots instances undeploy -y                   # Skip confirmation
     """
-    # Track if user explicitly specified ports
-    explicit_ports = bool(ports)
+    itype = resolve_instance_type(instance_type, web, worker, scheduler)
+    instances = resolve_identifiers(identifiers, itype, running_only=True)
 
-    ports = resolve_ports(ports, running_only=True)
-    worker_ids: tuple[str, ...] = ()
-    if not explicit_ports:
-        worker_ids = resolve_worker_ids((), running_only=True)
-
-    if not ports and not worker_ids:
+    if not instances:
         print("No running instances found")
         return
 
     if not yes and not dry_run:
         items = []
-        if ports:
-            items.append(f"web: {', '.join(str(p) for p in ports)}")
-        if worker_ids:
-            items.append(f"workers: {', '.join(worker_ids)}")
+        for inst_type, ids in instances.items():
+            items.append(f"{inst_type.value}: {', '.join(ids)}")
         print(f"This will stop instances: {'; '.join(items)}")
         response = input("Continue? [y/N] ")
         if response.lower() not in ("y", "yes"):
@@ -603,204 +548,169 @@ def undeploy(
             return
 
     if dry_run:
-        print("[dry-run] Would undeploy ports:", ports)
-        if worker_ids:
-            print("[dry-run] Would undeploy workers:", worker_ids)
+        for inst_type, ids in instances.items():
+            print(f"[dry-run] Would undeploy {inst_type.value}: {', '.join(ids)}")
         return
 
     cfg = Config()
-
-    # Get current image/tag for recording
     image, tag = cfg.resolve_image_tag()
 
-    def do_undeploy(port: int) -> None:
-        print(f"Stopping onetime@{port}")
+    def do_undeploy(inst_type: InstanceType, id_: str) -> None:
+        unit = systemd.unit_name(inst_type.value, id_)
         try:
-            systemd.stop(f"onetime@{port}")
-            # Record successful undeploy
+            systemd.stop(unit)
+            port = int(id_) if inst_type == InstanceType.WEB else 0
             db.record_deployment(
                 cfg.db_path,
                 image=image,
                 tag=tag,
-                action="undeploy",
+                action=f"undeploy-{inst_type.value}",
                 port=port,
                 success=True,
+                notes=None if inst_type == InstanceType.WEB else f"{inst_type.value}_id={id_}",
             )
         except Exception as e:
+            port = int(id_) if inst_type == InstanceType.WEB else 0
             db.record_deployment(
                 cfg.db_path,
                 image=image,
                 tag=tag,
-                action="undeploy",
+                action=f"undeploy-{inst_type.value}",
                 port=port,
                 success=False,
                 notes=str(e),
             )
             raise
 
-    if ports:
-        for_each(ports, delay, do_undeploy, "Undeploying")
-
-    # Also undeploy workers when no specific ports given
-    if worker_ids:
-
-        def do_undeploy_worker(worker_id: str) -> None:
-            unit = f"onetime-worker@{worker_id}"
-            print(f"Stopping {unit}")
-            try:
-                systemd.stop(unit)
-                db.record_deployment(
-                    cfg.db_path,
-                    image=image,
-                    tag=tag,
-                    action="undeploy-worker",
-                    port=0,
-                    success=True,
-                    notes=f"worker_id={worker_id}",
-                )
-            except Exception as e:
-                db.record_deployment(
-                    cfg.db_path,
-                    image=image,
-                    tag=tag,
-                    action="undeploy-worker",
-                    port=0,
-                    success=False,
-                    notes=f"worker_id={worker_id}: {e}",
-                )
-                raise
-
-        for_each_worker(worker_ids, delay, do_undeploy_worker, "Undeploying")
+    for_each_instance(instances, delay, do_undeploy, "Undeploying")
 
 
 @app.command
-def start(ports: OptionalPorts = ()):
+def start(
+    identifiers: Identifiers = (),
+    instance_type: TypeSelector = None,
+    web: WebFlag = False,
+    worker: WorkerFlag = False,
+    scheduler: SchedulerFlag = False,
+):
     """Start systemd unit(s) for instance(s).
 
     Does NOT regenerate quadlet - use 'redeploy' for that.
 
-    When no ports specified, starts all configured web AND worker instances.
-
     Examples:
-        ots instance start
-        ots instance start -p 7043 7044
+        ots instances start                         # Start all configured
+        ots instances start --web                   # Start web instances
+        ots instances start --web 7043 7044         # Start specific web
+        ots instances start --scheduler main        # Start specific scheduler
     """
-    # Track if user explicitly specified ports
-    explicit_ports = bool(ports)
+    itype = resolve_instance_type(instance_type, web, worker, scheduler)
+    instances = resolve_identifiers(identifiers, itype, running_only=False)
 
-    ports = resolve_ports(ports)
-    if not ports and explicit_ports:
+    if not instances:
+        print("No configured instances found")
         return
-    for port in ports:
-        systemd.start(f"onetime@{port}")
-        print(f"Started onetime@{port}")
 
-    # Also start workers when no specific ports given
-    if not explicit_ports:
-        worker_ids = resolve_worker_ids((), running_only=False)
-        for worker_id in worker_ids:
-            unit = f"onetime-worker@{worker_id}"
+    for inst_type, ids in instances.items():
+        for id_ in ids:
+            unit = systemd.unit_name(inst_type.value, id_)
             systemd.start(unit)
             print(f"Started {unit}")
 
 
 @app.command
-def stop(ports: OptionalPorts = ()):
+def stop(
+    identifiers: Identifiers = (),
+    instance_type: TypeSelector = None,
+    web: WebFlag = False,
+    worker: WorkerFlag = False,
+    scheduler: SchedulerFlag = False,
+):
     """Stop systemd unit(s) for instance(s).
 
     Does NOT affect quadlet config.
     Only stops running instances; already-stopped instances are skipped.
 
-    When no ports specified, stops all running web AND worker instances.
-
     Examples:
-        ots instance stop                    # Stop all running instances
-        ots instance stop -p 7043 7044       # Stop specific web instances
+        ots instances stop                          # Stop all running
+        ots instances stop --web                    # Stop web instances
+        ots instances stop --web 7043 7044          # Stop specific web
+        ots instances stop --scheduler              # Stop scheduler instances
     """
-    # Track if user explicitly specified ports
-    explicit_ports = bool(ports)
+    itype = resolve_instance_type(instance_type, web, worker, scheduler)
+    instances = resolve_identifiers(identifiers, itype, running_only=True)
 
-    ports = resolve_ports(ports, running_only=True)
-    for port in ports:
-        systemd.stop(f"onetime@{port}")
-        print(f"Stopped onetime@{port}")
+    if not instances:
+        print("No running instances found")
+        return
 
-    # Also stop workers when no specific ports given
-    if not explicit_ports:
-        worker_ids = resolve_worker_ids((), running_only=True)
-        for worker_id in worker_ids:
-            unit = f"onetime-worker@{worker_id}"
+    for inst_type, ids in instances.items():
+        for id_ in ids:
+            unit = systemd.unit_name(inst_type.value, id_)
             systemd.stop(unit)
             print(f"Stopped {unit}")
 
 
 @app.command
-def restart(ports: OptionalPorts = ()):
+def restart(
+    identifiers: Identifiers = (),
+    instance_type: TypeSelector = None,
+    web: WebFlag = False,
+    worker: WorkerFlag = False,
+    scheduler: SchedulerFlag = False,
+):
     """Restart systemd unit(s) for instance(s).
 
     Does NOT regenerate quadlet - use 'redeploy' for that.
     Only restarts running instances; stopped instances are skipped.
 
-    When no ports specified, restarts all running web AND worker instances.
-
     Examples:
-        ots instance restart                 # Restart all running instances
-        ots instance restart -p 7043 7044    # Restart specific web instances
+        ots instances restart                       # Restart all running
+        ots instances restart --web                 # Restart web instances
+        ots instances restart --web 7043 7044       # Restart specific web
+        ots instances restart --scheduler main      # Restart specific scheduler
     """
-    # Track if user explicitly specified ports
-    explicit_ports = bool(ports)
+    itype = resolve_instance_type(instance_type, web, worker, scheduler)
+    instances = resolve_identifiers(identifiers, itype, running_only=True)
 
-    ports = resolve_ports(ports, running_only=True)
-    for port in ports:
-        unit = f"onetime@{port}"
-        systemd.restart(unit)
-        print(f"Restarted {unit}")
+    if not instances:
+        print("No running instances found")
+        return
 
-    # Also restart workers when no specific ports given
-    if not explicit_ports:
-        worker_ids = resolve_worker_ids((), running_only=True)
-        for worker_id in worker_ids:
-            unit = f"onetime-worker@{worker_id}"
+    for inst_type, ids in instances.items():
+        for id_ in ids:
+            unit = systemd.unit_name(inst_type.value, id_)
             systemd.restart(unit)
             print(f"Restarted {unit}")
 
 
 @app.command
-def enable(ports: OptionalPorts = ()):
+def enable(
+    identifiers: Identifiers = (),
+    instance_type: TypeSelector = None,
+    web: WebFlag = False,
+    worker: WorkerFlag = False,
+    scheduler: SchedulerFlag = False,
+):
     """Enable instance(s) to start at boot.
 
     Does not start the instance - use 'start' for that.
 
-    When no ports specified, enables all configured web AND worker instances.
-
     Examples:
-        ots instance enable
-        ots instance enable -p 7043 7044
+        ots instances enable                        # Enable all configured
+        ots instances enable --web                  # Enable web instances
+        ots instances enable --web 7043 7044        # Enable specific web
+        ots instances enable --scheduler main       # Enable specific scheduler
     """
-    explicit_ports = bool(ports)
+    itype = resolve_instance_type(instance_type, web, worker, scheduler)
+    instances = resolve_identifiers(identifiers, itype, running_only=False)
 
-    ports = resolve_ports(ports)
-    if not ports and explicit_ports:
+    if not instances:
+        print("No configured instances found")
         return
 
-    for port in ports:
-        unit = f"onetime@{port}"
-        try:
-            subprocess.run(
-                ["systemctl", "enable", unit],
-                check=True,
-                capture_output=True,
-                text=True,
-            )
-            print(f"Enabled {unit}")
-        except subprocess.CalledProcessError as e:
-            print(f"Failed to enable {unit}: {e.stderr}")
-
-    # Also enable workers when no specific ports given
-    if not explicit_ports:
-        worker_ids = resolve_worker_ids((), running_only=False)
-        for worker_id in worker_ids:
-            unit = f"onetime-worker@{worker_id}"
+    for inst_type, ids in instances.items():
+        for id_ in ids:
+            unit = systemd.unit_name(inst_type.value, id_)
             try:
                 subprocess.run(
                     ["systemctl", "enable", unit],
@@ -815,58 +725,43 @@ def enable(ports: OptionalPorts = ()):
 
 @app.command
 def disable(
-    ports: OptionalPorts = (),
+    identifiers: Identifiers = (),
+    instance_type: TypeSelector = None,
+    web: WebFlag = False,
+    worker: WorkerFlag = False,
+    scheduler: SchedulerFlag = False,
     yes: Yes = False,
 ):
     """Disable instance(s) from starting at boot.
 
     Does not stop the instance - use 'stop' for that.
 
-    When no ports specified, disables all configured web AND worker instances.
-
     Examples:
-        ots instance disable
-        ots instance disable -p 7043 7044 -y
+        ots instances disable                       # Disable all configured
+        ots instances disable --web                 # Disable web instances
+        ots instances disable --web 7043 7044 -y    # Disable specific web
+        ots instances disable --scheduler main -y   # Disable specific scheduler
     """
-    explicit_ports = bool(ports)
+    itype = resolve_instance_type(instance_type, web, worker, scheduler)
+    instances = resolve_identifiers(identifiers, itype, running_only=False)
 
-    ports = resolve_ports(ports)
-    worker_ids: tuple[str, ...] = ()
-    if not explicit_ports:
-        worker_ids = resolve_worker_ids((), running_only=False)
-
-    if not ports and not worker_ids:
+    if not instances:
+        print("No configured instances found")
         return
 
     if not yes:
         items = []
-        if ports:
-            items.append(f"web: {', '.join(str(p) for p in ports)}")
-        if worker_ids:
-            items.append(f"workers: {', '.join(worker_ids)}")
+        for inst_type, ids in instances.items():
+            items.append(f"{inst_type.value}: {', '.join(ids)}")
         print(f"This will disable boot startup for: {'; '.join(items)}")
         response = input("Continue? [y/N] ")
         if response.lower() not in ("y", "yes"):
             print("Aborted")
             return
 
-    for port in ports:
-        unit = f"onetime@{port}"
-        try:
-            subprocess.run(
-                ["systemctl", "disable", unit],
-                check=True,
-                capture_output=True,
-                text=True,
-            )
-            print(f"Disabled {unit}")
-        except subprocess.CalledProcessError as e:
-            print(f"Failed to disable {unit}: {e.stderr}")
-
-    # Also disable workers when no specific ports given
-    if worker_ids:
-        for worker_id in worker_ids:
-            unit = f"onetime-worker@{worker_id}"
+    for inst_type, ids in instances.items():
+        for id_ in ids:
+            unit = systemd.unit_name(inst_type.value, id_)
             try:
                 subprocess.run(
                     ["systemctl", "disable", unit],
@@ -880,63 +775,66 @@ def disable(
 
 
 @app.command
-def status(ports: OptionalPorts = ()):
+def status(
+    identifiers: Identifiers = (),
+    instance_type: TypeSelector = None,
+    web: WebFlag = False,
+    worker: WorkerFlag = False,
+    scheduler: SchedulerFlag = False,
+):
     """Show systemd status for instance(s).
 
-    When no ports specified, shows status for all configured web AND worker instances.
-
     Examples:
-        ots instance status
-        ots instance status -p 7043 7044
+        ots instances status                        # Status of all configured
+        ots instances status --web                  # Status of web instances
+        ots instances status --web 7043 7044        # Status of specific web
+        ots instances status --scheduler            # Status of scheduler instances
     """
-    explicit_ports = bool(ports)
+    itype = resolve_instance_type(instance_type, web, worker, scheduler)
+    instances = resolve_identifiers(identifiers, itype, running_only=False)
 
-    ports = resolve_ports(ports)
-    if not ports and explicit_ports:
+    if not instances:
+        print("No configured instances found")
         return
 
-    for port in ports:
-        systemd.status(f"onetime@{port}")
-        print()
-
-    # Also show worker status when no specific ports given
-    if not explicit_ports:
-        worker_ids = resolve_worker_ids((), running_only=False)
-        for worker_id in worker_ids:
-            systemd.status(f"onetime-worker@{worker_id}")
+    for inst_type, ids in instances.items():
+        for id_ in ids:
+            unit = systemd.unit_name(inst_type.value, id_)
+            systemd.status(unit)
             print()
 
 
 @app.command
 def logs(
-    ports: OptionalPorts = (),
+    identifiers: Identifiers = (),
+    instance_type: TypeSelector = None,
+    web: WebFlag = False,
+    worker: WorkerFlag = False,
+    scheduler: SchedulerFlag = False,
     lines: Lines = 50,
     follow: Follow = False,
 ):
     """Show logs for instance(s).
 
-    When no ports specified, shows logs for all web AND worker instances.
-
     Examples:
-        ots instance logs                    # All instances (web + workers)
-        ots instance logs -p 7043 -f         # Specific port, follow
-        ots instance logs -n 100             # Last 100 lines
+        ots instances logs                          # Logs from all instances
+        ots instances logs --web                    # Logs from web instances
+        ots instances logs --web 7043 -f            # Follow specific web logs
+        ots instances logs --scheduler main -f      # Follow scheduler logs
+        ots instances logs -n 100                   # Last 100 lines
     """
-    # Track if user explicitly specified ports
-    explicit_ports = bool(ports)
+    itype = resolve_instance_type(instance_type, web, worker, scheduler)
+    instances = resolve_identifiers(identifiers, itype, running_only=False)
 
-    ports = resolve_ports(ports)
-    units = [f"onetime@{port}" for port in ports]
-
-    # Also include workers when no specific ports given
-    if not explicit_ports:
-        worker_ids = resolve_worker_ids((), running_only=False)
-        for worker_id in worker_ids:
-            units.append(f"onetime-worker@{worker_id}")
-
-    if not units:
+    if not instances:
         print("No instances found")
         return
+
+    # Build list of units
+    units = []
+    for inst_type, ids in instances.items():
+        for id_ in ids:
+            units.append(systemd.unit_name(inst_type.value, id_))
 
     cmd = ["sudo", "journalctl", "--no-pager", f"-n{lines}"]
     if follow:
@@ -954,7 +852,7 @@ def show_env():
     Only shows valid KEY=VALUE pairs, sorted alphabetically.
 
     Examples:
-        ots instance show-env
+        ots instances show-env
     """
     from pathlib import Path
 
@@ -986,7 +884,11 @@ def show_env():
 
 @app.command(name="exec")
 def exec_shell(
-    ports: OptionalPorts = (),
+    identifiers: Identifiers = (),
+    instance_type: TypeSelector = None,
+    web: WebFlag = False,
+    worker: WorkerFlag = False,
+    scheduler: SchedulerFlag = False,
     command: Annotated[
         str,
         cyclopts.Parameter(name=["--command", "-c"], help="Command to run (default: $SHELL)"),
@@ -994,36 +896,31 @@ def exec_shell(
 ):
     """Run interactive shell in container(s).
 
-    When no ports specified, iterates through all running web AND worker instances.
     Uses $SHELL environment variable or /bin/sh as fallback.
 
     Examples:
-        ots instance exec
-        ots instance exec -p 7043
-        ots instance exec -c "/bin/bash"
+        ots instances exec                          # Shell in all running
+        ots instances exec --web 7043               # Shell in specific web
+        ots instances exec --scheduler main         # Shell in scheduler
+        ots instances exec -c "/bin/bash"           # Use specific shell
     """
     import os
 
-    explicit_ports = bool(ports)
+    itype = resolve_instance_type(instance_type, web, worker, scheduler)
+    instances = resolve_identifiers(identifiers, itype, running_only=True)
 
-    ports = resolve_ports(ports, running_only=True)
-    if not ports and explicit_ports:
+    if not instances:
+        print("No running instances found")
         return
 
     shell = command or os.environ.get("SHELL", "/bin/sh")
 
-    for port in ports:
-        container = f"onetime@{port}"
-        print(f"=== Entering {container} ===")
-        # Interactive exec requires subprocess.run with no capture
-        subprocess.run(["podman", "exec", "-it", container, shell])
-        print()
-
-    # Also exec into workers when no specific ports given
-    if not explicit_ports:
-        worker_ids = resolve_worker_ids((), running_only=True)
-        for worker_id in worker_ids:
-            container = f"onetime-worker@{worker_id}"
-            print(f"=== Entering {container} ===")
+    for inst_type, ids in instances.items():
+        for id_ in ids:
+            # Use Quadlet container naming convention
+            unit = systemd.unit_name(inst_type.value, id_)
+            container = systemd.unit_to_container_name(unit)
+            print(f"=== Entering {unit} ===")
+            # Interactive exec requires subprocess.run with no capture
             subprocess.run(["podman", "exec", "-it", container, shell])
             print()

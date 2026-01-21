@@ -29,8 +29,9 @@ class Config:
     var_dir: Path = Path("/var/lib/onetimesecret")
     image: str = field(default_factory=lambda: os.environ.get("IMAGE", DEFAULT_IMAGE))
     tag: str = field(default_factory=lambda: os.environ.get("TAG", DEFAULT_TAG))
-    template_path: Path = Path("/etc/containers/systemd/onetime@.container")
+    web_template_path: Path = Path("/etc/containers/systemd/onetime-web@.container")
     worker_template_path: Path = Path("/etc/containers/systemd/onetime-worker@.container")
+    scheduler_template_path: Path = Path("/etc/containers/systemd/onetime-scheduler@.container")
 
     # Private registry configuration (optional, set via OTS_REGISTRY env var)
     registry: str | None = field(default_factory=lambda: os.environ.get("OTS_REGISTRY"))
