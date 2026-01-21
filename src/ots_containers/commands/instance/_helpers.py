@@ -107,6 +107,7 @@ def for_each_instance(
 
     total = len(items)
     if total == 0:
+        print("No instances found to operate on.")
         return 0
 
     for i, (itype, id_) in enumerate(items, 1):

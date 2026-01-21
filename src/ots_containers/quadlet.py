@@ -312,7 +312,7 @@ Volume={config_dir}:/app/etc:ro
 Exec=bin/entrypoint.sh bin/ots scheduler
 
 # Health check - verify scheduler process is running
-HealthCmd=pgrep -f "scheduler" || exit 1
+HealthCmd=pgrep -f "bin/ots scheduler" || exit 1
 HealthInterval=30s
 HealthRetries=3
 HealthStartPeriod=15s

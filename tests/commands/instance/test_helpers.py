@@ -144,7 +144,7 @@ class TestResolveIdentifiers:
 class TestForEachInstance:
     """Test for_each_instance helper."""
 
-    def test_empty_instances_returns_zero(self):
+    def test_empty_instances_returns_zero(self, capsys):
         """Should return 0 when no instances provided."""
         called = []
         result = for_each_instance(
@@ -152,6 +152,8 @@ class TestForEachInstance:
         )
         assert result == 0
         assert called == []
+        output = capsys.readouterr().out
+        assert "No instances found to operate on." in output
 
     def test_single_instance(self, capsys):
         """Should process single instance."""
