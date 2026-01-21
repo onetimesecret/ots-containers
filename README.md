@@ -28,12 +28,6 @@ cd ots-containers
 pipx install .
 ```
 
-### Specific version
-
-```bash
-pipx install git+https://github.com/onetimesecret/ots-containers.git@v0.1.0
-```
-
 ## Usage
 
 ```bash
@@ -41,81 +35,70 @@ ots-containers --help
 ots-containers --version
 ```
 
-### Viewing running containers
+### Instance Types
 
-These commands auto-discover running instances - no need to specify ports:
+Three container types with explicit systemd unit naming:
+
+| Type | Unit Name | Identifier | Use |
+|------|-----------|------------|-----|
+| `--web` | `onetime-web@{port}` | Port number | HTTP servers |
+| `--worker` | `onetime-worker@{id}` | Name/number | Background jobs |
+| `--scheduler` | `onetime-scheduler@{id}` | Name/number | Scheduled tasks |
+
+### Managing OTS Containers
 
 ```bash
-# Show systemd status for all running instances
-ots-containers status
+# List all instances
+ots-containers instances
+ots-containers instances --json
 
-# Show status for specific instance only
-ots-containers status 7043
+# List by type
+ots-containers instances --web
+ots-containers instances --worker
+ots-containers instances --scheduler
 
-# View logs (last 50 lines by default)
-ots-containers logs
+# Deploy instances
+ots-containers instances deploy --web 7043 7044
+ots-containers instances deploy --worker billing emails
+ots-containers instances deploy --scheduler main
 
-# Follow logs in real-time
-ots-containers logs -f
+# Redeploy (regenerate quadlet and restart)
+ots-containers instances redeploy                    # all running
+ots-containers instances redeploy --web 7043         # specific
 
-# View more log lines
-ots-containers logs -n 200
+# Start/stop/restart
+ots-containers instances start --web 7043
+ots-containers instances stop --scheduler main
+ots-containers instances restart                     # all running
 
-# Show running containers (podman view)
-ots-containers ps
+# Status and logs
+ots-containers instances status
+ots-containers instances logs --web 7043 -f
+ots-containers instances logs --scheduler main -f
 
-# List running instances
-ots-containers list
+# Enable/disable at boot
+ots-containers instances enable --web 7043
+ots-containers instances disable --scheduler main -y
+
+# Interactive shell
+ots-containers instances exec --web 7043
 ```
 
-### Managing OTS containers
+### Managing systemd Services (Valkey, Redis)
 
 ```bash
-# Setup new instance on port 7043
-ots-containers setup 7043
-
-# Setup multiple instances
-ots-containers setup 7043 7044 7045
-
-# Update all running instances
-ots-containers update
-
-# Update specific instance(s)
-ots-containers update 7043
-
-# Update with custom delay between operations
-ots-containers update 7043 7044 --delay 10
-
-# Remove instance (requires explicit port)
-ots-containers remove 7043
-
-# Replace instance: remove + setup (requires explicit port)
-ots-containers replace 7043
-
-# Update static assets only
-ots-containers static
-```
-
-### Managing systemd services (Valkey, Redis)
-
-```bash
-# Initialize new Valkey instance on port 6379
+# Initialize new service instance
 ots-containers service init valkey 6379
-
-# Initialize Redis instance with custom bind address
 ots-containers service init redis 6380 --bind 0.0.0.0
 
-# Start/stop/restart service instances
+# Start/stop/restart
 ots-containers service start valkey 6379
 ots-containers service stop redis 6380
 ots-containers service restart valkey 6379
 
-# Check service status
+# Status and logs
 ots-containers service status valkey 6379
-
-# View service logs
-ots-containers service logs valkey 6379
-ots-containers service logs redis 6380 --follow
+ots-containers service logs valkey 6379 --follow
 
 # Enable/disable at boot
 ots-containers service enable valkey 6379
@@ -125,14 +108,11 @@ ots-containers service disable redis 6380
 ots-containers service
 ```
 
-### Generating cloud-init configurations
+### Generating Cloud-Init Configurations
 
 ```bash
-# Generate basic cloud-init config with Debian 13 apt sources
+# Generate basic cloud-init config
 ots-containers cloudinit generate > user-data.yaml
-
-# Save to specific file
-ots-containers cloudinit generate --output /tmp/cloud-init.yaml
 
 # Include PostgreSQL repository
 ots-containers cloudinit generate --include-postgresql --postgresql-key /path/to/pgdg.asc
@@ -140,20 +120,18 @@ ots-containers cloudinit generate --include-postgresql --postgresql-key /path/to
 # Include Valkey repository
 ots-containers cloudinit generate --include-valkey --valkey-key /path/to/valkey.gpg
 
-# Validate a cloud-init configuration
+# Validate configuration
 ots-containers cloudinit validate user-data.yaml
 ```
 
 ## Environment Variables
 
-Override defaults:
-
 ```bash
 # Use a specific image tag
-TAG=v0.23.0 ots-containers update 7043
+TAG=v0.23.0 ots-containers instances redeploy --web 7043
 
 # Use a different image
-IMAGE=ghcr.io/onetimesecret/onetimesecret TAG=latest ots-containers setup 7044
+IMAGE=ghcr.io/onetimesecret/onetimesecret TAG=latest ots-containers instances deploy --web 7044
 ```
 
 ## Prerequisites
@@ -164,141 +142,107 @@ IMAGE=ghcr.io/onetimesecret/onetimesecret TAG=latest ots-containers setup 7044
 
 ## Server Setup
 
-The tool uses an FHS-compliant directory structure:
+FHS-compliant directory structure:
 
 ### OTS Container Configuration
 
 ```
-/etc/onetimesecret/           # System configuration (must exist)
-├── .env                      # Template env file (PORT gets substituted per instance)
-└── config.yaml               # Application configuration
+/etc/onetimesecret/              # System configuration
+├── config.yaml                  # Application configuration
+├── auth.yaml                    # Authentication config
+└── logging.yaml                 # Logging config
 
-/var/lib/onetimesecret/       # Variable runtime data (created by tool)
-├── .env-7043                 # Generated: instance-specific env for port 7043
-├── .env-7044                 # Generated: instance-specific env for port 7044
-└── ...
+/etc/default/onetimesecret       # Environment file (shared by all instances)
 
-/etc/containers/systemd/
-└── onetime@.container        # Quadlet template (managed by this tool)
+/etc/containers/systemd/         # Quadlet templates (managed by tool)
+├── onetime-web@.container
+├── onetime-worker@.container
+└── onetime-scheduler@.container
+
+/var/opt/onetimesecret/          # Runtime data
+└── deployments.db               # Deployment timeline (SQLite)
 ```
 
 ### Service Configuration (Valkey/Redis)
 
-Uses package-provided systemd templates with instance-specific configs:
-
 ```
-/etc/valkey/                  # Valkey system configuration (from package)
-├── valkey.conf               # Default config template
-└── instances/                # Instance configs (created by tool)
-    ├── 6379.conf             # Instance-specific config
-    ├── 6379-secrets.conf     # Secrets file (mode 0640)
-    └── 6380.conf
+/etc/valkey/                     # Valkey system configuration
+├── valkey.conf                  # Default config template
+└── instances/                   # Instance configs (created by tool)
+    ├── 6379.conf
+    └── 6379-secrets.conf        # Secrets file (mode 0640)
 
-/var/lib/valkey/              # Variable runtime data (created by tool)
-├── 6379/                     # Instance data directory
-│   └── dump.rdb
-└── 6380/
-
-/usr/lib/systemd/system/
-└── valkey-server@.service    # Template from package (not modified)
+/var/lib/valkey/                 # Runtime data
+└── 6379/
+    └── dump.rdb
 ```
-
-Similar structure for Redis (`/etc/redis/`, `/var/lib/redis/`).
 
 ## How It Works
 
-### Container Management (OTS instances)
+### Container Management
 
-1. **Static assets**: Extracts `/app/public` from the container image into a shared Podman volume
-2. **Quadlet template**: Writes a systemd unit template to `/etc/containers/systemd/onetime@.container`
-3. **Instance env files**: Creates `/var/lib/onetimesecret/.env-{port}` from the template with PORT substituted
-4. **systemd**: Starts/restarts `onetime@{port}` service
+1. **Quadlet templates**: Writes systemd unit templates to `/etc/containers/systemd/`
+2. **Environment**: Reads from `/etc/default/onetimesecret`
+3. **Secrets**: Uses Podman secrets for sensitive values
+4. **Timeline**: Records deployments to SQLite for audit and rollback
 
-### Service Management (Valkey, Redis)
+### Service Management
 
-1. **Config files**: Copies package defaults to `/etc/{package}/instances/{instance}.conf`
-2. **Port configuration**: Updates `port` and `bind` settings in instance config
-3. **Secrets**: Optionally creates `/etc/{package}/instances/{instance}-secrets.conf` with restricted permissions
-4. **Data directories**: Creates `/var/lib/{package}/{instance}/` with correct ownership
-5. **systemd**: Manages `{package}-server@{instance}` services using package-provided templates
-
-### Cloud-Init Generation
-
-1. **DEB822 format**: Uses modern Debian 13 (Trixie) DEB822-style apt sources
-2. **Base repositories**: Includes main, backports, and security repositories
-3. **Third-party repos**: Optionally adds PostgreSQL and Valkey repositories with GPG keys
-4. **Package selection**: Includes common packages (podman, git, systemd-container, etc.)
-5. **Validation**: Built-in YAML syntax and format validation
+1. **Config files**: Copies package defaults to instance-specific configs
+2. **Secrets**: Creates separate secrets files with restricted permissions
+3. **Data directories**: Creates per-instance data directories with correct ownership
+4. **systemd**: Manages services using package-provided templates
 
 ## Troubleshooting
 
 ```bash
-# Check service status (via CLI or systemctl)
-ots-containers status
-sudo systemctl status onetime@7043
+# Check instance status
+ots-containers instances status
+systemctl status onetime-web@7043
 
-# View logs (via CLI or journalctl)
-ots-containers logs -f
-sudo journalctl -u onetime@7043 --since '5 minutes ago'
+# View logs
+ots-containers instances logs --web 7043 -f
+journalctl -u onetime-web@7043 -f
+
+# Unified log filtering (all instance types)
+journalctl -t onetime -f
 
 # List all onetime systemd units
-systemctl list-units 'onetime@*'
+systemctl list-units 'onetime-*'
 
-# Verify Quadlet template
-cat /etc/containers/systemd/onetime@.container
+# Verify Quadlet templates
+cat /etc/containers/systemd/onetime-web@.container
 
 # Reload systemd after manual changes
-sudo systemctl daemon-reload
+systemctl daemon-reload
 ```
 
 ## Development
 
-For an editable install (changes take effect immediately):
-
 ```bash
-git clone https://github.com/onetimesecret/ots-containers.git /opt/ots-containers
-chown -R youruser:youruser /opt/ots-containers
-pipx install -e /opt/ots-containers
-```
-
-The `-e` flag is important: without it, pipx copies the package into its venv and source changes won't be reflected until you reinstall.
-
-### Running Tests
-
-```bash
-# Create and activate virtual environment
-python -m venv .venv
-source .venv/bin/activate
-
-# Install with dev and test dependencies
+# Editable install
+git clone https://github.com/onetimesecret/ots-containers.git
+cd ots-containers
 pip install -e ".[dev,test]"
 
 # Run tests
 pytest tests/
 
 # Run with coverage (CI threshold: 70%)
-pytest tests/ --cov=ots_containers --cov-report=term-missing --cov-fail-under=70
-```
+pytest tests/ --cov=ots_containers --cov-fail-under=70
 
-Pre-commit hooks run automatically on `git commit`. Install them with:
-
-```bash
+# Pre-commit hooks
 pre-commit install
 ```
 
 ### Running as root
 
-When running as root (e.g., via sudo), the user's PATH doesn't include `~/.local/bin`. Use the full path:
-
 ```bash
-sudo /home/youruser/.local/bin/ots-containers ps
-```
+# Use full path
+sudo /home/youruser/.local/bin/ots-containers instances status
 
-Or create a symlink for convenience:
-
-```bash
+# Or create symlink
 sudo ln -s /home/youruser/.local/bin/ots-containers /usr/local/bin/ots-containers
-sudo ots-containers ps
 ```
 
 ## License
