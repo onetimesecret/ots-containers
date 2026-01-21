@@ -461,3 +461,258 @@ class TestWorkerTemplate:
         quadlet.write_worker_template(cfg)
 
         mock_reload.assert_called_once()
+
+
+class TestSchedulerTemplate:
+    """Test scheduler container quadlet template generation."""
+
+    def test_write_scheduler_template_creates_file(self, mocker, tmp_path):
+        """write_scheduler_template should create the scheduler quadlet file."""
+        mocker.patch("ots_containers.quadlet.systemd.daemon_reload")
+        from ots_containers import quadlet
+        from ots_containers.config import Config
+
+        cfg = Config(
+            scheduler_template_path=tmp_path / "onetime-scheduler@.container",
+            var_dir=tmp_path / "var",
+        )
+
+        quadlet.write_scheduler_template(cfg)
+
+        assert cfg.scheduler_template_path.exists()
+
+    def test_write_scheduler_template_includes_image(self, mocker, tmp_path, monkeypatch):
+        """Scheduler quadlet should include Image from config."""
+        mocker.patch("ots_containers.quadlet.systemd.daemon_reload")
+        monkeypatch.setenv("IMAGE", "myregistry/myimage")
+        monkeypatch.setenv("TAG", "v1.0.0")
+
+        from ots_containers import quadlet
+        from ots_containers.config import Config
+
+        cfg = Config(
+            scheduler_template_path=tmp_path / "onetime-scheduler@.container",
+            var_dir=tmp_path / "var",
+        )
+
+        quadlet.write_scheduler_template(cfg)
+
+        content = cfg.scheduler_template_path.read_text()
+        assert "Image=myregistry/myimage:v1.0.0" in content
+
+    def test_write_scheduler_template_uses_host_network(self, mocker, tmp_path):
+        """Scheduler quadlet should use host networking."""
+        mocker.patch("ots_containers.quadlet.systemd.daemon_reload")
+        from ots_containers import quadlet
+        from ots_containers.config import Config
+
+        cfg = Config(
+            scheduler_template_path=tmp_path / "onetime-scheduler@.container",
+            var_dir=tmp_path / "var",
+        )
+
+        quadlet.write_scheduler_template(cfg)
+
+        content = cfg.scheduler_template_path.read_text()
+        assert "Network=host" in content
+
+    def test_write_scheduler_template_includes_syslog_tag(self, mocker, tmp_path):
+        """Scheduler quadlet should include syslog tag for unified log filtering."""
+        mocker.patch("ots_containers.quadlet.systemd.daemon_reload")
+        from ots_containers import quadlet
+        from ots_containers.config import Config
+
+        cfg = Config(
+            scheduler_template_path=tmp_path / "onetime-scheduler@.container",
+            var_dir=tmp_path / "var",
+        )
+
+        quadlet.write_scheduler_template(cfg)
+
+        content = cfg.scheduler_template_path.read_text()
+        assert "PodmanArgs=--log-opt tag=onetime" in content
+
+    def test_write_scheduler_template_sets_scheduler_id_env_var(self, mocker, tmp_path):
+        """Scheduler quadlet should set SCHEDULER_ID env var from instance."""
+        mocker.patch("ots_containers.quadlet.systemd.daemon_reload")
+        from ots_containers import quadlet
+        from ots_containers.config import Config
+
+        cfg = Config(
+            scheduler_template_path=tmp_path / "onetime-scheduler@.container",
+            var_dir=tmp_path / "var",
+        )
+
+        quadlet.write_scheduler_template(cfg)
+
+        content = cfg.scheduler_template_path.read_text()
+        assert "Environment=SCHEDULER_ID=%i" in content
+
+    def test_write_scheduler_template_has_scheduler_entry_point(self, mocker, tmp_path):
+        """Scheduler quadlet should have scheduler-specific entry point."""
+        mocker.patch("ots_containers.quadlet.systemd.daemon_reload")
+        from ots_containers import quadlet
+        from ots_containers.config import Config
+
+        cfg = Config(
+            scheduler_template_path=tmp_path / "onetime-scheduler@.container",
+            var_dir=tmp_path / "var",
+        )
+
+        quadlet.write_scheduler_template(cfg)
+
+        content = cfg.scheduler_template_path.read_text()
+        assert "bin/entrypoint.sh bin/ots scheduler" in content
+
+    def test_write_scheduler_template_has_scheduler_health_check(self, mocker, tmp_path):
+        """Scheduler quadlet should check for scheduler process."""
+        mocker.patch("ots_containers.quadlet.systemd.daemon_reload")
+        from ots_containers import quadlet
+        from ots_containers.config import Config
+
+        cfg = Config(
+            scheduler_template_path=tmp_path / "onetime-scheduler@.container",
+            var_dir=tmp_path / "var",
+        )
+
+        quadlet.write_scheduler_template(cfg)
+
+        content = cfg.scheduler_template_path.read_text()
+        assert 'pgrep -f "bin/ots scheduler"' in content
+
+    def test_write_scheduler_template_has_timeout_stop_sec(self, mocker, tmp_path):
+        """Scheduler quadlet should have TimeoutStopSec for graceful job completion."""
+        mocker.patch("ots_containers.quadlet.systemd.daemon_reload")
+        from ots_containers import quadlet
+        from ots_containers.config import Config
+
+        cfg = Config(
+            scheduler_template_path=tmp_path / "onetime-scheduler@.container",
+            var_dir=tmp_path / "var",
+        )
+
+        quadlet.write_scheduler_template(cfg)
+
+        content = cfg.scheduler_template_path.read_text()
+        assert "TimeoutStopSec=60" in content
+
+    def test_write_scheduler_template_no_static_assets_volume(self, mocker, tmp_path):
+        """Scheduler quadlet should NOT mount static_assets volume."""
+        mocker.patch("ots_containers.quadlet.systemd.daemon_reload")
+        from ots_containers import quadlet
+        from ots_containers.config import Config
+
+        cfg = Config(
+            scheduler_template_path=tmp_path / "onetime-scheduler@.container",
+            var_dir=tmp_path / "var",
+        )
+
+        quadlet.write_scheduler_template(cfg)
+
+        content = cfg.scheduler_template_path.read_text()
+        assert "static_assets" not in content
+
+    def test_write_scheduler_template_no_port_env_var(self, mocker, tmp_path):
+        """Scheduler quadlet should NOT have PORT env var (unlike web instances)."""
+        mocker.patch("ots_containers.quadlet.systemd.daemon_reload")
+        from ots_containers import quadlet
+        from ots_containers.config import Config
+
+        cfg = Config(
+            scheduler_template_path=tmp_path / "onetime-scheduler@.container",
+            var_dir=tmp_path / "var",
+        )
+
+        quadlet.write_scheduler_template(cfg)
+
+        content = cfg.scheduler_template_path.read_text()
+        assert "Environment=PORT=" not in content
+
+    def test_write_scheduler_template_includes_environment_file(self, mocker, tmp_path):
+        """Scheduler quadlet should reference shared environment file."""
+        mocker.patch("ots_containers.quadlet.systemd.daemon_reload")
+        from ots_containers import quadlet
+        from ots_containers.config import Config
+
+        cfg = Config(
+            scheduler_template_path=tmp_path / "onetime-scheduler@.container",
+            var_dir=tmp_path / "var",
+        )
+
+        quadlet.write_scheduler_template(cfg)
+
+        content = cfg.scheduler_template_path.read_text()
+        assert "EnvironmentFile=/etc/default/onetimesecret" in content
+
+    def test_write_scheduler_template_includes_config_volume(self, mocker, tmp_path):
+        """Scheduler quadlet should mount config directory."""
+        mocker.patch("ots_containers.quadlet.systemd.daemon_reload")
+        from ots_containers import quadlet
+        from ots_containers.config import Config
+
+        config_dir = tmp_path / "etc"
+        cfg = Config(
+            scheduler_template_path=tmp_path / "onetime-scheduler@.container",
+            config_dir=config_dir,
+            var_dir=tmp_path / "var",
+        )
+
+        quadlet.write_scheduler_template(cfg)
+
+        content = cfg.scheduler_template_path.read_text()
+        assert f"Volume={config_dir}:/app/etc:ro" in content
+
+    def test_write_scheduler_template_includes_podman_secrets(self, mocker, tmp_path):
+        """Scheduler quadlet should include Secret directives from env file."""
+        mocker.patch("ots_containers.quadlet.systemd.daemon_reload")
+        from ots_containers import quadlet
+        from ots_containers.config import Config
+
+        env_file = tmp_path / "onetimesecret.env"
+        env_file.write_text(
+            "SECRET_VARIABLE_NAMES=API_KEY,DB_PASSWORD\n"
+            "_API_KEY=ots_api_key\n"
+            "_DB_PASSWORD=ots_db_password\n"
+        )
+
+        cfg = Config(
+            scheduler_template_path=tmp_path / "onetime-scheduler@.container",
+            var_dir=tmp_path / "var",
+        )
+
+        quadlet.write_scheduler_template(cfg, env_file_path=env_file)
+
+        content = cfg.scheduler_template_path.read_text()
+        assert "Secret=ots_api_key,type=env,target=API_KEY" in content
+        assert "Secret=ots_db_password,type=env,target=DB_PASSWORD" in content
+
+    def test_write_scheduler_template_creates_parent_dirs(self, mocker, tmp_path):
+        """write_scheduler_template should create parent directories if needed."""
+        mocker.patch("ots_containers.quadlet.systemd.daemon_reload")
+        from ots_containers import quadlet
+        from ots_containers.config import Config
+
+        nested_path = tmp_path / "subdir" / "onetime-scheduler@.container"
+        cfg = Config(
+            scheduler_template_path=nested_path,
+            var_dir=tmp_path / "var",
+        )
+
+        quadlet.write_scheduler_template(cfg)
+
+        assert nested_path.exists()
+
+    def test_write_scheduler_template_reloads_daemon(self, mocker, tmp_path):
+        """write_scheduler_template should reload systemd daemon after writing."""
+        mock_reload = mocker.patch("ots_containers.quadlet.systemd.daemon_reload")
+        from ots_containers import quadlet
+        from ots_containers.config import Config
+
+        cfg = Config(
+            scheduler_template_path=tmp_path / "onetime-scheduler@.container",
+            var_dir=tmp_path / "var",
+        )
+
+        quadlet.write_scheduler_template(cfg)
+
+        mock_reload.assert_called_once()

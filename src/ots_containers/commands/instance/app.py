@@ -49,6 +49,8 @@ def list_instances(
         ots instances                            # List all instances
         ots instances --web                      # List web instances only
         ots instances --web 7043 7044            # List specific web instances
+        ots instances --worker                   # List worker instances
+        ots instances --scheduler                # List scheduler instances
         ots instances --json                     # JSON output
     """
     itype = resolve_instance_type(instance_type, web, worker, scheduler)
@@ -425,6 +427,7 @@ def redeploy(
         ots instances redeploy                      # Redeploy all running
         ots instances redeploy --web                # Redeploy web instances
         ots instances redeploy --web 7043 7044      # Redeploy specific web
+        ots instances redeploy --scheduler main     # Redeploy specific scheduler
         ots instances redeploy --force              # Force teardown+recreate
     """
     itype = resolve_instance_type(instance_type, web, worker, scheduler)
@@ -524,6 +527,7 @@ def undeploy(
         ots instances undeploy                      # Undeploy all running
         ots instances undeploy --web                # Undeploy web instances
         ots instances undeploy --web 7043 7044      # Undeploy specific web
+        ots instances undeploy --scheduler main     # Undeploy specific scheduler
         ots instances undeploy -y                   # Skip confirmation
     """
     itype = resolve_instance_type(instance_type, web, worker, scheduler)
@@ -597,6 +601,7 @@ def start(
         ots instances start                         # Start all configured
         ots instances start --web                   # Start web instances
         ots instances start --web 7043 7044         # Start specific web
+        ots instances start --scheduler main        # Start specific scheduler
     """
     itype = resolve_instance_type(instance_type, web, worker, scheduler)
     instances = resolve_identifiers(identifiers, itype, running_only=False)
@@ -629,6 +634,7 @@ def stop(
         ots instances stop                          # Stop all running
         ots instances stop --web                    # Stop web instances
         ots instances stop --web 7043 7044          # Stop specific web
+        ots instances stop --scheduler              # Stop scheduler instances
     """
     itype = resolve_instance_type(instance_type, web, worker, scheduler)
     instances = resolve_identifiers(identifiers, itype, running_only=True)
@@ -661,6 +667,7 @@ def restart(
         ots instances restart                       # Restart all running
         ots instances restart --web                 # Restart web instances
         ots instances restart --web 7043 7044       # Restart specific web
+        ots instances restart --scheduler main      # Restart specific scheduler
     """
     itype = resolve_instance_type(instance_type, web, worker, scheduler)
     instances = resolve_identifiers(identifiers, itype, running_only=True)
@@ -692,6 +699,7 @@ def enable(
         ots instances enable                        # Enable all configured
         ots instances enable --web                  # Enable web instances
         ots instances enable --web 7043 7044        # Enable specific web
+        ots instances enable --scheduler main       # Enable specific scheduler
     """
     itype = resolve_instance_type(instance_type, web, worker, scheduler)
     instances = resolve_identifiers(identifiers, itype, running_only=False)
@@ -732,6 +740,7 @@ def disable(
         ots instances disable                       # Disable all configured
         ots instances disable --web                 # Disable web instances
         ots instances disable --web 7043 7044 -y    # Disable specific web
+        ots instances disable --scheduler main -y   # Disable specific scheduler
     """
     itype = resolve_instance_type(instance_type, web, worker, scheduler)
     instances = resolve_identifiers(identifiers, itype, running_only=False)
@@ -779,6 +788,7 @@ def status(
         ots instances status                        # Status of all configured
         ots instances status --web                  # Status of web instances
         ots instances status --web 7043 7044        # Status of specific web
+        ots instances status --scheduler            # Status of scheduler instances
     """
     itype = resolve_instance_type(instance_type, web, worker, scheduler)
     instances = resolve_identifiers(identifiers, itype, running_only=False)
@@ -810,6 +820,7 @@ def logs(
         ots instances logs                          # Logs from all instances
         ots instances logs --web                    # Logs from web instances
         ots instances logs --web 7043 -f            # Follow specific web logs
+        ots instances logs --scheduler main -f      # Follow scheduler logs
         ots instances logs -n 100                   # Last 100 lines
     """
     itype = resolve_instance_type(instance_type, web, worker, scheduler)
@@ -889,8 +900,9 @@ def exec_shell(
 
     Examples:
         ots instances exec                          # Shell in all running
-        ots instances exec --web 7043              # Shell in specific web
-        ots instances exec -c "/bin/bash"          # Use specific shell
+        ots instances exec --web 7043               # Shell in specific web
+        ots instances exec --scheduler main         # Shell in scheduler
+        ots instances exec -c "/bin/bash"           # Use specific shell
     """
     import os
 

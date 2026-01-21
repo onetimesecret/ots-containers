@@ -785,3 +785,145 @@ class TestResolveInstanceType:
 
         with pytest.raises(SystemExit):
             resolve_instance_type(InstanceType.WEB, web=False, worker=True, scheduler=False)
+
+
+class TestSchedulerCommands:
+    """Integration tests for scheduler instance commands using --scheduler flag."""
+
+    def test_stop_scheduler_with_flag(self, mocker, capsys):
+        """stop --scheduler should call systemd.stop for scheduler instances."""
+        mock_stop = mocker.patch("ots_containers.commands.instance.app.systemd.stop")
+
+        instance.stop(identifiers=("main",), scheduler=True)
+
+        mock_stop.assert_called_once_with("onetime-scheduler@main")
+        captured = capsys.readouterr()
+        assert "Stopped onetime-scheduler@main" in captured.out
+
+    def test_restart_scheduler_with_flag(self, mocker, capsys):
+        """restart --scheduler should call systemd.restart for scheduler instances."""
+        mock_restart = mocker.patch("ots_containers.commands.instance.app.systemd.restart")
+
+        instance.restart(identifiers=("main",), scheduler=True)
+
+        mock_restart.assert_called_once_with("onetime-scheduler@main")
+        captured = capsys.readouterr()
+        assert "Restarted onetime-scheduler@main" in captured.out
+
+    def test_start_scheduler_with_flag(self, mocker, capsys):
+        """start --scheduler should call systemd.start for scheduler instances."""
+        mock_start = mocker.patch("ots_containers.commands.instance.app.systemd.start")
+
+        instance.start(identifiers=("main",), scheduler=True)
+
+        mock_start.assert_called_once_with("onetime-scheduler@main")
+        captured = capsys.readouterr()
+        assert "Started onetime-scheduler@main" in captured.out
+
+    def test_status_scheduler_with_flag(self, mocker, capsys):
+        """status --scheduler should show status for scheduler instances."""
+        mock_run = mocker.patch(
+            "ots_containers.commands.instance.app.subprocess.run",
+            return_value=mocker.Mock(returncode=0, stdout="active"),
+        )
+
+        instance.status(identifiers=("main",), scheduler=True)
+
+        # Should call systemctl status for the scheduler unit
+        mock_run.assert_called()
+        cmd = mock_run.call_args[0][0]
+        assert "systemctl" in cmd
+        assert "onetime-scheduler@main" in cmd
+
+    def test_logs_scheduler_with_flag(self, mocker):
+        """logs --scheduler should call journalctl for scheduler instances."""
+        mock_run = mocker.patch("ots_containers.commands.instance.app.subprocess.run")
+
+        instance.logs(identifiers=("main",), scheduler=True)
+
+        mock_run.assert_called_once()
+        cmd = mock_run.call_args[0][0]
+        assert "journalctl" in cmd
+        assert "onetime-scheduler@main" in cmd or "-u" in cmd
+
+    def test_enable_scheduler_with_flag(self, mocker, capsys):
+        """enable --scheduler should call systemctl enable for scheduler instances."""
+        mock_run = mocker.patch("ots_containers.commands.instance.app.subprocess.run")
+
+        instance.enable(identifiers=("main",), scheduler=True)
+
+        mock_run.assert_called_once()
+        cmd = mock_run.call_args[0][0]
+        assert "systemctl" in cmd
+        assert "enable" in cmd
+        assert "onetime-scheduler@main" in cmd
+
+    def test_disable_scheduler_with_flag(self, mocker, capsys):
+        """disable --scheduler should call systemctl disable for scheduler instances."""
+        mock_run = mocker.patch("ots_containers.commands.instance.app.subprocess.run")
+
+        instance.disable(identifiers=("main",), scheduler=True, yes=True)
+
+        mock_run.assert_called_once()
+        cmd = mock_run.call_args[0][0]
+        assert "systemctl" in cmd
+        assert "disable" in cmd
+        assert "onetime-scheduler@main" in cmd
+
+    def test_stop_discovers_scheduler_instances(self, mocker):
+        """stop --scheduler with no identifiers should discover scheduler instances."""
+        mocker.patch(
+            "ots_containers.commands.instance._helpers.systemd.discover_scheduler_instances",
+            return_value=["main", "cron"],
+        )
+        mock_stop = mocker.patch("ots_containers.commands.instance.app.systemd.stop")
+
+        instance.stop(identifiers=(), scheduler=True)
+
+        assert mock_stop.call_count == 2
+        calls = [c[0][0] for c in mock_stop.call_args_list]
+        assert "onetime-scheduler@main" in calls
+        assert "onetime-scheduler@cron" in calls
+
+    def test_restart_discovers_scheduler_instances(self, mocker):
+        """restart --scheduler with no identifiers should discover scheduler instances."""
+        mocker.patch(
+            "ots_containers.commands.instance._helpers.systemd.discover_scheduler_instances",
+            return_value=["main"],
+        )
+        mock_restart = mocker.patch("ots_containers.commands.instance.app.systemd.restart")
+
+        instance.restart(identifiers=(), scheduler=True)
+
+        mock_restart.assert_called_once_with("onetime-scheduler@main")
+
+    def test_multiple_scheduler_identifiers(self, mocker, capsys):
+        """Commands should handle multiple scheduler identifiers."""
+        mock_stop = mocker.patch("ots_containers.commands.instance.app.systemd.stop")
+
+        instance.stop(identifiers=("main", "cron", "backup"), scheduler=True)
+
+        assert mock_stop.call_count == 3
+        calls = [c[0][0] for c in mock_stop.call_args_list]
+        assert "onetime-scheduler@main" in calls
+        assert "onetime-scheduler@cron" in calls
+        assert "onetime-scheduler@backup" in calls
+
+    def test_scheduler_with_type_parameter(self, mocker, capsys):
+        """Commands should work with --type scheduler instead of --scheduler flag."""
+        mock_stop = mocker.patch("ots_containers.commands.instance.app.systemd.stop")
+
+        instance.stop(identifiers=("main",), instance_type=InstanceType.SCHEDULER)
+
+        mock_stop.assert_called_once_with("onetime-scheduler@main")
+
+    def test_scheduler_named_instances(self, mocker, capsys):
+        """Scheduler should accept string identifiers (not just numeric)."""
+        mock_restart = mocker.patch("ots_containers.commands.instance.app.systemd.restart")
+
+        instance.restart(identifiers=("daily-cleanup", "weekly-reports"), scheduler=True)
+
+        assert mock_restart.call_count == 2
+        calls = [c[0][0] for c in mock_restart.call_args_list]
+        assert "onetime-scheduler@daily-cleanup" in calls
+        assert "onetime-scheduler@weekly-reports" in calls

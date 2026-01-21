@@ -94,11 +94,11 @@ def resolve_instance_type(
     shorthand_count = sum([web, worker, scheduler])
 
     if shorthand_count > 1:
-        raise SystemExit("Only one of --web, --worker, --scheduler can be specified")
+        raise SystemExit("Only one of --web, --worker, or --scheduler can be specified")
 
     if type_ is not None:
         if shorthand_count > 0:
-            raise SystemExit("Cannot use --type with --web/--worker/--scheduler")
+            raise SystemExit("Cannot use --type with --web, --worker, or --scheduler")
         return type_
 
     if web:

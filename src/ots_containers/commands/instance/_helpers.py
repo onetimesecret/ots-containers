@@ -45,6 +45,15 @@ def resolve_identifiers(
                 "Instance type required when identifiers are specified. "
                 "Use --web, --worker, or --scheduler."
             )
+        # Validate web instance identifiers are valid ports
+        if instance_type == InstanceType.WEB:
+            for id_ in identifiers:
+                try:
+                    port = int(id_)
+                    if not (1 <= port <= 65535):
+                        raise SystemExit(f"Invalid port number: {id_} (must be 1-65535)")
+                except ValueError:
+                    raise SystemExit(f"Invalid port for web instance: {id_!r} (must be numeric)")
         return {instance_type: list(identifiers)}
 
     # No identifiers: discover based on type filter

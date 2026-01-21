@@ -54,6 +54,25 @@ class TestResolveIdentifiers:
         result = resolve_identifiers(("main", "cron"), instance_type=InstanceType.SCHEDULER)
         assert result == {InstanceType.SCHEDULER: ["main", "cron"]}
 
+    def test_invalid_web_port_non_numeric(self):
+        """Should raise SystemExit for non-numeric web port."""
+        with pytest.raises(SystemExit) as exc_info:
+            resolve_identifiers(("foo",), instance_type=InstanceType.WEB)
+        assert "Invalid port for web instance" in str(exc_info.value)
+
+    def test_invalid_web_port_out_of_range(self):
+        """Should raise SystemExit for out-of-range port."""
+        with pytest.raises(SystemExit) as exc_info:
+            resolve_identifiers(("70000",), instance_type=InstanceType.WEB)
+        assert "Invalid port number" in str(exc_info.value)
+        assert "must be 1-65535" in str(exc_info.value)
+
+    def test_invalid_web_port_zero(self):
+        """Should raise SystemExit for port 0."""
+        with pytest.raises(SystemExit) as exc_info:
+            resolve_identifiers(("0",), instance_type=InstanceType.WEB)
+        assert "Invalid port number" in str(exc_info.value)
+
     def test_auto_discover_web_only(self, mocker):
         """Should discover only web instances when type is WEB."""
         mocker.patch(
