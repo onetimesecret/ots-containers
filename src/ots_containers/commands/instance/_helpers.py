@@ -36,7 +36,7 @@ def format_journalctl_hint(instances: dict[InstanceType, list[str]]) -> str:
     if not tags:
         return ""
 
-    tag_args = " ".join(f"-t {tag}" for tag in tags)
+    tag_args = " ".join(f"-t {shlex.quote(tag)}" for tag in tags)
     return f"journalctl {tag_args} -f"
 
 
