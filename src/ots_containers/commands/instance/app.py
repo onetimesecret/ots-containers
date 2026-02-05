@@ -1024,7 +1024,9 @@ def shell(
         cmd.extend(["--tmpfs", "/app/data"])
 
     # Config directory (always read-only)
-    cmd.extend(["-v", f"{cfg.config_dir}:/app/etc:ro"])
+    # Resolve symlinks for podman VM compatibility (macOS)
+    config_dir = cfg.config_dir.resolve()
+    cmd.extend(["-v", f"{config_dir}:/app/etc:ro"])
 
     # Image
     cmd.append(full_image)
@@ -1150,13 +1152,15 @@ def config_transform(
 
         # Copy config file to volume using a helper container
         # We use a busybox-style approach: mount both and copy
+        # Resolve symlinks for podman VM compatibility (macOS)
+        config_path_resolved = config_path.resolve()
         subprocess.run(
             [
                 "podman",
                 "run",
                 "--rm",
                 "-v",
-                f"{config_path}:/src/{file}:ro",
+                f"{config_path_resolved}:/src/{file}:ro",
                 "-v",
                 f"{volume_name}:/dest",
                 full_image,
@@ -1177,7 +1181,9 @@ def config_transform(
             cmd.extend(build_secret_args(env_file))
 
         cmd.extend(["-v", f"{volume_name}:/app/data"])
-        cmd.extend(["-v", f"{cfg.config_dir}:/app/etc:ro"])
+        # Resolve symlinks for podman VM compatibility (macOS)
+        config_dir_resolved = cfg.config_dir.resolve()
+        cmd.extend(["-v", f"{config_dir_resolved}:/app/etc:ro"])
         cmd.append(full_image)
         cmd.extend(["/bin/bash", "-c", command])
 
