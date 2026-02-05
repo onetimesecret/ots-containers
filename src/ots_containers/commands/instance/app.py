@@ -35,29 +35,13 @@ app = cyclopts.App(
 )
 
 
-@app.default
-def list_instances(
-    identifiers: Identifiers = (),
-    instance_type: TypeSelector = None,
-    web: WebFlag = False,
-    worker: WorkerFlag = False,
-    scheduler: SchedulerFlag = False,
-    json_output: JsonOutput = False,
+def _list_instances_impl(
+    identifiers: tuple[str, ...],
+    instance_type: InstanceType | None,
+    json_output: bool,
 ):
-    """List instances with status, image, and deployment info.
-
-    Auto-discovers all instances if no identifiers specified.
-
-    Examples:
-        ots instances                            # List all instances
-        ots instances --web                      # List web instances only
-        ots instances --web 7043 7044            # List specific web instances
-        ots instances --worker                   # List worker instances
-        ots instances --scheduler                # List scheduler instances
-        ots instances --json                     # JSON output
-    """
-    itype = resolve_instance_type(instance_type, web, worker, scheduler)
-    instances = resolve_identifiers(identifiers, itype, running_only=False)
+    """Shared implementation for listing instances."""
+    instances = resolve_identifiers(identifiers, instance_type, running_only=False)
 
     if not instances:
         print("No configured instances found")
@@ -155,6 +139,55 @@ def list_instances(
                 f"{status:<12} {image_tag:<38} {deployed:<20} {action:<10}"
             )
             print(row)
+
+
+@app.command(name="list")
+def list_cmd(
+    identifiers: Identifiers = (),
+    instance_type: TypeSelector = None,
+    web: WebFlag = False,
+    worker: WorkerFlag = False,
+    scheduler: SchedulerFlag = False,
+    json_output: JsonOutput = False,
+):
+    """List instances with status, image, and deployment info.
+
+    Auto-discovers all instances if no identifiers specified.
+
+    Examples:
+        ots instances list                       # List all instances
+        ots instances list --web                 # List web instances only
+        ots instances list --web 7043 7044       # List specific web instances
+        ots instances list --worker              # List worker instances
+        ots instances list --json                # JSON output
+    """
+    itype = resolve_instance_type(instance_type, web, worker, scheduler)
+    _list_instances_impl(identifiers, itype, json_output)
+
+
+@app.default
+def list_instances(
+    identifiers: Identifiers = (),
+    instance_type: TypeSelector = None,
+    web: WebFlag = False,
+    worker: WorkerFlag = False,
+    scheduler: SchedulerFlag = False,
+    json_output: JsonOutput = False,
+):
+    """List instances with status, image, and deployment info.
+
+    Auto-discovers all instances if no identifiers specified.
+
+    Examples:
+        ots instances                            # List all instances
+        ots instances --web                      # List web instances only
+        ots instances --web 7043 7044            # List specific web instances
+        ots instances --worker                   # List worker instances
+        ots instances --scheduler                # List scheduler instances
+        ots instances --json                     # JSON output
+    """
+    itype = resolve_instance_type(instance_type, web, worker, scheduler)
+    _list_instances_impl(identifiers, itype, json_output)
 
 
 @app.command
