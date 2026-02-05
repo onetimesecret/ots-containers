@@ -1,4 +1,5 @@
 # src/ots_containers/commands/assets.py
+
 """Asset management commands for OTS containers."""
 
 from typing import Annotated

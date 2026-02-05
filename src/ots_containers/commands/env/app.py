@@ -1,4 +1,5 @@
 # src/ots_containers/commands/env/app.py
+
 """Environment file management commands.
 
 Process environment files to extract secrets and prepare for container deployment.
@@ -274,7 +275,10 @@ def quadlet_lines(
     parsed = EnvFile.parse(path)
 
     if not parsed.secret_variable_names:
-        print("Error: No SECRET_VARIABLE_NAMES defined in environment file.", file=sys.stderr)
+        print(
+            "Error: No SECRET_VARIABLE_NAMES defined in environment file.",
+            file=sys.stderr,
+        )
         return 1
 
     secrets, messages = extract_secrets(parsed)

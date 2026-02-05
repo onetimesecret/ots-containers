@@ -3,6 +3,7 @@
 Service orchestration CLI for [OneTimeSecret](https://github.com/onetimesecret/onetimesecret) infrastructure.
 
 **Dual-purpose management tool:**
+
 - **Container orchestration**: Containerized OTS deployments via Podman Quadlets (systemd integration)
 - **Service management**: Native systemd services for dependencies (Valkey, Redis)
 
@@ -39,10 +40,10 @@ ots-containers --version
 
 Three container types with explicit systemd unit naming:
 
-| Type | Unit Name | Identifier | Use |
-|------|-----------|------------|-----|
-| `--web` | `onetime-web@{port}` | Port number | HTTP servers |
-| `--worker` | `onetime-worker@{id}` | Name/number | Background jobs |
+| Type          | Unit Name                | Identifier  | Use             |
+| ------------- | ------------------------ | ----------- | --------------- |
+| `--web`       | `onetime-web@{port}`     | Port number | HTTP servers    |
+| `--worker`    | `onetime-worker@{id}`    | Name/number | Background jobs |
 | `--scheduler` | `onetime-scheduler@{id}` | Name/number | Scheduled tasks |
 
 ### Managing OTS Containers

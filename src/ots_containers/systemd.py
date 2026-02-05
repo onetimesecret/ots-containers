@@ -25,7 +25,14 @@ def discover_web_instances(running_only: bool = False) -> list[int]:
                       If False (default), return all loaded units regardless of state.
     """
     result = subprocess.run(
-        ["systemctl", "list-units", "onetime-web@*", "--plain", "--no-legend", "--all"],
+        [
+            "systemctl",
+            "list-units",
+            "onetime-web@*",
+            "--plain",
+            "--no-legend",
+            "--all",
+        ],
         capture_output=True,
         text=True,
     )
@@ -59,7 +66,14 @@ def discover_worker_instances(running_only: bool = False) -> list[str]:
                       If False (default), return all loaded units regardless of state.
     """
     result = subprocess.run(
-        ["systemctl", "list-units", "onetime-worker@*", "--plain", "--no-legend", "--all"],
+        [
+            "systemctl",
+            "list-units",
+            "onetime-worker@*",
+            "--plain",
+            "--no-legend",
+            "--all",
+        ],
         capture_output=True,
         text=True,
     )
@@ -94,7 +108,14 @@ def discover_scheduler_instances(running_only: bool = False) -> list[str]:
                       If False (default), return all loaded units regardless of state.
     """
     result = subprocess.run(
-        ["systemctl", "list-units", "onetime-scheduler@*", "--plain", "--no-legend", "--all"],
+        [
+            "systemctl",
+            "list-units",
+            "onetime-scheduler@*",
+            "--plain",
+            "--no-legend",
+            "--all",
+        ],
         capture_output=True,
         text=True,
     )

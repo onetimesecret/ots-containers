@@ -1,4 +1,5 @@
 # src/ots_containers/commands/init.py
+
 """Init command for idempotent setup of ots-containers.
 
 Creates required directories and initializes the deployment database.
@@ -157,7 +158,11 @@ def init(
         print("\nSystem Configuration:")
     quadlet_dir = cfg.web_template_path.parent
     users_dir = quadlet_dir / "users"
-    template_paths = [cfg.web_template_path, cfg.worker_template_path, cfg.scheduler_template_path]
+    template_paths = [
+        cfg.web_template_path,
+        cfg.worker_template_path,
+        cfg.scheduler_template_path,
+    ]
     if check:
         for template_path in template_paths:
             if template_path.exists():

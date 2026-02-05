@@ -11,7 +11,10 @@ from pathlib import Path
 
 from . import systemd
 from .config import Config
-from .environment_file import generate_quadlet_secret_lines, get_secrets_from_env_file
+from .environment_file import (
+    generate_quadlet_secret_lines,
+    get_secrets_from_env_file,
+)
 
 # Default environment file path
 DEFAULT_ENV_FILE = Path("/etc/default/onetimesecret")

@@ -1,4 +1,5 @@
 # src/ots_containers/commands/image/app.py
+
 """Image management commands for OTS containers.
 
 Supports pulling from multiple registries:

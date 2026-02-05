@@ -1,4 +1,5 @@
 # src/ots_containers/commands/proxy/app.py
+
 """Proxy management commands for OTS containers.
 
 These commands manage the reverse proxy (Caddy) configuration using HOST
@@ -15,7 +16,12 @@ import cyclopts
 from ots_containers.config import Config
 
 from ..common import DryRun
-from ._helpers import ProxyError, reload_caddy, render_template, validate_caddy_config
+from ._helpers import (
+    ProxyError,
+    reload_caddy,
+    render_template,
+    validate_caddy_config,
+)
 
 app = cyclopts.App(
     name="proxy",

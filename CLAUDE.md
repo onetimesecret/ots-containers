@@ -48,6 +48,7 @@ When running git commands with long output, use `git --no-pager diff` etc.
 ## Architecture
 
 This is a dual-purpose service orchestration tool:
+
 1. **Container management**: OneTimeSecret containers via Podman Quadlets (systemd integration)
 2. **Service management**: Native systemd services for dependencies (Valkey, Redis)
 
@@ -63,17 +64,20 @@ This is a dual-purpose service orchestration tool:
 ### Commands (`src/ots_containers/commands/`)
 
 #### Container Commands
+
 - **instance.py** - Main operations: `deploy`, `redeploy`, `undeploy`, `start`, `stop`, `restart`, `status`, `logs`, `list`
 - **assets.py** - `sync` command for static asset updates
 - **image.py** - Container image management
 - **proxy.py** - Caddy reverse proxy configuration
 
 #### Service Commands (`service/`)
+
 - **app.py** - Service lifecycle: `init`, `start`, `stop`, `restart`, `status`, `logs`, `enable`, `disable`, `list_instances`
 - **packages.py** - Service package definitions: `VALKEY`, `REDIS` with config paths, secrets handling, systemd templates
-- **_helpers.py** - Shared utilities: config file management, secrets creation, systemctl wrappers
+- **\_helpers.py** - Shared utilities: config file management, secrets creation, systemctl wrappers
 
 #### Cloud-Init Commands (`cloudinit/`)
+
 - **app.py** - Cloud-init generation: `generate`, `validate`
 - **templates.py** - DEB822-style apt sources templates for Debian 13 (Trixie), PostgreSQL, and Valkey repositories
 
@@ -87,6 +91,6 @@ This is a dual-purpose service orchestration tool:
 - **Service secrets separation**: Sensitive data in separate files with restricted permissions (mode 0640, owned by service user)
 - **Package-provided templates**: Uses existing systemd templates (`valkey-server@.service`) rather than creating custom units
 - ## Verification
-Don't invent technical rationales. When working with runtime behavior, get or
-ask for actual output (podman ps, systemctl status, etc.) before changing code.
-Documentation and memories are not substitutes for verified information.
+  Don't invent technical rationales. When working with runtime behavior, get or
+  ask for actual output (podman ps, systemctl status, etc.) before changing code.
+  Documentation and memories are not substitutes for verified information.

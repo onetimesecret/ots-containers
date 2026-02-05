@@ -1,4 +1,5 @@
 # src/ots_containers/commands/instance/annotations.py
+
 """Type annotations for instance commands.
 
 Instance types:

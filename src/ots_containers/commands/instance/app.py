@@ -1,4 +1,5 @@
 # src/ots_containers/commands/instance/app.py
+
 """Instance management app and commands for OTS containers."""
 
 import subprocess
@@ -273,7 +274,12 @@ def run(
             # Secrets
             secret_specs = get_secrets_from_env_file(env_file)
             for spec in secret_specs:
-                cmd.extend(["--secret", f"{spec.secret_name},type=env,target={spec.env_var_name}"])
+                cmd.extend(
+                    [
+                        "--secret",
+                        f"{spec.secret_name},type=env,target={spec.env_var_name}",
+                    ]
+                )
 
         # Volumes
         cmd.extend(["-v", f"{cfg.config_dir}:/app/etc:ro"])

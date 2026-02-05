@@ -1,4 +1,5 @@
 # src/ots_containers/commands/service/packages.py
+
 """Service package registry for systemd template services.
 
 Defines ServicePackage and SecretConfig dataclasses that describe how to

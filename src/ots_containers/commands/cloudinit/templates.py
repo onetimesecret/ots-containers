@@ -1,4 +1,5 @@
 # src/ots_containers/commands/cloudinit/templates.py
+
 """Cloud-init configuration templates with Debian 13 DEB822 apt sources."""
 
 
