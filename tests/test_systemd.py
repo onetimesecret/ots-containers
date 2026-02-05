@@ -6,6 +6,12 @@ import subprocess
 import pytest
 
 
+@pytest.fixture(autouse=True)
+def mock_systemctl_available(mocker):
+    """Mock shutil.which to report systemctl as available for all tests."""
+    mocker.patch("shutil.which", return_value="/usr/bin/systemctl")
+
+
 class TestUnitName:
     """Test unit_name helper function."""
 

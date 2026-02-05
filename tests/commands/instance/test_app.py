@@ -13,6 +13,12 @@ from ots_containers.commands.instance._helpers import format_command
 from ots_containers.commands.instance.annotations import InstanceType
 
 
+@pytest.fixture(autouse=True)
+def mock_systemctl_available(mocker):
+    """Mock shutil.which to report systemctl as available for all tests."""
+    mocker.patch("shutil.which", return_value="/usr/bin/systemctl")
+
+
 class TestFormatCommand:
     """Test command formatting for copy-paste usage."""
 

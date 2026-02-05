@@ -1,7 +1,36 @@
 # src/ots_containers/systemd.py
 
 import re
+import shutil
 import subprocess
+import sys
+
+
+class SystemdNotAvailableError(Exception):
+    """Raised when systemd/systemctl is not available on the system."""
+
+    pass
+
+
+def require_systemctl() -> None:
+    """Check that systemctl is available, exit with helpful message if not.
+
+    Call this at the start of any function that requires systemd.
+    """
+    if not shutil.which("systemctl"):
+        print(
+            "Error: systemctl not found. Instance management requires Linux with systemd.",
+            file=sys.stderr,
+        )
+        print(
+            "\nThis command manages containers via systemd Quadlets and is not available on macOS.",
+            file=sys.stderr,
+        )
+        print(
+            "For local development, use 'podman run' or 'docker compose' directly.",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
 
 
 def unit_name(instance_type: str, identifier: str) -> str:
@@ -24,6 +53,7 @@ def discover_web_instances(running_only: bool = False) -> list[int]:
         running_only: If True, only return units that are active and running.
                       If False (default), return all loaded units regardless of state.
     """
+    require_systemctl()
     result = subprocess.run(
         [
             "systemctl",
@@ -65,6 +95,7 @@ def discover_worker_instances(running_only: bool = False) -> list[str]:
         running_only: If True, only return units that are active and running.
                       If False (default), return all loaded units regardless of state.
     """
+    require_systemctl()
     result = subprocess.run(
         [
             "systemctl",
@@ -107,6 +138,7 @@ def discover_scheduler_instances(running_only: bool = False) -> list[str]:
         running_only: If True, only return units that are active and running.
                       If False (default), return all loaded units regardless of state.
     """
+    require_systemctl()
     result = subprocess.run(
         [
             "systemctl",
@@ -141,24 +173,28 @@ def discover_scheduler_instances(running_only: bool = False) -> list[str]:
 
 
 def daemon_reload() -> None:
+    require_systemctl()
     cmd = ["sudo", "systemctl", "daemon-reload"]
     print(f"  $ {' '.join(cmd)}")
     subprocess.run(cmd, check=True)
 
 
 def start(unit: str) -> None:
+    require_systemctl()
     cmd = ["sudo", "systemctl", "start", unit]
     print(f"  $ {' '.join(cmd)}")
     subprocess.run(cmd, check=True)
 
 
 def stop(unit: str) -> None:
+    require_systemctl()
     cmd = ["sudo", "systemctl", "stop", unit]
     print(f"  $ {' '.join(cmd)}")
     subprocess.run(cmd, check=True)
 
 
 def restart(unit: str) -> None:
+    require_systemctl()
     cmd = ["sudo", "systemctl", "restart", unit]
     print(f"  $ {' '.join(cmd)}")
     subprocess.run(cmd, check=True)
@@ -188,6 +224,7 @@ def recreate(unit: str) -> None:
     preserves stopped containers. Without removal, start just restarts
     the existing container with its old configuration.
     """
+    require_systemctl()
     # Stop the systemd unit
     stop_cmd = ["sudo", "systemctl", "stop", unit]
     print(f"  $ {' '.join(stop_cmd)}")
@@ -206,6 +243,7 @@ def recreate(unit: str) -> None:
 
 
 def status(unit: str, lines: int = 25) -> None:
+    require_systemctl()
     cmd = ["sudo", "systemctl", "--no-pager", f"-n{lines}", "status", unit]
     print(f"  $ {' '.join(cmd)}")
     subprocess.run(
@@ -216,6 +254,7 @@ def status(unit: str, lines: int = 25) -> None:
 
 def unit_exists(unit: str) -> bool:
     """Check if a systemd unit exists (loaded or not)."""
+    require_systemctl()
     result = subprocess.run(
         ["systemctl", "list-unit-files", unit, "--plain", "--no-legend"],
         capture_output=True,
