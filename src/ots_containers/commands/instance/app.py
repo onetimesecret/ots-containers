@@ -64,9 +64,14 @@ def _list_instances_impl(
                 )
                 status = result.stdout.strip()
 
-                # Get deployment info (only for web instances with port)
-                port = int(id_) if inst_type == InstanceType.WEB else 0
-                deployments = db.get_deployments(cfg.db_path, limit=1, port=port) if port else []
+                # Get deployment info
+                if inst_type == InstanceType.WEB:
+                    deployments = db.get_deployments(cfg.db_path, limit=1, port=int(id_))
+                else:
+                    # Worker/scheduler: query by notes containing instance ID
+                    deployments = db.get_deployments(
+                        cfg.db_path, limit=1, notes_like=f"%{inst_type.value}_id={id_}%"
+                    )
                 if deployments:
                     dep = deployments[0]
                     output.append(
@@ -120,9 +125,14 @@ def _list_instances_impl(
             )
             status = result.stdout.strip()
 
-            # Get last deployment from database (only for web instances)
-            port = int(id_) if inst_type == InstanceType.WEB else 0
-            deployments = db.get_deployments(cfg.db_path, limit=1, port=port) if port else []
+            # Get last deployment from database
+            if inst_type == InstanceType.WEB:
+                deployments = db.get_deployments(cfg.db_path, limit=1, port=int(id_))
+            else:
+                # Worker/scheduler: query by notes containing instance ID
+                deployments = db.get_deployments(
+                    cfg.db_path, limit=1, notes_like=f"%{inst_type.value}_id={id_}%"
+                )
             if deployments:
                 dep = deployments[0]
                 image_tag = f"{dep.image}:{dep.tag}"
