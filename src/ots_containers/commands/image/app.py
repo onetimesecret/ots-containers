@@ -61,6 +61,13 @@ def pull(
             help="Pull from private registry (uses configured OTS_REGISTRY)",
         ),
     ] = False,
+    platform: Annotated[
+        str | None,
+        cyclopts.Parameter(
+            name=["--platform", "-p"],
+            help="Target platform (e.g., linux/amd64, linux/arm64)",
+        ),
+    ] = None,
     quiet: Quiet = False,
 ):
     """Pull a container image from registry.
@@ -70,6 +77,8 @@ def pull(
         ots image pull --tag latest --current
         ots image pull --tag v0.23.0 --image docker.io/onetimesecret/onetimesecret
         ots image pull --tag v0.23.0 --private  # Pull from private registry
+        ots image pull --tag dev --platform linux/amd64  # Pull amd64 on Apple Silicon
+        ots image pull --tag latest -p linux/arm64  # Pull arm64 image
     """
     cfg = Config()
 
@@ -87,13 +96,16 @@ def pull(
 
     try:
         # Use auth file for authenticated registries
-        podman.pull(
-            full_image,
-            authfile=str(cfg.registry_auth_file),
-            check=True,
-            capture_output=True,
-            text=True,
-        )
+        pull_kwargs = {
+            "authfile": str(cfg.registry_auth_file),
+            "check": True,
+            "capture_output": True,
+            "text": True,
+        }
+        if platform:
+            pull_kwargs["platform"] = platform
+
+        podman.pull(full_image, **pull_kwargs)
         if not quiet:
             print(f"Successfully pulled {full_image}")
     except Exception as e:
