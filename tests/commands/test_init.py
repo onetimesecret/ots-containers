@@ -199,9 +199,11 @@ class TestInitCommand:
 
         result = init(check=True)
 
-        assert result == 1  # Missing components
+        assert result == 1  # Missing components (quadlet, var_dir)
         captured = capsys.readouterr()
         assert "[missing]" in captured.out
+        # Config files are now optional, so they show [optional]
+        assert "[optional]" in captured.out
         assert "Missing components" in captured.out
         # Directories should NOT be created
         assert not mock_config.config_dir.exists()
@@ -304,13 +306,15 @@ class TestInitCommand:
         assert "Initialization complete" in captured.out
 
     def test_copies_templates_from_source(self, tmp_path, mocker, capsys):
-        """Init should copy config.yaml when --source provided."""
+        """Init should copy all CONFIG_FILES when --source provided."""
         from ots_containers.commands.init import init
 
-        # Create source directory with templates
+        # Create source directory with all config file templates
         source_dir = tmp_path / "source"
         source_dir.mkdir()
         (source_dir / "config.yaml").write_text("site: example")
+        (source_dir / "auth.yaml").write_text("auth: basic")
+        (source_dir / "logging.yaml").write_text("level: info")
 
         # Create target structure
         config_dir = tmp_path / "etc" / "onetimesecret"
@@ -333,10 +337,59 @@ class TestInitCommand:
         result = init(source_dir=source_dir, quiet=False)
 
         assert result == 0
-        assert mock_config.config_yaml.exists()
-        assert mock_config.config_yaml.read_text() == "site: example"
+        # All three CONFIG_FILES should be copied
+        assert (config_dir / "config.yaml").exists()
+        assert (config_dir / "config.yaml").read_text() == "site: example"
+        assert (config_dir / "auth.yaml").exists()
+        assert (config_dir / "auth.yaml").read_text() == "auth: basic"
+        assert (config_dir / "logging.yaml").exists()
+        assert (config_dir / "logging.yaml").read_text() == "level: info"
         captured = capsys.readouterr()
         assert "[copied]" in captured.out
+
+    def test_check_reports_optional_for_missing_config_files(self, tmp_path, mocker, capsys):
+        """Check mode should report [optional] for missing config files."""
+        from ots_containers.commands.init import init
+
+        # Create all directories and deploy db so only config files are missing
+        config_dir = tmp_path / "etc" / "onetimesecret"
+        var_dir = tmp_path / "var" / "lib" / "onetimesecret"
+        quadlet_dir = tmp_path / "etc" / "containers" / "systemd"
+        users_dir = quadlet_dir / "users"
+
+        config_dir.mkdir(parents=True)
+        var_dir.mkdir(parents=True)
+        quadlet_dir.mkdir(parents=True)
+        users_dir.mkdir(parents=True)
+
+        # Create quadlet templates and db so those pass
+        (quadlet_dir / "onetime-web@.container").touch()
+        (quadlet_dir / "onetime-worker@.container").touch()
+        (quadlet_dir / "onetime-scheduler@.container").touch()
+        (var_dir / "deployments.db").touch()
+
+        mock_config = mocker.MagicMock()
+        mock_config.config_dir = config_dir
+        mock_config.var_dir = var_dir
+        mock_config.web_template_path = quadlet_dir / "onetime-web@.container"
+        mock_config.worker_template_path = quadlet_dir / "onetime-worker@.container"
+        mock_config.scheduler_template_path = quadlet_dir / "onetime-scheduler@.container"
+        mock_config.config_yaml = config_dir / "config.yaml"
+        mock_config.db_path = var_dir / "deployments.db"
+
+        mocker.patch("ots_containers.commands.init.Config", return_value=mock_config)
+
+        result = init(check=True)
+
+        # Should still pass because config files are optional
+        assert result == 0
+        captured = capsys.readouterr()
+        # Each missing config file should show [optional]
+        assert captured.out.count("[optional]") >= 3
+        assert "config.yaml" in captured.out
+        assert "auth.yaml" in captured.out
+        assert "logging.yaml" in captured.out
+        assert "All components present" in captured.out
 
     def test_database_permission_error_handled(self, tmp_path, mocker, capsys):
         """Database creation permission errors should be handled gracefully."""

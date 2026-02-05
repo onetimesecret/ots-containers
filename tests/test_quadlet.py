@@ -106,12 +106,17 @@ class TestContainerTemplate:
         assert "PodmanArgs=--log-opt tag=onetime-web-%i" in content
 
     def test_write_web_template_includes_volumes(self, mocker, tmp_path):
-        """Container quadlet should mount config directory and static assets."""
+        """Container quadlet should mount per-file config volumes and static assets."""
         mocker.patch("ots_containers.quadlet.systemd.daemon_reload")
         from ots_containers import quadlet
         from ots_containers.config import Config
 
         config_dir = tmp_path / "etc"
+        config_dir.mkdir()
+        (config_dir / "config.yaml").touch()
+        (config_dir / "auth.yaml").touch()
+        (config_dir / "logging.yaml").touch()
+
         cfg = Config(
             web_template_path=tmp_path / "onetime-web@.container",
             config_dir=config_dir,
@@ -121,8 +126,10 @@ class TestContainerTemplate:
         quadlet.write_web_template(cfg)
 
         content = cfg.web_template_path.read_text()
-        # Mounts entire config directory (not just config.yaml)
-        assert f"Volume={config_dir}:/app/etc:ro" in content
+        # Per-file volume mounts for each config file
+        assert f"Volume={config_dir}/config.yaml:/app/etc/config.yaml:ro" in content
+        assert f"Volume={config_dir}/auth.yaml:/app/etc/auth.yaml:ro" in content
+        assert f"Volume={config_dir}/logging.yaml:/app/etc/logging.yaml:ro" in content
         assert "Volume=static_assets:/app/public:ro" in content
 
     def test_write_web_template_includes_podman_secrets_from_env_file(self, mocker, tmp_path):
@@ -236,6 +243,27 @@ class TestContainerTemplate:
         quadlet.write_web_template(cfg)
 
         mock_reload.assert_called_once()
+
+    def test_write_web_template_no_config_shows_defaults_comment(self, mocker, tmp_path):
+        """Container quadlet should show defaults comment when no config files exist."""
+        mocker.patch("ots_containers.quadlet.systemd.daemon_reload")
+        from ots_containers import quadlet
+        from ots_containers.config import Config
+
+        cfg = Config(
+            web_template_path=tmp_path / "onetime-web@.container",
+            config_dir=tmp_path / "nonexistent_config",
+            var_dir=tmp_path / "var",
+        )
+
+        quadlet.write_web_template(cfg)
+
+        content = cfg.web_template_path.read_text()
+        assert "built-in defaults" in content
+        # No per-file config Volume lines
+        for line in content.splitlines():
+            if "Volume=" in line and "/app/etc" in line:
+                assert False, f"Unexpected config volume line: {line}"
 
 
 class TestWorkerTemplate:
@@ -405,12 +433,17 @@ class TestWorkerTemplate:
         assert "EnvironmentFile=/etc/default/onetimesecret" in content
 
     def test_write_worker_template_includes_config_volume(self, mocker, tmp_path):
-        """Worker quadlet should mount config directory."""
+        """Worker quadlet should mount per-file config volumes."""
         mocker.patch("ots_containers.quadlet.systemd.daemon_reload")
         from ots_containers import quadlet
         from ots_containers.config import Config
 
         config_dir = tmp_path / "etc"
+        config_dir.mkdir()
+        (config_dir / "config.yaml").touch()
+        (config_dir / "auth.yaml").touch()
+        (config_dir / "logging.yaml").touch()
+
         cfg = Config(
             worker_template_path=tmp_path / "onetime-worker@.container",
             config_dir=config_dir,
@@ -420,7 +453,9 @@ class TestWorkerTemplate:
         quadlet.write_worker_template(cfg)
 
         content = cfg.worker_template_path.read_text()
-        assert f"Volume={config_dir}:/app/etc:ro" in content
+        assert f"Volume={config_dir}/config.yaml:/app/etc/config.yaml:ro" in content
+        assert f"Volume={config_dir}/auth.yaml:/app/etc/auth.yaml:ro" in content
+        assert f"Volume={config_dir}/logging.yaml:/app/etc/logging.yaml:ro" in content
 
     def test_write_worker_template_includes_secrets(self, mocker, tmp_path):
         """Worker quadlet should include Secret= directives from env file."""
@@ -461,6 +496,26 @@ class TestWorkerTemplate:
         quadlet.write_worker_template(cfg)
 
         mock_reload.assert_called_once()
+
+    def test_write_worker_template_no_config_shows_defaults_comment(self, mocker, tmp_path):
+        """Worker quadlet should show defaults comment when no config files exist."""
+        mocker.patch("ots_containers.quadlet.systemd.daemon_reload")
+        from ots_containers import quadlet
+        from ots_containers.config import Config
+
+        cfg = Config(
+            worker_template_path=tmp_path / "onetime-worker@.container",
+            config_dir=tmp_path / "nonexistent_config",
+            var_dir=tmp_path / "var",
+        )
+
+        quadlet.write_worker_template(cfg)
+
+        content = cfg.worker_template_path.read_text()
+        assert "built-in defaults" in content
+        for line in content.splitlines():
+            if "Volume=" in line and "/app/etc" in line:
+                assert False, f"Unexpected config volume line: {line}"
 
 
 class TestSchedulerTemplate:
@@ -646,12 +701,17 @@ class TestSchedulerTemplate:
         assert "EnvironmentFile=/etc/default/onetimesecret" in content
 
     def test_write_scheduler_template_includes_config_volume(self, mocker, tmp_path):
-        """Scheduler quadlet should mount config directory."""
+        """Scheduler quadlet should mount per-file config volumes."""
         mocker.patch("ots_containers.quadlet.systemd.daemon_reload")
         from ots_containers import quadlet
         from ots_containers.config import Config
 
         config_dir = tmp_path / "etc"
+        config_dir.mkdir()
+        (config_dir / "config.yaml").touch()
+        (config_dir / "auth.yaml").touch()
+        (config_dir / "logging.yaml").touch()
+
         cfg = Config(
             scheduler_template_path=tmp_path / "onetime-scheduler@.container",
             config_dir=config_dir,
@@ -661,7 +721,9 @@ class TestSchedulerTemplate:
         quadlet.write_scheduler_template(cfg)
 
         content = cfg.scheduler_template_path.read_text()
-        assert f"Volume={config_dir}:/app/etc:ro" in content
+        assert f"Volume={config_dir}/config.yaml:/app/etc/config.yaml:ro" in content
+        assert f"Volume={config_dir}/auth.yaml:/app/etc/auth.yaml:ro" in content
+        assert f"Volume={config_dir}/logging.yaml:/app/etc/logging.yaml:ro" in content
 
     def test_write_scheduler_template_includes_podman_secrets(self, mocker, tmp_path):
         """Scheduler quadlet should include Secret directives from env file."""
@@ -717,3 +779,83 @@ class TestSchedulerTemplate:
         quadlet.write_scheduler_template(cfg)
 
         mock_reload.assert_called_once()
+
+    def test_write_scheduler_template_no_config_shows_defaults_comment(self, mocker, tmp_path):
+        """Scheduler quadlet should show defaults comment when no config files exist."""
+        mocker.patch("ots_containers.quadlet.systemd.daemon_reload")
+        from ots_containers import quadlet
+        from ots_containers.config import Config
+
+        cfg = Config(
+            scheduler_template_path=tmp_path / "onetime-scheduler@.container",
+            config_dir=tmp_path / "nonexistent_config",
+            var_dir=tmp_path / "var",
+        )
+
+        quadlet.write_scheduler_template(cfg)
+
+        content = cfg.scheduler_template_path.read_text()
+        assert "built-in defaults" in content
+        for line in content.splitlines():
+            if "Volume=" in line and "/app/etc" in line:
+                assert False, f"Unexpected config volume line: {line}"
+
+
+class TestGetConfigVolumesSection:
+    """Test get_config_volumes_section function."""
+
+    def test_no_files_returns_defaults_comment(self, tmp_path):
+        """Should return defaults comment when no config files exist."""
+        from ots_containers.config import Config
+        from ots_containers.quadlet import get_config_volumes_section
+
+        cfg = Config(
+            config_dir=tmp_path / "nonexistent_dir",
+            var_dir=tmp_path / "var",
+        )
+
+        result = get_config_volumes_section(cfg)
+        assert "built-in defaults" in result
+        assert "Volume=" not in result
+
+    def test_all_files_returns_volume_lines(self, tmp_path):
+        """Should return Volume lines for all 3 config files when present."""
+        from ots_containers.config import Config
+        from ots_containers.quadlet import get_config_volumes_section
+
+        config_dir = tmp_path / "etc"
+        config_dir.mkdir()
+        (config_dir / "config.yaml").touch()
+        (config_dir / "auth.yaml").touch()
+        (config_dir / "logging.yaml").touch()
+
+        cfg = Config(
+            config_dir=config_dir,
+            var_dir=tmp_path / "var",
+        )
+
+        result = get_config_volumes_section(cfg)
+        assert f"Volume={config_dir}/config.yaml:/app/etc/config.yaml:ro" in result
+        assert f"Volume={config_dir}/auth.yaml:/app/etc/auth.yaml:ro" in result
+        assert f"Volume={config_dir}/logging.yaml:/app/etc/logging.yaml:ro" in result
+
+    def test_subset_of_files(self, tmp_path):
+        """Should return Volume lines only for files that exist."""
+        from ots_containers.config import Config
+        from ots_containers.quadlet import get_config_volumes_section
+
+        config_dir = tmp_path / "etc"
+        config_dir.mkdir()
+        (config_dir / "config.yaml").touch()
+        (config_dir / "auth.yaml").touch()
+        # logging.yaml intentionally not created
+
+        cfg = Config(
+            config_dir=config_dir,
+            var_dir=tmp_path / "var",
+        )
+
+        result = get_config_volumes_section(cfg)
+        assert f"Volume={config_dir}/config.yaml:/app/etc/config.yaml:ro" in result
+        assert f"Volume={config_dir}/auth.yaml:/app/etc/auth.yaml:ro" in result
+        assert "logging.yaml" not in result

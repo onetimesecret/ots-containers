@@ -24,19 +24,17 @@ class TestAssetsCommandImports:
 class TestAssetsSyncCommand:
     """Test assets sync command execution."""
 
-    def test_sync_validates_config(self, mocker):
-        """sync should validate config before proceeding."""
+    def test_sync_proceeds_without_validation(self, mocker):
+        """sync should call assets_module.update without config validation."""
         from ots_containers.commands import assets
 
-        mock_validate = mocker.patch(
-            "ots_containers.commands.assets.Config.validate",
-            side_effect=SystemExit("Missing required files"),
-        )
+        mock_config = mocker.MagicMock()
+        mocker.patch("ots_containers.commands.assets.Config", return_value=mock_config)
+        mock_update = mocker.patch("ots_containers.commands.assets.assets_module.update")
 
-        with pytest.raises(SystemExit):
-            assets.sync()
+        assets.sync()
 
-        mock_validate.assert_called_once()
+        mock_update.assert_called_once_with(mock_config, create_volume=False)
 
     def test_sync_calls_assets_update(self, mocker):
         """sync should call assets_module.update."""

@@ -325,8 +325,9 @@ def run(
                     ]
                 )
 
-        # Volumes
-        cmd.extend(["-v", f"{cfg.config_dir}:/app/etc:ro"])
+        # Config overrides (per-file)
+        for f in cfg.existing_config_files:
+            cmd.extend(["-v", f"{f}:/app/etc/{f.name}:ro"])
         cmd.extend(["-v", "static_assets:/app/public:ro"])
 
         # Auth file for private registry
@@ -391,13 +392,16 @@ def deploy(
         raise SystemExit("Instance type required for deploy. Use --web, --worker, or --scheduler.")
 
     cfg = Config()
-    cfg.validate()
 
     # Resolve image/tag (handles CURRENT/ROLLBACK aliases)
     image, tag = cfg.resolve_image_tag()
     if not quiet:
         print(f"Image: {image}:{tag}")
-        print(f"Reading config from {cfg.config_yaml}")
+        if cfg.has_custom_config:
+            mounted = [f.name for f in cfg.existing_config_files]
+            print(f"Config overrides: {', '.join(mounted)}")
+        else:
+            print("Config: using container built-in defaults")
 
     if dry_run:
         print(f"[dry-run] Would deploy {itype.value}: {', '.join(identifiers)}")
@@ -489,13 +493,16 @@ def redeploy(
         return
 
     cfg = Config()
-    cfg.validate()
 
     # Resolve image/tag (handles CURRENT/ROLLBACK aliases)
     image, tag = cfg.resolve_image_tag()
     if not quiet:
         print(f"Image: {image}:{tag}")
-        print(f"Reading config from {cfg.config_yaml}")
+        if cfg.has_custom_config:
+            mounted = [f.name for f in cfg.existing_config_files]
+            print(f"Config overrides: {', '.join(mounted)}")
+        else:
+            print("Config: using container built-in defaults")
 
     if dry_run:
         verb = "force redeploy" if force else "redeploy"
@@ -1068,10 +1075,10 @@ def shell(
     else:
         cmd.extend(["--tmpfs", "/app/data"])
 
-    # Config directory (always read-only)
-    # Resolve symlinks for podman VM compatibility (macOS)
-    config_dir = cfg.config_dir.resolve()
-    cmd.extend(["-v", f"{config_dir}:/app/etc:ro"])
+    # Config overrides (per-file, if any exist on host)
+    for f in cfg.existing_config_files:
+        resolved = f.resolve()  # symlink resolution for macOS podman VM
+        cmd.extend(["-v", f"{resolved}:/app/etc/{f.name}:ro"])
 
     # Image
     cmd.append(full_image)

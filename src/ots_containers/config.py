@@ -8,13 +8,17 @@ from pathlib import Path
 DEFAULT_IMAGE = "ghcr.io/onetimesecret/onetimesecret"
 DEFAULT_TAG = "current"
 
+# Config files that ship as defaults in the container image (etc/defaults/*.defaults.yaml).
+# Only files present on the host override the container's built-in defaults.
+CONFIG_FILES: tuple[str, ...] = ("config.yaml", "auth.yaml", "logging.yaml")
+
 
 @dataclass
 class Config:
     """FHS-compliant configuration paths.
 
     Directory layout:
-        /etc/onetimesecret/          - YAML configs mounted as /app/etc:ro
+        /etc/onetimesecret/          - YAML config overrides (per-file mount, optional)
         /etc/default/onetimesecret   - Infrastructure env vars (REDIS_URL, etc.)
         /var/lib/onetimesecret/      - Variable runtime data (deployments.db)
         /etc/containers/systemd/     - Quadlet unit files
@@ -125,13 +129,22 @@ class Config:
         user_dir = xdg_data / "ots-containers"
         return user_dir / "deployments.db"
 
+    @property
+    def existing_config_files(self) -> list[Path]:
+        """Host config files that exist and should be mounted into the container.
+
+        Only files present on the host override the container's built-in defaults.
+        """
+        return [self.config_dir / f for f in CONFIG_FILES if (self.config_dir / f).exists()]
+
+    @property
+    def has_custom_config(self) -> bool:
+        """Whether any host config files exist to mount."""
+        return len(self.existing_config_files) > 0
+
     def validate(self) -> None:
-        required = [
-            self.config_yaml,
-        ]
-        missing = [f for f in required if not f.exists()]
-        if missing:
-            raise SystemExit(f"Missing required files: {missing}")
+        """Validate configuration. Config files are optional (container has defaults)."""
+        pass
 
     def resolve_image_tag(self) -> tuple[str, str]:
         """Resolve image and tag, checking database aliases if tag is an alias.

@@ -27,6 +27,7 @@ class TestShellCommand:
         mock_config.tag = "current"
         mock_config.config_dir = tmp_path / "etc"
         mock_config.config_dir.mkdir()
+        mock_config.existing_config_files = []
         mocker.patch("ots_containers.commands.instance.app.Config", return_value=mock_config)
 
         # Mock env file not existing
@@ -62,6 +63,7 @@ class TestShellCommand:
         mock_config.tag = "current"
         mock_config.config_dir = tmp_path / "etc"
         mock_config.config_dir.mkdir()
+        mock_config.existing_config_files = []
         mocker.patch("ots_containers.commands.instance.app.Config", return_value=mock_config)
 
         # Mock env file not existing
@@ -97,6 +99,7 @@ class TestShellCommand:
         mock_config.tag = "current"
         mock_config.config_dir = tmp_path / "etc"
         mock_config.config_dir.mkdir()
+        mock_config.existing_config_files = []
         mocker.patch("ots_containers.commands.instance.app.Config", return_value=mock_config)
 
         # Create env file with secrets
@@ -138,6 +141,7 @@ class TestShellCommand:
         mock_config.tag = "current"
         mock_config.config_dir = tmp_path / "etc"
         mock_config.config_dir.mkdir()
+        mock_config.existing_config_files = []
         mocker.patch("ots_containers.commands.instance.app.Config", return_value=mock_config)
 
         # Create env file
@@ -162,12 +166,18 @@ class TestShellCommand:
         assert str(env_file) == cmd[env_idx + 1]
 
     def test_shell_mounts_config_readonly(self, mocker, tmp_path):
-        """shell should mount config directory read-only."""
+        """shell should mount individual config files read-only."""
         # Mock Config
         mock_config = mocker.MagicMock()
         mock_config.tag = "current"
         mock_config.config_dir = tmp_path / "etc"
         mock_config.config_dir.mkdir()
+
+        # Create a config file so existing_config_files returns it
+        config_yaml = mock_config.config_dir / "config.yaml"
+        config_yaml.touch()
+        mock_config.existing_config_files = [config_yaml]
+
         mocker.patch("ots_containers.commands.instance.app.Config", return_value=mock_config)
 
         # Mock env file not existing
@@ -183,10 +193,38 @@ class TestShellCommand:
         # Call shell command
         instance.shell(quiet=True)
 
-        # Verify config mount
+        # Verify per-file config mount
         cmd = mock_run.call_args[0][0]
         cmd_str = " ".join(cmd)
-        assert f"{mock_config.config_dir}:/app/etc:ro" in cmd_str
+        assert "config.yaml:/app/etc/config.yaml:ro" in cmd_str
+
+    def test_shell_no_config_files_no_mount(self, mocker, tmp_path):
+        """shell should not mount config when no config files exist."""
+        # Mock Config
+        mock_config = mocker.MagicMock()
+        mock_config.tag = "current"
+        mock_config.config_dir = tmp_path / "etc"
+        mock_config.config_dir.mkdir()
+        mock_config.existing_config_files = []
+        mocker.patch("ots_containers.commands.instance.app.Config", return_value=mock_config)
+
+        # Mock env file not existing
+        mocker.patch(
+            "ots_containers.commands.instance.app.quadlet.DEFAULT_ENV_FILE",
+            tmp_path / "nonexistent",
+        )
+
+        # Mock subprocess.run
+        mock_run = mocker.patch("subprocess.run")
+        mock_run.return_value = subprocess.CompletedProcess([], 0)
+
+        # Call shell command
+        instance.shell(quiet=True)
+
+        # Verify no config volume mounts (no -v args containing /app/etc)
+        cmd = mock_run.call_args[0][0]
+        cmd_str = " ".join(cmd)
+        assert "/app/etc" not in cmd_str
 
     def test_shell_runs_command_with_bash_c(self, mocker, tmp_path):
         """shell -c should run command via bash -c."""
@@ -195,6 +233,7 @@ class TestShellCommand:
         mock_config.tag = "current"
         mock_config.config_dir = tmp_path / "etc"
         mock_config.config_dir.mkdir()
+        mock_config.existing_config_files = []
         mocker.patch("ots_containers.commands.instance.app.Config", return_value=mock_config)
 
         # Mock env file not existing
@@ -225,6 +264,7 @@ class TestShellCommand:
         mock_config.tag = "current"
         mock_config.config_dir = tmp_path / "etc"
         mock_config.config_dir.mkdir()
+        mock_config.existing_config_files = []
         mocker.patch("ots_containers.commands.instance.app.Config", return_value=mock_config)
 
         # Mock env file not existing
@@ -252,6 +292,7 @@ class TestShellCommand:
         mock_config.tag = "v0.24.0"
         mock_config.config_dir = tmp_path / "etc"
         mock_config.config_dir.mkdir()
+        mock_config.existing_config_files = []
         mocker.patch("ots_containers.commands.instance.app.Config", return_value=mock_config)
 
         # Mock env file not existing
@@ -281,6 +322,7 @@ class TestShellCommand:
         mock_config.image = "ghcr.io/onetimesecret/onetimesecret"
         mock_config.config_dir = tmp_path / "etc"
         mock_config.config_dir.mkdir()
+        mock_config.existing_config_files = []
         mock_config.resolve_image_tag.return_value = (
             "ghcr.io/onetimesecret/onetimesecret",
             "v0.24.0",
@@ -311,6 +353,7 @@ class TestShellCommand:
         mock_config.tag = "current"
         mock_config.config_dir = tmp_path / "etc"
         mock_config.config_dir.mkdir()
+        mock_config.existing_config_files = []
         mocker.patch("ots_containers.commands.instance.app.Config", return_value=mock_config)
 
         # Mock env file not existing
@@ -337,6 +380,7 @@ class TestShellCommand:
         mock_config.tag = "current"
         mock_config.config_dir = tmp_path / "etc"
         mock_config.config_dir.mkdir()
+        mock_config.existing_config_files = []
         mocker.patch("ots_containers.commands.instance.app.Config", return_value=mock_config)
 
         # Mock env file not existing
@@ -362,6 +406,7 @@ class TestShellCommand:
         mock_config.tag = "current"
         mock_config.config_dir = tmp_path / "etc"
         mock_config.config_dir.mkdir()
+        mock_config.existing_config_files = []
         mocker.patch("ots_containers.commands.instance.app.Config", return_value=mock_config)
 
         # Mock env file not existing
@@ -388,6 +433,7 @@ class TestShellCommand:
         mock_config.tag = "current"
         mock_config.config_dir = tmp_path / "etc"
         mock_config.config_dir.mkdir()
+        mock_config.existing_config_files = []
         mocker.patch("ots_containers.commands.instance.app.Config", return_value=mock_config)
 
         # Mock env file not existing

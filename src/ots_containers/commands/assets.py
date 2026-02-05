@@ -26,5 +26,4 @@ def sync(
     on initial setup.
     """
     cfg = Config()
-    cfg.validate()
     assets_module.update(cfg, create_volume=create_volume)

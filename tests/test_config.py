@@ -3,8 +3,6 @@
 
 from pathlib import Path
 
-import pytest
-
 
 class TestConfigDefaults:
     """Test Config dataclass default values."""
@@ -121,16 +119,12 @@ class TestConfigPaths:
 class TestConfigValidate:
     """Test Config.validate method."""
 
-    def test_validate_missing_files_raises(self, tmp_path):
-        """Should raise SystemExit when required files missing."""
+    def test_validate_is_noop(self, tmp_path):
+        """Should not raise even when config files are missing (validate is a no-op)."""
         from ots_containers.config import Config
 
         cfg = Config(config_dir=tmp_path)
-
-        with pytest.raises(SystemExit) as exc_info:
-            cfg.validate()
-
-        assert "Missing required files" in str(exc_info.value)
+        cfg.validate()  # Should not raise
 
     def test_validate_with_all_files(self, tmp_path):
         """Should not raise when all required files exist."""
@@ -141,3 +135,142 @@ class TestConfigValidate:
 
         cfg = Config(config_dir=tmp_path)
         cfg.validate()  # Should not raise
+
+
+class TestConfigFiles:
+    """Test CONFIG_FILES module-level constant."""
+
+    def test_config_files_contains_expected_files(self):
+        """CONFIG_FILES should list the three known config files."""
+        from ots_containers.config import CONFIG_FILES
+
+        assert "config.yaml" in CONFIG_FILES
+        assert "auth.yaml" in CONFIG_FILES
+        assert "logging.yaml" in CONFIG_FILES
+
+    def test_config_files_length(self):
+        """CONFIG_FILES should contain exactly 3 entries."""
+        from ots_containers.config import CONFIG_FILES
+
+        assert len(CONFIG_FILES) == 3
+
+    def test_config_files_is_tuple(self):
+        """CONFIG_FILES should be a tuple (immutable)."""
+        from ots_containers.config import CONFIG_FILES
+
+        assert isinstance(CONFIG_FILES, tuple)
+
+
+class TestExistingConfigFiles:
+    """Test Config.existing_config_files property."""
+
+    def test_returns_empty_when_config_dir_missing(self):
+        """Should return empty list when config_dir does not exist."""
+        from ots_containers.config import Config
+
+        cfg = Config(config_dir=Path("/nonexistent/config/dir"))
+        assert cfg.existing_config_files == []
+
+    def test_returns_empty_when_no_yaml_files(self, tmp_path):
+        """Should return empty list when config_dir exists but has no yaml files."""
+        from ots_containers.config import Config
+
+        config_dir = tmp_path / "etc"
+        config_dir.mkdir()
+
+        cfg = Config(config_dir=config_dir)
+        assert cfg.existing_config_files == []
+
+    def test_returns_only_existing_files(self, tmp_path):
+        """Should return only files that actually exist on disk."""
+        from ots_containers.config import Config
+
+        config_dir = tmp_path / "etc"
+        config_dir.mkdir()
+        (config_dir / "config.yaml").touch()
+        (config_dir / "auth.yaml").touch()
+        # logging.yaml intentionally not created
+
+        cfg = Config(config_dir=config_dir)
+        result = cfg.existing_config_files
+        assert len(result) == 2
+        assert config_dir / "config.yaml" in result
+        assert config_dir / "auth.yaml" in result
+        assert config_dir / "logging.yaml" not in result
+
+    def test_returns_all_three_when_all_exist(self, tmp_path):
+        """Should return all 3 paths when all config files exist."""
+        from ots_containers.config import Config
+
+        config_dir = tmp_path / "etc"
+        config_dir.mkdir()
+        (config_dir / "config.yaml").touch()
+        (config_dir / "auth.yaml").touch()
+        (config_dir / "logging.yaml").touch()
+
+        cfg = Config(config_dir=config_dir)
+        result = cfg.existing_config_files
+        assert len(result) == 3
+        assert config_dir / "config.yaml" in result
+        assert config_dir / "auth.yaml" in result
+        assert config_dir / "logging.yaml" in result
+
+    def test_ignores_non_config_files(self, tmp_path):
+        """Should not include files not listed in CONFIG_FILES."""
+        from ots_containers.config import Config
+
+        config_dir = tmp_path / "etc"
+        config_dir.mkdir()
+        (config_dir / "config.yaml").touch()
+        (config_dir / "billing.yaml").touch()  # Not in CONFIG_FILES
+
+        cfg = Config(config_dir=config_dir)
+        result = cfg.existing_config_files
+        assert len(result) == 1
+        assert config_dir / "config.yaml" in result
+        assert config_dir / "billing.yaml" not in result
+
+
+class TestHasCustomConfig:
+    """Test Config.has_custom_config property."""
+
+    def test_false_when_no_config_dir(self):
+        """Should return False when config_dir does not exist."""
+        from ots_containers.config import Config
+
+        cfg = Config(config_dir=Path("/nonexistent/config/dir"))
+        assert cfg.has_custom_config is False
+
+    def test_false_when_empty_config_dir(self, tmp_path):
+        """Should return False when config_dir exists but is empty."""
+        from ots_containers.config import Config
+
+        config_dir = tmp_path / "etc"
+        config_dir.mkdir()
+
+        cfg = Config(config_dir=config_dir)
+        assert cfg.has_custom_config is False
+
+    def test_true_when_one_yaml_exists(self, tmp_path):
+        """Should return True when at least one config file exists."""
+        from ots_containers.config import Config
+
+        config_dir = tmp_path / "etc"
+        config_dir.mkdir()
+        (config_dir / "config.yaml").touch()
+
+        cfg = Config(config_dir=config_dir)
+        assert cfg.has_custom_config is True
+
+    def test_true_when_all_yaml_files_exist(self, tmp_path):
+        """Should return True when all config files exist."""
+        from ots_containers.config import Config
+
+        config_dir = tmp_path / "etc"
+        config_dir.mkdir()
+        (config_dir / "config.yaml").touch()
+        (config_dir / "auth.yaml").touch()
+        (config_dir / "logging.yaml").touch()
+
+        cfg = Config(config_dir=config_dir)
+        assert cfg.has_custom_config is True
