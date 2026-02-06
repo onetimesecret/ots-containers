@@ -16,7 +16,7 @@ from ots_containers.commands.instance.annotations import InstanceType
 @pytest.fixture(autouse=True)
 def mock_systemctl_available(mocker):
     """Mock shutil.which to report systemctl as available for all tests."""
-    mocker.patch("shutil.which", return_value="/usr/bin/systemctl")
+    mocker.patch("shutil.which", return_value="/mock/bin/systemctl")
 
 
 class TestFormatCommand:

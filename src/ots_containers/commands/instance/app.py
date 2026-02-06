@@ -41,6 +41,7 @@ def _list_instances_impl(
     json_output: bool,
 ):
     """Shared implementation for listing instances."""
+    systemd.require_systemctl()
     instances = resolve_identifiers(identifiers, instance_type, running_only=False)
 
     if not instances:
@@ -436,6 +437,11 @@ def deploy(
             )
         except Exception as e:
             port = int(id_) if inst_type == InstanceType.WEB else 0
+            fail_notes = (
+                str(e)
+                if inst_type == InstanceType.WEB
+                else f"{inst_type.value}_id={id_}; error={e}"
+            )
             db.record_deployment(
                 cfg.db_path,
                 image=image,
@@ -443,7 +449,7 @@ def deploy(
                 action=f"deploy-{inst_type.value}",
                 port=port,
                 success=False,
-                notes=str(e),
+                notes=fail_notes,
             )
             raise
 
@@ -551,6 +557,11 @@ def redeploy(
             )
         except Exception as e:
             port = int(id_) if inst_type == InstanceType.WEB else 0
+            fail_notes = (
+                str(e)
+                if inst_type == InstanceType.WEB
+                else f"{inst_type.value}_id={id_}; error={e}"
+            )
             db.record_deployment(
                 cfg.db_path,
                 image=image,
@@ -558,7 +569,7 @@ def redeploy(
                 action=f"redeploy-{inst_type.value}",
                 port=port,
                 success=False,
-                notes=str(e),
+                notes=fail_notes,
             )
             raise
 
@@ -631,6 +642,11 @@ def undeploy(
             )
         except Exception as e:
             port = int(id_) if inst_type == InstanceType.WEB else 0
+            fail_notes = (
+                str(e)
+                if inst_type == InstanceType.WEB
+                else f"{inst_type.value}_id={id_}; error={e}"
+            )
             db.record_deployment(
                 cfg.db_path,
                 image=image,
@@ -638,7 +654,7 @@ def undeploy(
                 action=f"undeploy-{inst_type.value}",
                 port=port,
                 success=False,
-                notes=str(e),
+                notes=fail_notes,
             )
             raise
 
@@ -1145,8 +1161,13 @@ def config_transform(
     """Transform config files with backup/apply workflow.
 
     Runs a migration command in a container to transform config files.
-    By default shows a diff without making changes (dry-run).
+    By default shows a unified diff without making changes (dry-run).
     Use --apply to backup the original and apply the transformation.
+
+    Note: Config files (config.yaml, auth.yaml, logging.yaml) contain
+    application settings, not secrets. Secrets are managed separately
+    via podman secrets and env files. The diff output is the primary
+    interface for reviewing proposed changes before applying them.
 
     The migration command should:
     - Read from /app/data/{file} (original config copied there)
@@ -1246,6 +1267,9 @@ def config_transform(
         result = subprocess.run(cmd, capture_output=True, text=True)
 
         if result.returncode != 0:
+            # Show migration command output for operator debugging.
+            # No secrets here: env vars are passed via podman secrets,
+            # not visible in command stdout/stderr.
             print(f"Migration command failed (exit {result.returncode})")
             if result.stderr:
                 print(result.stderr)
@@ -1277,8 +1301,9 @@ def config_transform(
         new_content = read_result.stdout
         original_content = config_path.read_text()
 
-        # Generate and display diff
-        diff = list(
+        # Show unified diff of proposed config changes. This is the primary
+        # output of dry-run mode — config files contain app settings, not secrets.
+        config_diff = list(
             difflib.unified_diff(
                 original_content.splitlines(keepends=True),
                 new_content.splitlines(keepends=True),
@@ -1287,11 +1312,11 @@ def config_transform(
             )
         )
 
-        if not diff:
+        if not config_diff:
             print("No changes detected")
             return
 
-        print("".join(diff))
+        print("".join(config_diff))
 
         if not apply:
             print()

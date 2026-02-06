@@ -9,7 +9,7 @@ import pytest
 @pytest.fixture(autouse=True)
 def mock_systemctl_available(mocker):
     """Mock shutil.which to report systemctl as available for all tests."""
-    mocker.patch("shutil.which", return_value="/usr/bin/systemctl")
+    mocker.patch("shutil.which", return_value="/mock/bin/systemctl")
 
 
 class TestUnitName:
@@ -768,7 +768,7 @@ class TestRequireSystemctl:
         from ots_containers import systemd
 
         # The autouse fixture already mocks this, but be explicit
-        mocker.patch("shutil.which", return_value="/usr/bin/systemctl")
+        mocker.patch("shutil.which", return_value="/mock/bin/systemctl")
 
         # Should not raise
         systemd.require_systemctl()
