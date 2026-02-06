@@ -13,6 +13,12 @@ from ots_containers.commands.instance._helpers import format_command
 from ots_containers.commands.instance.annotations import InstanceType
 
 
+@pytest.fixture(autouse=True)
+def mock_systemctl_available(mocker):
+    """Mock shutil.which to report systemctl as available for all tests."""
+    mocker.patch("shutil.which", return_value="/mock/bin/systemctl")
+
+
 class TestFormatCommand:
     """Test command formatting for copy-paste usage."""
 
@@ -152,6 +158,7 @@ class TestRunCommand:
         mock_config.resolve_image_tag.return_value = ("onetimesecret", "latest")
         mock_config.config_dir = tmp_path / "etc"
         mock_config.config_dir.mkdir()
+        mock_config.existing_config_files = []
         mock_config.registry = None
         mocker.patch("ots_containers.commands.instance.app.Config", return_value=mock_config)
 
@@ -215,17 +222,25 @@ class TestRunCommand:
 class TestDeployCommand:
     """Test deploy command with mocked dependencies."""
 
-    def test_deploy_validates_config(self, mocker):
-        """deploy should validate config before proceeding."""
-        mock_validate = mocker.patch(
-            "ots_containers.commands.instance.app.Config.validate",
-            side_effect=SystemExit("Missing required files"),
-        )
+    def test_deploy_proceeds_without_config_validation(self, mocker, tmp_path):
+        """deploy should proceed without config validation (validate is a no-op)."""
+        mock_config = mocker.MagicMock()
+        mock_config.config_dir = mocker.MagicMock()
+        mock_config.config_yaml = mocker.MagicMock()
+        mock_config.var_dir = mocker.MagicMock()
+        mock_config.web_template_path = mocker.MagicMock()
+        mock_config.db_path = tmp_path / "test.db"
+        mock_config.existing_config_files = []
+        mock_config.has_custom_config = False
+        mock_config.resolve_image_tag.return_value = ("ghcr.io/test/image", "v1.0.0")
+        mocker.patch("ots_containers.commands.instance.app.Config", return_value=mock_config)
+        mocker.patch("ots_containers.commands.instance.app.assets.update")
+        mocker.patch("ots_containers.commands.instance.app.quadlet.write_web_template")
+        mocker.patch("ots_containers.commands.instance.app.systemd.start")
+        mocker.patch("ots_containers.commands.instance.app.db.record_deployment")
 
-        with pytest.raises(SystemExit):
-            instance.deploy(identifiers=("7143",), web=True)
-
-        mock_validate.assert_called_once()
+        # Should not raise SystemExit - validation no longer blocks deploy
+        instance.deploy(identifiers=("7143",), web=True)
 
     def test_deploy_requires_identifiers(self, mocker, capsys):
         """deploy without identifiers should fail."""
@@ -247,6 +262,8 @@ class TestDeployCommand:
         mock_config.var_dir = mocker.MagicMock()
         mock_config.web_template_path = mocker.MagicMock()
         mock_config.db_path = tmp_path / "test.db"
+        mock_config.existing_config_files = []
+        mock_config.has_custom_config = False
         mock_config.resolve_image_tag.return_value = ("ghcr.io/test/image", "v1.0.0")
         mocker.patch("ots_containers.commands.instance.app.Config", return_value=mock_config)
         mock_assets = mocker.patch("ots_containers.commands.instance.app.assets.update")
@@ -274,6 +291,8 @@ class TestDeployWorkerCommand:
         mock_config.worker_template_path = mocker.MagicMock()
         mock_config.worker_template_path.parent = mocker.MagicMock()
         mock_config.db_path = tmp_path / "test.db"
+        mock_config.existing_config_files = []
+        mock_config.has_custom_config = False
         mock_config.resolve_image_tag.return_value = ("ghcr.io/test/image", "v1.0.0")
         mocker.patch("ots_containers.commands.instance.app.Config", return_value=mock_config)
         mock_quadlet = mocker.patch(
@@ -295,6 +314,8 @@ class TestDeployWorkerCommand:
         mock_config.worker_template_path = mocker.MagicMock()
         mock_config.worker_template_path.parent = mocker.MagicMock()
         mock_config.db_path = tmp_path / "test.db"
+        mock_config.existing_config_files = []
+        mock_config.has_custom_config = False
         mock_config.resolve_image_tag.return_value = ("ghcr.io/test/image", "v1.0.0")
         mocker.patch("ots_containers.commands.instance.app.Config", return_value=mock_config)
         mock_assets = mocker.patch("ots_containers.commands.instance.app.assets.update")
@@ -315,6 +336,8 @@ class TestDeployWorkerCommand:
         mock_config.worker_template_path = mocker.MagicMock()
         mock_config.worker_template_path.parent = mocker.MagicMock()
         mock_config.db_path = tmp_path / "test.db"
+        mock_config.existing_config_files = []
+        mock_config.has_custom_config = False
         mock_config.resolve_image_tag.return_value = ("ghcr.io/test/image", "v1.0.0")
         mocker.patch("ots_containers.commands.instance.app.Config", return_value=mock_config)
         mocker.patch("ots_containers.commands.instance.app.quadlet.write_worker_template")
@@ -357,6 +380,8 @@ class TestRedeployCommand:
         mock_config.var_dir = mocker.MagicMock()
         mock_config.web_template_path = tmp_path / "template"
         mock_config.db_path = tmp_path / "test.db"
+        mock_config.existing_config_files = []
+        mock_config.has_custom_config = False
         mock_config.resolve_image_tag.return_value = ("ghcr.io/test/image", "v1.0.0")
         mocker.patch("ots_containers.commands.instance.app.Config", return_value=mock_config)
         mocker.patch(

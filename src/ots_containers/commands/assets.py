@@ -1,4 +1,5 @@
 # src/ots_containers/commands/assets.py
+
 """Asset management commands for OTS containers."""
 
 from typing import Annotated
@@ -25,5 +26,4 @@ def sync(
     on initial setup.
     """
     cfg = Config()
-    cfg.validate()
     assets_module.update(cfg, create_volume=create_volume)

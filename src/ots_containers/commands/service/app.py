@@ -1,4 +1,5 @@
 # src/ots_containers/commands/service/app.py
+
 """Service management commands for systemd template services.
 
 Manages systemd template services like valkey-server@ and redis-server@
@@ -327,7 +328,13 @@ def status(package: Package, instance: OptInstance = None):
         # Show all instances of this template
         pattern = f"{pkg.template}*"
         result = subprocess.run(
-            ["systemctl", "list-units", "--type=service", pattern, "--no-pager"],
+            [
+                "systemctl",
+                "list-units",
+                "--type=service",
+                pattern,
+                "--no-pager",
+            ],
             capture_output=True,
             text=True,
         )
@@ -432,7 +439,15 @@ def list_instances(
     # Find running/enabled units matching the template
     pattern = f"{pkg.template}*"
     result = subprocess.run(
-        ["systemctl", "list-units", "--type=service", "--all", pattern, "--no-pager", "--plain"],
+        [
+            "systemctl",
+            "list-units",
+            "--type=service",
+            "--all",
+            pattern,
+            "--no-pager",
+            "--plain",
+        ],
         capture_output=True,
         text=True,
     )

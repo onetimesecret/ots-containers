@@ -1,3 +1,8 @@
 # src/ots_containers/__init__.py
 
-__version__ = "0.2.2"
+from importlib.metadata import PackageNotFoundError, version
+
+try:
+    __version__ = version("ots-containers")
+except PackageNotFoundError:
+    __version__ = "0.0.0+dev"

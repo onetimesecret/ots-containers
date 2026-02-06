@@ -143,30 +143,44 @@ def get_deployments(
     db_path: Path,
     limit: int = 50,
     port: int | None = None,
+    action_like: str | None = None,
+    notes_like: str | None = None,
 ) -> list[Deployment]:
-    """Get deployment history, optionally filtered by port."""
+    """Get deployment history, optionally filtered by port, action, or notes.
+
+    Args:
+        db_path: Path to the database file.
+        limit: Maximum number of records to return.
+        port: Filter by exact port number (for web instances).
+        action_like: Filter by action pattern using SQL LIKE (e.g., "%-worker").
+        notes_like: Filter by notes pattern using SQL LIKE (e.g., "%worker_id=1%").
+    """
     with get_connection(db_path) as conn:
+        # Build query dynamically based on filters
+        conditions = []
+        params: list[int | str] = []
+
         if port is not None:
-            rows = conn.execute(
-                """
-                SELECT id, timestamp, port, image, tag, action, success, notes
-                FROM deployments
-                WHERE port = ?
-                ORDER BY timestamp DESC
-                LIMIT ?
-                """,
-                (port, limit),
-            ).fetchall()
-        else:
-            rows = conn.execute(
-                """
-                SELECT id, timestamp, port, image, tag, action, success, notes
-                FROM deployments
-                ORDER BY timestamp DESC
-                LIMIT ?
-                """,
-                (limit,),
-            ).fetchall()
+            conditions.append("port = ?")
+            params.append(port)
+        if action_like is not None:
+            conditions.append("action LIKE ?")
+            params.append(action_like)
+        if notes_like is not None:
+            conditions.append("notes LIKE ?")
+            params.append(notes_like)
+
+        where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+        query = f"""
+            SELECT id, timestamp, port, image, tag, action, success, notes
+            FROM deployments
+            {where_clause}
+            ORDER BY timestamp DESC
+            LIMIT ?
+        """
+        params.append(limit)
+
+        rows = conn.execute(query, params).fetchall()
 
         return [
             Deployment(

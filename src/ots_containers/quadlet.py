@@ -11,7 +11,10 @@ from pathlib import Path
 
 from . import systemd
 from .config import Config
-from .environment_file import generate_quadlet_secret_lines, get_secrets_from_env_file
+from .environment_file import (
+    generate_quadlet_secret_lines,
+    get_secrets_from_env_file,
+)
 
 # Default environment file path
 DEFAULT_ENV_FILE = Path("/etc/default/onetimesecret")
@@ -32,8 +35,9 @@ WEB_TEMPLATE = """\
 #    # This reads SECRET_VARIABLE_NAMES from the env file,
 #    # creates podman secrets, and updates the file
 #
-# 2. Place YAML configs in {config_dir}/:
-#    config.yaml, auth.yaml, logging.yaml, billing.yaml
+# 2. (Optional) Place config overrides in {config_dir}/:
+#    config.yaml, auth.yaml, logging.yaml
+#    Only files present on host are mounted; others use container defaults.
 #
 # OPERATIONS:
 #   Start:    systemctl start onetime-web@7043
@@ -76,8 +80,8 @@ EnvironmentFile=/etc/default/onetimesecret
 
 {secrets_section}
 
-# Config directory mounted read-only (all YAML configs)
-Volume={config_dir}:/app/etc:ro
+# Host config overrides (per-file, only what exists on host)
+{config_volumes_section}
 
 # Static assets extracted from container image
 Volume=static_assets:/app/public:ro
@@ -118,6 +122,20 @@ def get_secrets_section(env_file_path: Path | None = None) -> str:
     return generate_quadlet_secret_lines(secrets)
 
 
+def get_config_volumes_section(cfg: Config) -> str:
+    """Generate per-file Volume directives for host config overrides.
+
+    Only mounts files that exist on the host. Missing files use container defaults.
+    """
+    files = cfg.existing_config_files
+    if not files:
+        return "# No host config overrides (using container built-in defaults)"
+    lines = []
+    for f in files:
+        lines.append(f"Volume={f}:/app/etc/{f.name}:ro")
+    return "\n".join(lines)
+
+
 def write_web_template(cfg: Config, env_file_path: Path | None = None) -> None:
     """Write the web container quadlet template.
 
@@ -126,11 +144,13 @@ def write_web_template(cfg: Config, env_file_path: Path | None = None) -> None:
         env_file_path: Optional path to environment file for secret discovery
     """
     secrets_section = get_secrets_section(env_file_path)
+    config_volumes_section = get_config_volumes_section(cfg)
 
     content = WEB_TEMPLATE.format(
         image=cfg.resolved_image_with_tag,
         config_dir=cfg.config_dir,
         secrets_section=secrets_section,
+        config_volumes_section=config_volumes_section,
     )
     cfg.web_template_path.parent.mkdir(parents=True, exist_ok=True)
     cfg.web_template_path.write_text(content)
@@ -153,8 +173,9 @@ WORKER_TEMPLATE = """\
 #    # This reads SECRET_VARIABLE_NAMES from the env file,
 #    # creates podman secrets, and updates the file
 #
-# 2. Place YAML configs in {config_dir}/:
-#    config.yaml, auth.yaml, logging.yaml, billing.yaml
+# 2. (Optional) Place config overrides in {config_dir}/:
+#    config.yaml, auth.yaml, logging.yaml
+#    Only files present on host are mounted; others use container defaults.
 #
 # OPERATIONS:
 #   Start:    systemctl start onetime-worker@1
@@ -203,8 +224,8 @@ EnvironmentFile=/etc/default/onetimesecret
 
 {secrets_section}
 
-# Config directory mounted read-only (all YAML configs)
-Volume={config_dir}:/app/etc:ro
+# Host config overrides (per-file, only what exists on host)
+{config_volumes_section}
 
 # Worker entry point - runs Sneakers job processor
 Exec=bin/entrypoint.sh bin/ots worker
@@ -228,11 +249,13 @@ def write_worker_template(cfg: Config, env_file_path: Path | None = None) -> Non
         env_file_path: Optional path to environment file for secret discovery
     """
     secrets_section = get_secrets_section(env_file_path)
+    config_volumes_section = get_config_volumes_section(cfg)
 
     content = WORKER_TEMPLATE.format(
         image=cfg.resolved_image_with_tag,
         config_dir=cfg.config_dir,
         secrets_section=secrets_section,
+        config_volumes_section=config_volumes_section,
     )
     cfg.worker_template_path.parent.mkdir(parents=True, exist_ok=True)
     cfg.worker_template_path.write_text(content)
@@ -255,8 +278,9 @@ SCHEDULER_TEMPLATE = """\
 #    # This reads SECRET_VARIABLE_NAMES from the env file,
 #    # creates podman secrets, and updates the file
 #
-# 2. Place YAML configs in {config_dir}/:
-#    config.yaml, auth.yaml, logging.yaml, billing.yaml
+# 2. (Optional) Place config overrides in {config_dir}/:
+#    config.yaml, auth.yaml, logging.yaml
+#    Only files present on host are mounted; others use container defaults.
 #
 # OPERATIONS:
 #   Start:    systemctl start onetime-scheduler@main
@@ -305,8 +329,8 @@ EnvironmentFile=/etc/default/onetimesecret
 
 {secrets_section}
 
-# Config directory mounted read-only (all YAML configs)
-Volume={config_dir}:/app/etc:ro
+# Host config overrides (per-file, only what exists on host)
+{config_volumes_section}
 
 # Scheduler entry point - runs scheduled job processor
 Exec=bin/entrypoint.sh bin/ots scheduler
@@ -330,11 +354,13 @@ def write_scheduler_template(cfg: Config, env_file_path: Path | None = None) -> 
         env_file_path: Optional path to environment file for secret discovery
     """
     secrets_section = get_secrets_section(env_file_path)
+    config_volumes_section = get_config_volumes_section(cfg)
 
     content = SCHEDULER_TEMPLATE.format(
         image=cfg.resolved_image_with_tag,
         config_dir=cfg.config_dir,
         secrets_section=secrets_section,
+        config_volumes_section=config_volumes_section,
     )
     cfg.scheduler_template_path.parent.mkdir(parents=True, exist_ok=True)
     cfg.scheduler_template_path.write_text(content)

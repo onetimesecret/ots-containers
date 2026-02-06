@@ -1,4 +1,5 @@
 # src/ots_containers/commands/common.py
+
 """Shared CLI annotations for consistency across commands.
 
 All common flags use long+short forms for consistency:

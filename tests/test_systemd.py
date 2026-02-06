@@ -6,6 +6,12 @@ import subprocess
 import pytest
 
 
+@pytest.fixture(autouse=True)
+def mock_systemctl_available(mocker):
+    """Mock shutil.which to report systemctl as available for all tests."""
+    mocker.patch("shutil.which", return_value="/mock/bin/systemctl")
+
+
 class TestUnitName:
     """Test unit_name helper function."""
 
@@ -726,3 +732,43 @@ class TestWorkerContainerExists:
             ["podman", "container", "exists", "systemd-onetime-worker_1"],
             capture_output=True,
         )
+
+
+class TestRequireSystemctl:
+    """Test require_systemctl function behavior when systemctl is missing."""
+
+    def test_require_systemctl_exits_when_systemctl_missing(self, mocker):
+        """Should raise SystemExit(1) when systemctl is not found."""
+        from ots_containers import systemd
+
+        # Override the autouse fixture to simulate missing systemctl
+        mocker.patch("shutil.which", return_value=None)
+
+        with pytest.raises(SystemExit) as exc_info:
+            systemd.require_systemctl()
+
+        assert exc_info.value.code == 1
+
+    def test_require_systemctl_message_mentions_shell_command(self, mocker, capsys):
+        """Should print error message mentioning 'ots instance shell' for macOS."""
+        from ots_containers import systemd
+
+        # Override the autouse fixture to simulate missing systemctl
+        mocker.patch("shutil.which", return_value=None)
+
+        with pytest.raises(SystemExit):
+            systemd.require_systemctl()
+
+        captured = capsys.readouterr()
+        assert "ots instance shell" in captured.err
+        assert "macOS" in captured.err
+
+    def test_require_systemctl_passes_when_systemctl_available(self, mocker):
+        """Should not raise when systemctl is available."""
+        from ots_containers import systemd
+
+        # The autouse fixture already mocks this, but be explicit
+        mocker.patch("shutil.which", return_value="/mock/bin/systemctl")
+
+        # Should not raise
+        systemd.require_systemctl()

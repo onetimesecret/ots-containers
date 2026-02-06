@@ -12,10 +12,10 @@ ots-containers <topic> <command> [identifiers] [flags]
 
 Three container types, each with explicit naming:
 
-| Type | Systemd Unit | Identifier | Use |
-|------|--------------|------------|-----|
-| `web` | `onetime-web@{port}` | Port number | HTTP servers |
-| `worker` | `onetime-worker@{id}` | Name or number | Background jobs |
+| Type        | Systemd Unit             | Identifier     | Use             |
+| ----------- | ------------------------ | -------------- | --------------- |
+| `web`       | `onetime-web@{port}`     | Port number    | HTTP servers    |
+| `worker`    | `onetime-worker@{id}`    | Name or number | Background jobs |
 | `scheduler` | `onetime-scheduler@{id}` | Name or number | Scheduled tasks |
 
 ## Command Syntax
@@ -39,14 +39,14 @@ ots instances logs --scheduler -f   # only scheduler logs
 
 Each topic is a separate module with its own `cyclopts.App`:
 
-| Topic | Purpose |
-|-------|---------|
-| `instance` | Container lifecycle and runtime control |
-| `service` | Native systemd services (Valkey, Redis) |
-| `image` | Container image management |
-| `assets` | Static asset management |
-| `cloudinit` | Cloud-init configuration generation |
-| `env` | Environment file management |
+| Topic       | Purpose                                 |
+| ----------- | --------------------------------------- |
+| `instance`  | Container lifecycle and runtime control |
+| `service`   | Native systemd services (Valkey, Redis) |
+| `image`     | Container image management              |
+| `assets`    | Static asset management                 |
+| `cloudinit` | Cloud-init configuration generation     |
+| `env`       | Environment file management             |
 
 To add a new topic, create a module and register it in `cli.py`.
 
@@ -55,24 +55,28 @@ To add a new topic, create a module and register it in `cli.py`.
 Commands are categorized by their impact:
 
 ### High-level (affects config + state)
+
 Commands that modify quadlet templates, database records, or both:
+
 - `deploy`, `redeploy`, `undeploy`
 
 These commands should document their config impact in the docstring.
 
 ### Low-level (runtime control only)
+
 Commands that only interact with systemd, no config changes:
+
 - `start`, `stop`, `restart`, `status`, `logs`, `enable`, `disable`, `exec`
 
 These commands should explicitly state they do NOT refresh config.
 
 ## Naming Conventions
 
-| Pattern | Example | Use for |
-|---------|---------|---------|
-| Verb | `deploy`, `sync` | Actions |
-| `--flag` | `--force`, `--yes` | Boolean options |
-| `--option VALUE` | `--delay 5`, `--lines 50` | Value options |
+| Pattern            | Example                            | Use for                 |
+| ------------------ | ---------------------------------- | ----------------------- |
+| Verb               | `deploy`, `sync`                   | Actions                 |
+| `--flag`           | `--force`, `--yes`                 | Boolean options         |
+| `--option VALUE`   | `--delay 5`, `--lines 50`          | Value options           |
 | `--type` shortcuts | `--web`, `--worker`, `--scheduler` | Instance type selection |
 
 ## Default Commands

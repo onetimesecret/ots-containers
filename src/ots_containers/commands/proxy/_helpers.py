@@ -1,4 +1,5 @@
 # src/ots_containers/commands/proxy/_helpers.py
+
 """Helper functions for proxy commands.
 
 IMPORTANT: These functions use HOST environment variables via envsubst,

@@ -1,4 +1,5 @@
 # src/ots_containers/commands/cloudinit/app.py
+
 """Cloud-init configuration generation commands.
 
 Generates cloud-init YAML with Debian 13 (Trixie) DEB822-style apt sources.
@@ -74,7 +75,10 @@ def generate(
             "Warning: --include-postgresql specified but no --postgresql-key provided",
             file=sys.stderr,
         )
-        print("PostgreSQL repository will use inline key placeholder", file=sys.stderr)
+        print(
+            "PostgreSQL repository will use inline key placeholder",
+            file=sys.stderr,
+        )
 
     if include_valkey and valkey_key:
         valkey_gpg = Path(valkey_key).read_text()

@@ -1,4 +1,5 @@
 # src/ots_containers/commands/image/app.py
+
 """Image management commands for OTS containers.
 
 Supports pulling from multiple registries:
@@ -33,12 +34,12 @@ app = cyclopts.App(
 @app.command
 def pull(
     tag: Annotated[
-        str,
+        str | None,
         cyclopts.Parameter(
             name=["--tag", "-t"],
-            help="Image tag to pull (e.g., v0.23.0, latest)",
+            help="Image tag to pull (default: from TAG env var)",
         ),
-    ],
+    ] = None,
     image: Annotated[
         str,
         cyclopts.Parameter(
@@ -60,6 +61,13 @@ def pull(
             help="Pull from private registry (uses configured OTS_REGISTRY)",
         ),
     ] = False,
+    platform: Annotated[
+        str | None,
+        cyclopts.Parameter(
+            name=["--platform", "-p"],
+            help="Target platform (e.g., linux/amd64, linux/arm64)",
+        ),
+    ] = None,
     quiet: Quiet = False,
 ):
     """Pull a container image from registry.
@@ -67,10 +75,18 @@ def pull(
     Examples:
         ots image pull --tag v0.23.0
         ots image pull --tag latest --current
+        TAG=dev ots image pull                  # Use TAG env var
         ots image pull --tag v0.23.0 --image docker.io/onetimesecret/onetimesecret
         ots image pull --tag v0.23.0 --private  # Pull from private registry
+        ots image pull --tag dev --platform linux/amd64  # Pull amd64 on Apple Silicon
     """
     cfg = Config()
+
+    # Resolve tag from env var if not provided
+    resolved_tag = tag or cfg.tag
+    if not resolved_tag:
+        print("Error: --tag is required (or set TAG env var)")
+        raise SystemExit(1)
 
     # Use private registry if requested
     if private:
@@ -79,20 +95,23 @@ def pull(
             raise SystemExit(1)
         image = cfg.private_image
 
-    full_image = f"{image}:{tag}"
+    full_image = f"{image}:{resolved_tag}"
 
     if not quiet:
         print(f"Pulling {full_image}...")
 
     try:
         # Use auth file for authenticated registries
-        podman.pull(
-            full_image,
-            authfile=str(cfg.registry_auth_file),
-            check=True,
-            capture_output=True,
-            text=True,
-        )
+        pull_kwargs = {
+            "authfile": str(cfg.registry_auth_file),
+            "check": True,
+            "capture_output": True,
+            "text": True,
+        }
+        if platform:
+            pull_kwargs["platform"] = platform
+
+        podman.pull(full_image, **pull_kwargs)
         if not quiet:
             print(f"Successfully pulled {full_image}")
     except Exception as e:
@@ -100,7 +119,7 @@ def pull(
         db.record_deployment(
             cfg.db_path,
             image=image,
-            tag=tag,
+            tag=resolved_tag,
             action="pull",
             success=False,
             notes=str(e),
@@ -111,19 +130,19 @@ def pull(
     db.record_deployment(
         cfg.db_path,
         image=image,
-        tag=tag,
+        tag=resolved_tag,
         action="pull",
         success=True,
     )
 
     # Set as current if requested
     if set_as_current:
-        previous = db.set_current(cfg.db_path, image, tag)
+        previous = db.set_current(cfg.db_path, image, resolved_tag)
         if not quiet:
             if previous:
-                print(f"Set CURRENT to {tag} (previous: {previous})")
+                print(f"Set CURRENT to {resolved_tag} (previous: {previous})")
             else:
-                print(f"Set CURRENT to {tag}")
+                print(f"Set CURRENT to {resolved_tag}")
 
 
 @app.default

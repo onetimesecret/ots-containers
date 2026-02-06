@@ -1,4 +1,5 @@
 # src/ots_containers/commands/init.py
+
 """Init command for idempotent setup of ots-containers.
 
 Creates required directories and initializes the deployment database.
@@ -13,7 +14,7 @@ from typing import Annotated
 import cyclopts
 
 from ots_containers import db
-from ots_containers.config import Config
+from ots_containers.config import CONFIG_FILES, Config
 
 app = cyclopts.App(
     name="init",
@@ -125,16 +126,17 @@ def init(
             prefix = "Re-initializing" if is_reinit else "Initializing"
             print(f"{prefix} ots-containers...")
 
-    # 1. App Configuration - user-managed config files
+    # 1. App Configuration - user-managed config files (all optional)
     # Note: /etc/default/onetimesecret and Podman secrets are managed separately
     if not quiet or check:
         print("\nApp Configuration:")
     if check:
-        if cfg.config_yaml.exists():
-            print(f"  [ok] {cfg.config_yaml}")
-        else:
-            print(f"  [missing] {cfg.config_yaml}")
-            all_ok = False
+        for fname in CONFIG_FILES:
+            fpath = cfg.config_dir / fname
+            if fpath.exists():
+                print(f"  [ok] {fpath}")
+            else:
+                print(f"  [optional] {fpath}")
     else:
         result = _create_directory(cfg.config_dir, mode=0o755, quiet=True)
         if result is None:
@@ -143,21 +145,27 @@ def init(
             # Directory exists or was created - now handle config files
             if source_dir:
                 src = Path(source_dir)
-                if _copy_template(src / "config.yaml", cfg.config_yaml, quiet=quiet) is None:
-                    all_ok = False
+                for fname in CONFIG_FILES:
+                    if _copy_template(src / fname, cfg.config_dir / fname, quiet=quiet) is None:
+                        all_ok = False
             elif not quiet:
-                # Report status of config files
-                if cfg.config_yaml.exists():
-                    print(f"  [ok] {cfg.config_yaml}")
-                else:
-                    print(f"  [missing] {cfg.config_yaml}")
+                for fname in CONFIG_FILES:
+                    fpath = cfg.config_dir / fname
+                    if fpath.exists():
+                        print(f"  [ok] {fpath}")
+                    else:
+                        print(f"  [optional] {fpath}")
 
     # 2. System Configuration - quadlet files
     if not quiet or check:
         print("\nSystem Configuration:")
     quadlet_dir = cfg.web_template_path.parent
     users_dir = quadlet_dir / "users"
-    template_paths = [cfg.web_template_path, cfg.worker_template_path, cfg.scheduler_template_path]
+    template_paths = [
+        cfg.web_template_path,
+        cfg.worker_template_path,
+        cfg.scheduler_template_path,
+    ]
     if check:
         for template_path in template_paths:
             if template_path.exists():
@@ -243,8 +251,7 @@ def init(
             print("\nInitialization incomplete - some operations failed.")
             print("Try running with elevated privileges: sudo ots init")
         print("\nNext steps:")
-        if not cfg.config_yaml.exists():
-            print(f"  1. Create {cfg.config_yaml}")
+        print(f"  1. (Optional) Place config overrides in {cfg.config_dir}/")
         print("  2. Create /etc/default/onetimesecret with infrastructure env vars")
         print("  3. Create Podman secrets: ots_hmac_secret, ots_secret, ots_session_secret")
         print("  4. Run 'ots image pull --tag <version>' to pull an image")

@@ -17,6 +17,7 @@ which port the application listens on.
 The quadlet template passes the instance number as the PORT:
 
 **onetime@.container**:
+
 ```ini
 [Container]
 Image=ghcr.io/onetimesecret/onetimesecret:current

@@ -1,4 +1,5 @@
 # src/ots_containers/commands/instance/annotations.py
+
 """Type annotations for instance commands.
 
 Instance types:
@@ -12,13 +13,13 @@ Identifier patterns:
 - Scheduler: numeric or named (main, 1)
 """
 
-from enum import Enum
+from enum import StrEnum
 from typing import Annotated
 
 import cyclopts
 
 
-class InstanceType(str, Enum):
+class InstanceType(StrEnum):
     """Type of container instance."""
 
     WEB = "web"

@@ -82,16 +82,14 @@ class TestAssetsSync:
         captured = capsys.readouterr()
         assert "create-volume" in captured.out.lower() or "volume" in captured.out.lower()
 
-    def test_assets_sync_requires_valid_config(self, mocker, tmp_path):
-        """assets sync should validate config before running."""
-        # Mock Config.validate to raise SystemExit (missing files)
-        mock_validate = mocker.patch(
-            "ots_containers.commands.assets.Config.validate",
-            side_effect=SystemExit("Missing required files"),
-        )
+    def test_assets_sync_proceeds_without_validation(self, mocker):
+        """assets sync should proceed without config validation (config is optional)."""
+        mock_config = mocker.MagicMock()
+        mocker.patch("ots_containers.commands.assets.Config", return_value=mock_config)
+        mock_update = mocker.patch("ots_containers.commands.assets.assets_module.update")
 
         with pytest.raises(SystemExit) as exc_info:
             app(["assets", "sync"])
 
-        mock_validate.assert_called_once()
-        assert "Missing" in str(exc_info.value)
+        assert exc_info.value.code == 0
+        mock_update.assert_called_once_with(mock_config, create_volume=False)
