@@ -20,11 +20,11 @@ Configuration is not written by hand. It is generated from the **Environment Inv
 We use a strict hierarchical schema to encode sovereignty boundaries directly into the hostname. This ensures that a host's name dictates its legal and logical location.
 
 ```text
-                            .ots (Internal TLD)
+                            .abc (Internal TLD)
                                │
          ┌─────────────────────┴─────────────────────┐
          │                                           │
-    .canonical.ots                              .customer.ots
+    .companyproper.abc                              .customer.abc
    (Multi-tenant/SaaS)                        (Single-tenant/Private)
          │                                           │
     ┌────┴────┐                              ┌───────┴───────┐
@@ -40,19 +40,19 @@ We use a strict hierarchical schema to encode sovereignty boundaries directly in
 
 Every host is assigned a **Mutable FQDN** at Layer 0.
 
-`server-id.jurisdiction.environment.tenant-type.ots`
+`server-id.jurisdiction.environment.tenant-type.abc`
 
 | Component        | Values                         | Purpose                                                 |
 | :--------------- | :----------------------------- | :------------------------------------------------------ |
 | **server-id**    | `web-01`, `db-02`, `node-8f7a` | Unique identifier within the pool.                      |
 | **jurisdiction** | `eu`, `us`, `ca`, `nz`         | **Sovereignty Boundary.** Determines physical location. |
 | **environment**  | `prod`, `staging`, `support`   | Lifecycle stage (for Canonical).                        |
-| **tenant-type**  | `canonical`, `customer`        | **Data Owner.** Determines isolation level.             |
+| **tenant-type**  | `companyproper`, `customer`        | **Data Owner.** Determines isolation level.             |
 
 ### Customer Variation
 
 For single-tenant customer installations, the `customer-id` replaces the environment segment to ensure namespace isolation.
-`server-id.jurisdiction.customer-id.customer.ots`
+`server-id.jurisdiction.customer-id.customer.abc`
 
 ## Generated Dnsmasq Configuration
 
@@ -74,25 +74,25 @@ bogus-priv
 # ─────────────────────────────────────────────────────────
 
 # EU Production (Strict GDPR)
-address=/web-01.eu.prod.canonical.ots/10.1.1.10
-address=/db-01.eu.prod.canonical.ots/10.1.1.20
+address=/web-01.eu.prod.companyproper.abc/10.1.1.10
+address=/db-01.eu.prod.companyproper.abc/10.1.1.20
 
 # US Production
-address=/web-01.us.prod.canonical.ots/10.2.1.10
+address=/web-01.us.prod.companyproper.abc/10.2.1.10
 
 # Staging (EU)
-address=/web-01.eu.staging.canonical.ots/10.1.2.10
+address=/web-01.eu.staging.companyproper.abc/10.1.2.10
 
 # ─────────────────────────────────────────────────────────
 # CUSTOMER INSTALLATIONS (Sovereign Single-Tenancy)
 # ─────────────────────────────────────────────────────────
 
 # Acme Corp (EU Jurisdiction)
-address=/app-01.eu.acme-corp.customer.ots/10.10.1.10
-address=/db-01.eu.acme-corp.customer.ots/10.10.1.20
+address=/app-01.eu.acme-corp.customer.abc/10.10.1.10
+address=/db-01.eu.acme-corp.customer.abc/10.10.1.20
 
 # Globex (NZ Jurisdiction)
-address=/app-01.nz.globex.customer.ots/10.11.1.10
+address=/app-01.nz.globex.customer.abc/10.11.1.10
 ```
 
 ## Decoupling: The Stable Alias Pattern
@@ -103,9 +103,9 @@ Layer 0 provides the "Mutable Implementation" (where the server is right now). L
 
 | Layer         | Responsibility | Example                                      | Source                    |
 | :------------ | :------------- | :------------------------------------------- | :------------------------ |
-| **Inventory** | **Map**        | `eu-web-01` → `web-01.eu.prod.canonical.ots` | SQLite Database           |
+| **Inventory** | **Map**        | `eu-web-01` → `web-01.eu.prod.companyproper.abc` | SQLite Database           |
 | **Layer 1**   | **Interface**  | `Host eu-web-01`                             | Generated `~/.ssh/config` |
-| **Layer 0**   | **Route**      | `web-01.eu.prod.canonical.ots` → `10.1.1.10` | Generated `dnsmasq.conf`  |
+| **Layer 0**   | **Route**      | `web-01.eu.prod.companyproper.abc` → `10.1.1.10` | Generated `dnsmasq.conf`  |
 
 This separation allows us to reclassify a server (e.g., moving Acme to a new jurisdiction) by updating the Inventory. The Generator then:
 

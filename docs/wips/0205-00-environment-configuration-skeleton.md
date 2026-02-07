@@ -7,44 +7,13 @@ These are the actual file listings from the main dev/operations workstation.
 $ lsd --tree --dereference ~/.ssh
  .
 ├──  authorized_keys
-├──  clients
-│   ├──  afb
-│   │   ├──  config
-│   │   ├──  id_ed25519
-│   │   └── 󰌆 id_ed25519.pub
-│   └──  qc
-│       ├──  authorized_keys
-│       ├──  config
-│       ├──  known_hosts
-│       ├── 󰁯 known_hosts.old
-│       └──  v2
-│           ├──  integration
-│           │   ├──  config
-│           │   ├── 󰌆 integration-keys-us-east-1.pub
-│           │   ├── 󰌆 integration-keys.pub
-│           │   └── 󰌆 qc-staging-v2.pub
-│           ├──  jumphosts
-│           ├── 󰌆 key-ca-jumphost.pub
-│           ├──  orchestra
-│           │   ├──  config
-│           │   ├── 󰌆 orchestra-common-2022.pub
-│           │   ├── 󰌆 orchestra-default-2022.pub
-│           │   └── 󰌆 orchestra-eks-pair.pub
-│           ├──  production
-│           │   ├──  config
-│           │   ├── 󰌆 qc-deploy-key.pub
-│           │   ├── 󰌆 qc-deploy-key2.pub
-│           │   └── 󰌆 qc-prod-v2.pub
-│           └──  sandbox
-├──  code_gitpod.d
-│   └──  config
 ├──  config
 ├──  ctrlmasters
 ├──  id_ed25519
-├── 󰌆 id_ed25519-catalyst-generated.pem
+├── 󰌆 id_ed25519-plaintiff-generated.pem
 ├── 󰌆 id_ed25519.pub
-├──  id_rsa-ovh
-├── 󰌆 id_rsa-ovh.pub
+├──  id_rsa-lal
+├── 󰌆 id_rsa-lal.pub
 ├──  known_hosts
 ├── 󰁯 known_hosts.old
 ├──  onetime
@@ -52,34 +21,31 @@ $ lsd --tree --dereference ~/.ssh
 │   ├──  config-demo.md
 │   ├──  demos
 │   │   ├──  config
-│   │   ├──  id_ed25519-hz-demokeys
-│   │   └── 󰌆 id_ed25519-hz-demokeys.pub
+│   │   ├──  id_ed25519-ul-demokeys
+│   │   └── 󰌆 id_ed25519-ul-demokeys.pub
 │   ├──  ge
 │   ├──  ge-config
-│   ├── 󰌆 'GithubApp-4Sentry-Land of a Thousand Lakes Private Key Feb 2025.pem'
 │   ├──  id_ed25519
-│   ├──  id_ed25519-1pass-hetzner
-│   ├── 󰌆 id_ed25519-1pass-hetzner.pub
-│   ├──  id_ed25519-catalyst
-│   ├── 󰌆 id_ed25519-catalyst.pub
+│   ├──  id_ed25519-fulton-ploptart
+│   ├── 󰌆 id_ed25519-fulton-ploptart.pub
+│   ├──  id_ed25519-plaintiff
+│   ├── 󰌆 id_ed25519-plaintiff.pub
 │   ├──  id_ed25519-do
 │   ├──  id_ed25519-do-uqcyu
 │   ├── 󰌆 id_ed25519-do-uqcyu.pub
 │   ├── 󰌆 id_ed25519-do.pub
-│   ├──  id_ed25519-ovh
-│   ├── 󰌆 id_ed25519-ovh.pub
+│   ├──  id_ed25519-lal
+│   ├── 󰌆 id_ed25519-lal.pub
 │   ├── 󰌆 id_ed25519.pub
-│   ├──  id_rsa-catalyst
-│   ├── 󰌆 id_rsa-catalyst.pub
+│   ├──  id_rsa-plaintiff
+│   ├── 󰌆 id_rsa-plaintiff.pub
 │   └──  production
 │       ├──  config
-│       ├──  id_ed25519-hetzner-infra
-│       ├── 󰌆 id_ed25519-hetzner-infra.pub
-│       ├──  id_ed25519-upcloud
-│       └── 󰌆 id_ed25519-upcloud.pub
+│       ├──  id_ed25519-ploptart-infra
+│       ├── 󰌆 id_ed25519-ploptart-infra.pub
+│       ├──  id_ed25519-bananahat
+│       └── 󰌆 id_ed25519-bananahat.pub
 ├── 󰌆 van.2024-03-16.private-key.pem
-└──  wireguard-fly
-    └──  wireguard-export.zip
 ```
 
 ### SSH Config
@@ -104,13 +70,13 @@ $ cat .ssh/onetime/config
 # NZ (Por)
 #
 Host nz-por-web-01 nz-web1
-  IdentityFile              ~/.ssh/onetime/id_rsa-catalyst
+  IdentityFile              ~/.ssh/onetime/id_rsa-plaintiff
   Port                      22
   User                      appuser
 
 Host nz-por-redis-01 nz-redis
   # IdentityFile              ~/.ssh/onetime/id_ed25519
-  IdentityFile              ~/.ssh/onetime/id_rsa-catalyst
+  IdentityFile              ~/.ssh/onetime/id_rsa-plaintiff
   Port                      22
   User                      appuser
  ProxyCommand              ssh nz-por-web-01 exec nc %h %p
@@ -142,49 +108,49 @@ Host ca-tor-redis-01 ca-redis
 #
 # EU
 #
-Host eu-nurem-sentry eu-sentry sentry
+Host ab-noro-sentry ab-sentry sentry
   IdentityFile              ~/.ssh/onetime/id_ed25519
-  IdentityFile              ~/.ssh/onetime/id_ed25519-1pass-hetzner
+  IdentityFile              ~/.ssh/onetime/id_ed25519-fulton-ploptart
   Port                      22
   User                      appuser
 
-Host eu-nurem-proxy-01 eu-proxy
+Host ab-noro-proxy-01 ab-proxy
   IdentityFile              ~/.ssh/onetime/id_ed25519
-  #IdentityFile              ~/.ssh/onetime/id_ed25519-1pass-hetzner
+  #IdentityFile              ~/.ssh/onetime/id_ed25519-fulton-ploptart
   Port                      22
   User                      appuser
 
-Host eu-nurem-web-02 eu-web2
+Host ab-noro-web-02 ab-web2
   IdentityFile              ~/.ssh/onetime/id_ed25519
-  IdentityFile              ~/.ssh/onetime/id_ed25519-1pass-hetzner
+  IdentityFile              ~/.ssh/onetime/id_ed25519-fulton-ploptart
   Port                      22
   User                      appuser
 
-Host eu-nurem-redis-01 eu-redis
+Host ab-noro-redis-01 ab-redis
   IdentityFile              ~/.ssh/onetime/id_ed25519
-  ProxyCommand              ssh eu-nurem-web-02 exec nc %h %p
+  ProxyCommand              ssh ab-noro-web-02 exec nc %h %p
   Port                      22
   User                      appuser
 
 #
 # US
 #
-Host us-hillsboro-webdirect-01 us-webdirect1
+Host ts-lana-webdirect-01 ts-webdirect1
   IdentityFile              ~/.ssh/onetime/id_ed25519
-  IdentityFile              ~/.ssh/onetime/id_ed25519-1pass-hetzner
+  IdentityFile              ~/.ssh/onetime/id_ed25519-fulton-ploptart
   Port                      22
   User                      appuser
 
-Host us-hillsboro-web-01 us-web1
+Host ts-lana-web-01 ts-web1
   IdentityFile              ~/.ssh/onetime/id_ed25519
-  IdentityFile              ~/.ssh/onetime/id_ed25519-1pass-hetzner
+  IdentityFile              ~/.ssh/onetime/id_ed25519-fulton-ploptart
   Port                      22
   User                      appuser
 
-Host us-hillsboro-redis-01 us-redis1
+Host ts-lana-redis-01 ts-redis1
   IdentityFile              ~/.ssh/onetime/id_ed25519
-  IdentityFile              ~/.ssh/onetime/id_ed25519-1pass-hetzner
-  ProxyCommand              ssh us-hillsboro-web-01 exec nc %h %p
+  IdentityFile              ~/.ssh/onetime/id_ed25519-fulton-ploptart
+  ProxyCommand              ssh ts-lana-web-01 exec nc %h %p
   Port                      22
   User                      appuser
 
@@ -192,17 +158,17 @@ Host us-hillsboro-redis-01 us-redis1
 # -------------------------------------------  DEMOS ---
 
 
-Host eu-demos-web eu-logto
-  HostName                  eu-demos-web.internal
+Host ab-demos-web ab-logto
+  HostName                  ab-demos-web.internal
 
-Host eu-demos-db eu-demos-maindb eu-demos-authdb eu-demos-mq
-  HostName                  eu-demos-db.internal
-  ProxyCommand              ssh eu-demos-web exec nc %h %p
+Host ab-demos-db ab-demos-maindb ab-demos-authdb ab-demos-mq
+  HostName                  ab-demos-db.internal
+  ProxyCommand              ssh ab-demos-web exec nc %h %p
 
 
-Host eu-demos-*
+Host ab-demos-*
   IdentityFile              ~/.ssh/onetime/id_ed25519
-  IdentityFile              ~/.ssh/onetime/demos/id_ed25519-hz-demokeys
+  IdentityFile              ~/.ssh/onetime/demos/id_ed25519-ul-demokeys
   Port                      22
   User                      appuser
   #User                      root
@@ -231,7 +197,7 @@ Host ots*
   IdentityFile              ~/.ssh/onetime/id_ed25519
   User                      root
 
-Host onetim* ots* eu-* us-* ca-* nz-* au-* uk-* jp-*
+Host onetim* ots* ab-* ts-* ca-* nz-* au-* uk-* jp-*
   # Prevent forwarding locale environment variables to remote hosts
   # This avoids locale-related warnings when connecting to servers
   # without the client's locale settings installed
@@ -350,7 +316,7 @@ $ lsd --tree --dereference
 │       ├──  cloud-init-db.yaml
 │       ├──  cloud-init-web.yaml
 │       ├──  README.md
-│       └──  upcloud-dns.md
+│       └──  bananahat-dns.md
 └──  us
     ├──  allowed-domains
     │   ├──  allowed-domains.py
