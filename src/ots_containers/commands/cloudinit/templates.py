@@ -146,13 +146,17 @@ def generate_cloudinit_config(
                 "  - debian-keyring",
                 "  - debian-archive-keyring",
                 "  - apt-transport-https",
+                "  - gnupg",
             ]
         )
 
     # Add runcmd section for xcaddy repo setup and build
     if include_xcaddy:
+        import shlex
+
         plugins = caddy_plugins if caddy_plugins is not None else DEFAULT_CADDY_PLUGINS
-        build_args = " ".join(f"--with {p}" for p in plugins)
+        quoted_version = shlex.quote(caddy_version)
+        build_args = " ".join(f"--with {shlex.quote(p)}" for p in plugins)
 
         config_parts.extend(
             [
@@ -168,7 +172,7 @@ def generate_cloudinit_config(
                 "  - apt-get update",
                 "  - apt-get install -y xcaddy",
                 "  # Build custom Caddy binary with plugins",
-                f"  - CADDY_VERSION={caddy_version} xcaddy build {build_args}",
+                f"  - CADDY_VERSION={quoted_version} xcaddy build {build_args}",
                 "  - install -m 0755 ./caddy /usr/local/bin/caddy",
             ]
         )

@@ -175,6 +175,7 @@ class TestXcaddyCloudInit:
         assert "debian-keyring" in packages
         assert "debian-archive-keyring" in packages
         assert "apt-transport-https" in packages
+        assert "gnupg" in packages
 
     def test_xcaddy_adds_runcmd_section(self):
         """xcaddy should add runcmd with repo setup and build."""

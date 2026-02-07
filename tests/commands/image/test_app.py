@@ -926,7 +926,7 @@ class TestRegistryEnvVarResolution:
         )
 
         # Mock skopeo being available
-        mocker.patch("shutil.which", return_value="/usr/bin/skopeo")
+        mocker.patch("shutil.which", return_value=str(tmp_path / "skopeo"))
 
         # Mock subprocess.run for skopeo list-tags
         mock_run = mocker.patch(
