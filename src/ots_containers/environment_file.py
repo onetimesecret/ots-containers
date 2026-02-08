@@ -320,9 +320,8 @@ def extract_secrets(env_file: EnvFile) -> tuple[list[SecretSpec], list[str]]:
             continue
 
         # No entry found - neither VARNAME nor _VARNAME exists
+        # Skip adding to secrets list so quadlet won't reference a non-existent secret
         messages.append(f"Warning: {var_name} listed in SECRET_VARIABLE_NAMES but not found")
-        # Still include in secrets list so quadlet line is generated
-        secrets.append(SecretSpec.from_env_var(var_name, value=None))
 
     return secrets, messages
 

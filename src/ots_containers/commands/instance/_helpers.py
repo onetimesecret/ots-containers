@@ -3,12 +3,14 @@
 """Internal helper functions for instance commands."""
 
 import shlex
+import sys
 import time
 from collections.abc import Callable, Sequence
 from pathlib import Path
 
 from ots_containers import systemd
 from ots_containers.environment_file import get_secrets_from_env_file
+from ots_containers.systemd import SystemctlError
 
 from .annotations import InstanceType
 
@@ -171,7 +173,15 @@ def for_each_instance(
     for i, (itype, id_) in enumerate(items, 1):
         unit = systemd.unit_name(itype.value, id_)
         print(f"[{i}/{total}] {verb} {unit}...")
-        action(itype, id_)
+        try:
+            action(itype, id_)
+        except SystemctlError as exc:
+            print(f"Error: {exc}", file=sys.stderr)
+            if exc.journal:
+                print(f"\nRecent journal output for {exc.unit}:", file=sys.stderr)
+                for line in exc.journal.splitlines():
+                    print(f"  {line}", file=sys.stderr)
+            raise SystemExit(1) from None
         if i < total and delay > 0:
             print(f"Waiting {delay}s...")
             time.sleep(delay)
