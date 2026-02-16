@@ -1019,6 +1019,20 @@ def shell(
             help="Named volume for persistent data (survives exit)",
         ),
     ] = None,
+    volume: Annotated[
+        str | None,
+        cyclopts.Parameter(
+            name=["--volume", "-v"],
+            help="Host path to bind-mount at /app/data (rw, user-mapped)",
+        ),
+    ] = None,
+    env: Annotated[
+        tuple[str, ...],
+        cyclopts.Parameter(
+            name=["--env", "-e"],
+            help="Set container env var (KEY=VALUE, repeatable)",
+        ),
+    ] = (),
     command: Annotated[
         str | None,
         cyclopts.Parameter(
@@ -1046,6 +1060,7 @@ def shell(
 
     By default uses tmpfs at /app/data (data destroyed on exit).
     Use --persistent to create a named volume that survives exit.
+    Use --volume to bind-mount a host directory at /app/data.
     Config is mounted read-only at /app/etc.
 
     Examples:
@@ -1053,7 +1068,16 @@ def shell(
         ots instance shell --persistent upgrade-v024    # named volume survives exit
         ots instance shell -c "bin/ots migrate"         # run command and exit
         ots instance shell --tag v0.24.0                # specific image tag
+        ots instance shell -v ./data                    # bind-mount ./data at /app/data
+        ots instance shell -v ./data -e REDIS_URL=redis://10.0.0.5:6379/0  # with env
+        ots instance shell -e FOO=bar -e BAZ=qux        # multiple env vars, tmpfs default
     """
+    from pathlib import Path
+
+    if persistent and volume:
+        print("Error: --persistent and --volume are mutually exclusive")
+        raise SystemExit(1)
+
     cfg = Config()
 
     # Resolve image/tag (same pattern as run command)
@@ -1084,12 +1108,20 @@ def shell(
         cmd.extend(["--env-file", str(env_file)])
         cmd.extend(build_secret_args(env_file))
 
-    # Data volume: tmpfs (default) or persistent named volume
-    if persistent:
+    # Data volume: bind-mount, persistent named volume, or tmpfs (default)
+    if volume:
+        host_path = Path(volume).resolve()
+        host_path.mkdir(parents=True, exist_ok=True)
+        cmd.extend(["-v", f"{host_path}:/app/data:rw,U"])
+    elif persistent:
         volume_name = f"ots-migration-{persistent}"
         cmd.extend(["-v", f"{volume_name}:/app/data"])
     else:
         cmd.extend(["--tmpfs", "/app/data"])
+
+    # Ad-hoc environment variables
+    for entry in env:
+        cmd.extend(["-e", entry])
 
     # Config overrides (per-file, if any exist on host)
     for f in cfg.existing_config_files:
