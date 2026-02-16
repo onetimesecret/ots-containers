@@ -32,7 +32,7 @@ def _fetch_journal(unit: str, lines: int = 20) -> str:
             timeout=10,
         )
         return result.stdout.strip()
-    except Exception:
+    except (subprocess.SubprocessError, OSError):
         return "(could not retrieve journal)"
 
 
