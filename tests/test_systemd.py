@@ -147,6 +147,7 @@ class TestDiscoverWebInstances:
             ["systemctl", "list-units", "onetime-web@*", "--plain", "--no-legend", "--all"],
             capture_output=True,
             text=True,
+            timeout=10,
         )
 
 
