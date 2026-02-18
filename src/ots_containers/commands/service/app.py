@@ -7,6 +7,7 @@ on Debian 13 systems. Uses package-provided templates rather than custom
 unit files.
 """
 
+import logging
 import subprocess
 from typing import Annotated
 
@@ -25,6 +26,8 @@ from ._helpers import (
     update_config_value,
 )
 from .packages import get_package, list_packages
+
+logger = logging.getLogger(__name__)
 
 app = cyclopts.App(
     name=["service", "services"],
@@ -66,6 +69,7 @@ def list_all(json_output: JsonOutput = False):
             ],
             capture_output=True,
             text=True,
+            timeout=10,
         )
 
         if result.stdout.strip():
@@ -174,7 +178,15 @@ def init(
         ots service init valkey 6379 --dry-run
     """
     pkg = get_package(package)
-    port_num = port or int(instance)
+    if port is not None:
+        port_num = port
+    elif instance.isnumeric():
+        port_num = int(instance)
+    else:
+        raise SystemExit(
+            f"--port is required when instance name '{instance}' is not a port number.\n"
+            f"Example: ots service init {package} {instance} --port 6379"
+        )
 
     print(f"Initializing {pkg.name} instance '{instance}'")
     print(f"  Template: {pkg.template_unit}")
@@ -203,7 +215,7 @@ def init(
         config_path = pkg.config_file(instance)
     except FileNotFoundError as e:
         print(f"  ERROR: {e}")
-        return
+        raise SystemExit(1)
 
     # Step 2: Update port and bind in config
     print("Updating config values...")
@@ -245,7 +257,7 @@ def init(
             print("  Started")
         except subprocess.CalledProcessError as e:
             print(f"  ERROR: Could not start: {e.stderr}")
-            return
+            raise SystemExit(1)
 
     print()
     print(f"Instance '{instance}' initialized successfully!")
@@ -270,6 +282,7 @@ def enable(package: Package, instance: Instance):
         print("Enabled")
     except subprocess.CalledProcessError as e:
         print(f"ERROR: {e.stderr}")
+        raise SystemExit(1)
 
 
 @app.command
@@ -306,6 +319,7 @@ def disable(
         print("Disabled")
     except subprocess.CalledProcessError as e:
         print(f"ERROR: {e.stderr}")
+        raise SystemExit(1)
 
 
 @app.command
@@ -337,6 +351,7 @@ def status(package: Package, instance: OptInstance = None):
             ],
             capture_output=True,
             text=True,
+            timeout=10,
         )
         print(result.stdout)
 
@@ -357,6 +372,7 @@ def start(package: Package, instance: Instance):
         print("Started")
     except subprocess.CalledProcessError as e:
         print(f"ERROR: {e.stderr}")
+        raise SystemExit(1)
 
 
 @app.command
@@ -375,6 +391,7 @@ def stop(package: Package, instance: Instance):
         print("Stopped")
     except subprocess.CalledProcessError as e:
         print(f"ERROR: {e.stderr}")
+        raise SystemExit(1)
 
 
 @app.command
@@ -393,6 +410,7 @@ def restart(package: Package, instance: Instance):
         print("Restarted")
     except subprocess.CalledProcessError as e:
         print(f"ERROR: {e.stderr}")
+        raise SystemExit(1)
 
 
 @app.command
@@ -450,6 +468,7 @@ def list_instances(
         ],
         capture_output=True,
         text=True,
+        timeout=10,
     )
 
     if result.stdout.strip():

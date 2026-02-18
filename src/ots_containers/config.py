@@ -46,6 +46,21 @@ class Config:
     registry: str | None = field(default_factory=lambda: os.environ.get("OTS_REGISTRY"))
     _registry_auth_file: Path | None = field(default=None, repr=False)
 
+    # Valkey/Redis service dependency for quadlet ordering (optional).
+    # Set OTS_VALKEY_SERVICE to the systemd unit name, e.g. "valkey-server@6379.service".
+    # When set, the web quadlet adds After= and Wants= entries so the OTS container
+    # only starts after the data store is ready on reboot.
+    valkey_service: str | None = field(default_factory=lambda: os.environ.get("OTS_VALKEY_SERVICE"))
+
+    # Container resource limits (optional, applied to all quadlet templates).
+    # Set via environment variables before deploying.
+    #
+    # MEMORY_MAX: Hard memory limit — container is OOM-killed if exceeded.
+    #             Systemd format: "512M", "1G", "2G".  Example: MEMORY_MAX=1G
+    # CPU_QUOTA:  CPU time quota as a percentage.  Example: CPU_QUOTA=80%
+    memory_max: str | None = field(default_factory=lambda: os.environ.get("MEMORY_MAX"))
+    cpu_quota: str | None = field(default_factory=lambda: os.environ.get("CPU_QUOTA"))
+
     # Proxy (Caddy) configuration - uses HOST environment, not container .env
     proxy_template: Path = Path("/etc/onetimesecret/Caddyfile.template")
     proxy_config: Path = Path("/etc/caddy/Caddyfile")

@@ -214,6 +214,79 @@ class TestContainerTemplate:
         assert "Wants=network-online.target" in content
         assert "WantedBy=multi-user.target" in content
 
+    def test_write_web_template_valkey_dependency_when_configured(self, mocker, tmp_path):
+        """write_web_template should add After= and Wants= for Valkey when configured."""
+        mocker.patch("ots_containers.quadlet.systemd.daemon_reload")
+        from ots_containers import quadlet
+        from ots_containers.config import Config
+
+        cfg = Config(
+            web_template_path=tmp_path / "onetime-web@.container",
+            var_dir=tmp_path / "var",
+        )
+        cfg.valkey_service = "valkey-server@6379.service"
+
+        quadlet.write_web_template(cfg)
+
+        content = cfg.web_template_path.read_text()
+        assert "After=local-fs.target network-online.target valkey-server@6379.service" in content
+        assert "Wants=valkey-server@6379.service" in content
+
+    def test_write_web_template_no_valkey_dependency_by_default(self, mocker, tmp_path):
+        """write_web_template should not add Valkey dependency when OTS_VALKEY_SERVICE is unset."""
+        mocker.patch("ots_containers.quadlet.systemd.daemon_reload")
+        from ots_containers import quadlet
+        from ots_containers.config import Config
+
+        cfg = Config(
+            web_template_path=tmp_path / "onetime-web@.container",
+            var_dir=tmp_path / "var",
+        )
+        assert cfg.valkey_service is None
+
+        quadlet.write_web_template(cfg)
+
+        content = cfg.web_template_path.read_text()
+        assert "valkey-server" not in content
+
+    def test_write_web_template_resource_limits_when_configured(self, mocker, tmp_path):
+        """write_web_template should include MemoryMax and CPUQuota when set."""
+        mocker.patch("ots_containers.quadlet.systemd.daemon_reload")
+        from ots_containers import quadlet
+        from ots_containers.config import Config
+
+        cfg = Config(
+            web_template_path=tmp_path / "onetime-web@.container",
+            var_dir=tmp_path / "var",
+        )
+        cfg.memory_max = "1G"
+        cfg.cpu_quota = "80%"
+
+        quadlet.write_web_template(cfg)
+
+        content = cfg.web_template_path.read_text()
+        assert "MemoryMax=1G" in content
+        assert "CPUQuota=80%" in content
+
+    def test_write_web_template_no_resource_limits_by_default(self, mocker, tmp_path):
+        """write_web_template should not add resource limits when not configured."""
+        mocker.patch("ots_containers.quadlet.systemd.daemon_reload")
+        from ots_containers import quadlet
+        from ots_containers.config import Config
+
+        cfg = Config(
+            web_template_path=tmp_path / "onetime-web@.container",
+            var_dir=tmp_path / "var",
+        )
+        assert cfg.memory_max is None
+        assert cfg.cpu_quota is None
+
+        quadlet.write_web_template(cfg)
+
+        content = cfg.web_template_path.read_text()
+        assert "MemoryMax=" not in content
+        assert "CPUQuota=" not in content
+
     def test_write_web_template_creates_parent_dirs(self, mocker, tmp_path):
         """write_web_template should create parent directories if needed."""
         mocker.patch("ots_containers.quadlet.systemd.daemon_reload")

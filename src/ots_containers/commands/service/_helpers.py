@@ -230,6 +230,7 @@ def systemctl_json(*args: str) -> dict | list | None:
             capture_output=True,
             text=True,
             check=True,
+            timeout=10,
         )
         if result.stdout.strip():
             return json.loads(result.stdout)
@@ -253,6 +254,7 @@ def systemctl(*args: str, check: bool = True) -> subprocess.CompletedProcess:
         capture_output=True,
         text=True,
         check=check,
+        timeout=30,
     )
 
 

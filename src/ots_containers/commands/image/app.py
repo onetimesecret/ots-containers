@@ -14,6 +14,7 @@ Maintains CURRENT and ROLLBACK aliases in SQLite database for:
   - Full audit trail
 """
 
+import logging
 from pathlib import Path
 from typing import Annotated
 
@@ -24,6 +25,8 @@ from ots_containers.config import Config
 from ots_containers.podman import podman
 
 from ..common import JsonOutput, Lines, Quiet, Yes
+
+logger = logging.getLogger(__name__)
 
 app = cyclopts.App(
     name=["image", "images"],

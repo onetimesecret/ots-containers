@@ -27,7 +27,9 @@ The container management commands use this layout:
 └── deployments.db            # Deployment tracking database
 
 /etc/containers/systemd/
-└── onetime@.container        # Generated quadlet template
+├── onetime-web@.container        # Generated quadlet template for web instances
+├── onetime-worker@.container     # Generated quadlet template for worker instances
+└── onetime-scheduler@.container  # Generated quadlet template for scheduler instances
 ```
 
 ## Podman Secrets
@@ -56,13 +58,13 @@ podman secret rm ots_hmac_secret
 
 ## Systemd Quadlet Template
 
-**Location**: `/etc/containers/systemd/onetime@.container`
+**Location**: `/etc/containers/systemd/onetime-web@.container`
 
 The tool generates a systemd quadlet file (a declarative container unit that systemd-podman converts into a service):
 
 ```bash
 sudo mkdir -p /etc/containers/systemd
-sudo tee /etc/containers/systemd/onetime@.container << 'EOF'
+sudo tee /etc/containers/systemd/onetime-web@.container << 'EOF'
 [Unit]
 Description=OneTimeSecret Container %i
 After=local-fs.target network-online.target
@@ -153,38 +155,38 @@ podman rm "$CONTAINER_ID"
 ### Start an Instance
 
 ```bash
-sudo systemctl start onetime@7043
+sudo systemctl start onetime-web@7043
 ```
 
 ### Stop an Instance
 
 ```bash
-sudo systemctl stop onetime@7043
+sudo systemctl stop onetime-web@7043
 ```
 
 ### Restart an Instance
 
 ```bash
-sudo systemctl restart onetime@7043
+sudo systemctl restart onetime-web@7043
 ```
 
 ### Check Status
 
 ```bash
-sudo systemctl --no-pager -n25 status onetime@7043
+sudo systemctl --no-pager -n25 status onetime-web@7043
 ```
 
 ### View Logs
 
 ```bash
 # Last 50 lines
-sudo journalctl --no-pager -n50 -u onetime@7043
+sudo journalctl --no-pager -n50 -u onetime-web@7043
 
 # Follow logs
-sudo journalctl -f -u onetime@7043
+sudo journalctl -f -u onetime-web@7043
 
 # Multiple instances
-sudo journalctl --no-pager -n50 -u onetime@7043 -u onetime@7044
+sudo journalctl --no-pager -n50 -u onetime-web@7043 -u onetime-web@7044
 ```
 
 ---
@@ -194,13 +196,20 @@ sudo journalctl --no-pager -n50 -u onetime@7043 -u onetime@7044
 ### Find Running Instances
 
 ```bash
-systemctl list-units 'onetime@*' --plain --no-legend
+# Web instances
+systemctl list-units 'onetime-web@*' --plain --no-legend
+
+# Worker instances
+systemctl list-units 'onetime-worker@*' --plain --no-legend
+
+# Scheduler instances
+systemctl list-units 'onetime-scheduler@*' --plain --no-legend
 ```
 
 ### Check if Instance Exists
 
 ```bash
-systemctl list-unit-files 'onetime@7043' --plain --no-legend
+systemctl list-unit-files 'onetime-web@7043' --plain --no-legend
 ```
 
 ### List Running Containers
@@ -213,7 +222,8 @@ podman ps --filter name=onetime \
 ### Execute Shell in Container
 
 ```bash
-podman exec -it onetime@7043 /bin/sh
+# Web instance (Podman names containers as systemd-{unit-with-underscores})
+podman exec -it systemd-onetime-web_7043 /bin/sh
 ```
 
 ---
@@ -264,7 +274,7 @@ podman rm "$CONTAINER_ID"
 
 # 3. Write quadlet template
 sudo mkdir -p /etc/containers/systemd
-sudo tee /etc/containers/systemd/onetime@.container << 'EOF'
+sudo tee /etc/containers/systemd/onetime-web@.container << 'EOF'
 [Unit]
 Description=OneTimeSecret Container %i
 After=local-fs.target network-online.target
@@ -300,7 +310,7 @@ EOF
 sudo systemctl daemon-reload
 
 # 5. Start the service
-sudo systemctl start onetime@7043
+sudo systemctl start onetime-web@7043
 ```
 
 ### Redeploy Existing Instance
@@ -309,7 +319,7 @@ Same as deploy, but use restart instead of start:
 
 ```bash
 # Steps 1-4 same as deploy
-sudo systemctl restart onetime@7043
+sudo systemctl restart onetime-web@7043
 ```
 
 ### Force Redeploy (Full Teardown)
@@ -320,8 +330,8 @@ This is `ots instance redeploy 7043 --force`:
 # Steps 1-4 same as deploy
 
 # 5. Stop and start fresh
-sudo systemctl stop onetime@7043
-sudo systemctl start onetime@7043
+sudo systemctl stop onetime-web@7043
+sudo systemctl start onetime-web@7043
 ```
 
 ### Undeploy Instance
@@ -329,7 +339,7 @@ sudo systemctl start onetime@7043
 This is `ots instance undeploy 7043`:
 
 ```bash
-sudo systemctl stop onetime@7043
+sudo systemctl stop onetime-web@7043
 ```
 
 ---
@@ -653,7 +663,9 @@ valkey-cli -p 6379 CONFIG GET '*'
 
 | Path | Purpose | Created By |
 |------|---------|------------|
-| `/etc/containers/systemd/onetime@.container` | Systemd quadlet template | `ots-containers instance deploy` |
+| `/etc/containers/systemd/onetime-web@.container` | Systemd quadlet template for web instances | `ots-containers instance deploy` |
+| `/etc/containers/systemd/onetime-worker@.container` | Systemd quadlet template for worker instances | `ots-containers instance deploy` |
+| `/etc/containers/systemd/onetime-scheduler@.container` | Systemd quadlet template for scheduler instances | `ots-containers instance deploy` |
 | `/etc/caddy/Caddyfile` | Rendered proxy config | `ots-containers proxy render` |
 
 ## Summary of Container Files Required

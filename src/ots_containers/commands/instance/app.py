@@ -2,7 +2,9 @@
 
 """Instance management app and commands for OTS containers."""
 
+import logging
 import subprocess
+import sys
 from typing import Annotated
 
 import cyclopts
@@ -13,6 +15,7 @@ from ots_containers.config import Config
 from ..common import DryRun, Follow, JsonOutput, Lines, Quiet, Yes
 from ._helpers import (
     build_secret_args,
+    deploy_lock,
     for_each_instance,
     format_command,
     format_journalctl_hint,
@@ -28,6 +31,8 @@ from .annotations import (
     WorkerFlag,
     resolve_instance_type,
 )
+
+logger = logging.getLogger(__name__)
 
 app = cyclopts.App(
     name=["instance", "instances"],
@@ -62,6 +67,7 @@ def _list_instances_impl(
                     ["systemctl", "is-active", service],
                     capture_output=True,
                     text=True,
+                    timeout=10,
                 )
                 status = result.stdout.strip()
 
@@ -125,6 +131,7 @@ def _list_instances_impl(
                 ["systemctl", "is-active", service],
                 capture_output=True,
                 text=True,
+                timeout=10,
             )
             status = result.stdout.strip()
 
@@ -373,6 +380,27 @@ def deploy(
     delay: Delay = 5,
     dry_run: DryRun = False,
     quiet: Quiet = False,
+    force: Annotated[
+        bool,
+        cyclopts.Parameter(
+            name=["--force", "-f"],
+            help=(
+                "Allow deployment even when env file or Podman secrets are missing. "
+                "The application will likely fail at runtime without required secrets."
+            ),
+        ),
+    ] = False,
+    wait_timeout: Annotated[
+        int,
+        cyclopts.Parameter(
+            name=["--wait-timeout", "-w"],
+            help=(
+                "Seconds to wait for the unit to become active after start. "
+                "0 disables the health wait (default: 0). "
+                "Records success=False in deployment history if unit fails to become active."
+            ),
+        ),
+    ] = 0,
 ):
     """Deploy new instance(s) using quadlet and Podman secrets.
 
@@ -385,6 +413,8 @@ def deploy(
         ots instances deploy --worker 1 2           # Deploy workers 1, 2
         ots instances deploy --worker billing       # Deploy 'billing' worker
         ots instances deploy --scheduler main       # Deploy scheduler
+        ots instances deploy --web 7043 --force     # Skip secrets check (not recommended)
+        ots instances deploy --web 7043 --wait-timeout 60  # Wait up to 60s for health
     """
     itype = resolve_instance_type(instance_type, web, worker, scheduler)
 
@@ -412,53 +442,77 @@ def deploy(
         print(f"[dry-run] Would deploy {itype.value}: {', '.join(identifiers)}")
         return
 
-    # Write appropriate quadlet template
-    if itype == InstanceType.WEB:
-        assets.update(cfg, create_volume=True)
-        print(f"Writing quadlet files to {cfg.web_template_path.parent}")
-        quadlet.write_web_template(cfg)
-    elif itype == InstanceType.WORKER:
-        print(f"Writing quadlet files to {cfg.worker_template_path.parent}")
-        quadlet.write_worker_template(cfg)
-    elif itype == InstanceType.SCHEDULER:
-        print(f"Writing quadlet files to {cfg.scheduler_template_path.parent}")
-        quadlet.write_scheduler_template(cfg)
+    with deploy_lock():
+        # Write appropriate quadlet template.
+        # Raises SystemExit(1) if env file or secrets are missing (unless force=True).
+        if itype == InstanceType.WEB:
+            assets.update(cfg, create_volume=True)
+            logger.info("Writing quadlet files to %s", cfg.web_template_path.parent)
+            quadlet.write_web_template(cfg, force=force)
+        elif itype == InstanceType.WORKER:
+            logger.info("Writing quadlet files to %s", cfg.worker_template_path.parent)
+            quadlet.write_worker_template(cfg, force=force)
+        elif itype == InstanceType.SCHEDULER:
+            logger.info("Writing quadlet files to %s", cfg.scheduler_template_path.parent)
+            quadlet.write_scheduler_template(cfg, force=force)
 
-    def do_deploy(inst_type: InstanceType, id_: str) -> None:
-        unit = systemd.unit_name(inst_type.value, id_)
-        try:
-            systemd.start(unit)
-            # Record successful deployment
+        def do_deploy(inst_type: InstanceType, id_: str) -> None:
+            unit = systemd.unit_name(inst_type.value, id_)
             port = int(id_) if inst_type == InstanceType.WEB else 0
-            db.record_deployment(
-                cfg.db_path,
-                image=image,
-                tag=tag,
-                action=f"deploy-{inst_type.value}",
-                port=port,
-                success=True,
-                notes=None if inst_type == InstanceType.WEB else f"{inst_type.value}_id={id_}",
-            )
-        except Exception as e:
-            port = int(id_) if inst_type == InstanceType.WEB else 0
-            fail_notes = (
-                str(e)
-                if inst_type == InstanceType.WEB
-                else f"{inst_type.value}_id={id_}; error={e}"
-            )
-            db.record_deployment(
-                cfg.db_path,
-                image=image,
-                tag=tag,
-                action=f"deploy-{inst_type.value}",
-                port=port,
-                success=False,
-                notes=fail_notes,
-            )
-            raise
+            base_notes = None if inst_type == InstanceType.WEB else f"{inst_type.value}_id={id_}"
+            try:
+                systemd.start(unit)
+                # Optionally wait for the unit to become active
+                if wait_timeout > 0:
+                    if not quiet:
+                        print(f"  Waiting up to {wait_timeout}s for {unit} to become active...")
+                    systemd.wait_for_healthy(unit, timeout=wait_timeout)
+                # Record successful deployment
+                db.record_deployment(
+                    cfg.db_path,
+                    image=image,
+                    tag=tag,
+                    action=f"deploy-{inst_type.value}",
+                    port=port,
+                    success=True,
+                    notes=base_notes,
+                )
+            except systemd.HealthCheckTimeoutError as e:
+                fail_notes = (
+                    f"health-timeout: {e}"
+                    if inst_type == InstanceType.WEB
+                    else f"{inst_type.value}_id={id_}; health-timeout: {e}"
+                )
+                db.record_deployment(
+                    cfg.db_path,
+                    image=image,
+                    tag=tag,
+                    action=f"deploy-{inst_type.value}",
+                    port=port,
+                    success=False,
+                    notes=fail_notes,
+                )
+                print(f"  ERROR: {e}", file=sys.stderr)
+                raise SystemExit(1) from None
+            except Exception as e:
+                fail_notes = (
+                    str(e)
+                    if inst_type == InstanceType.WEB
+                    else f"{inst_type.value}_id={id_}; error={e}"
+                )
+                db.record_deployment(
+                    cfg.db_path,
+                    image=image,
+                    tag=tag,
+                    action=f"deploy-{inst_type.value}",
+                    port=port,
+                    success=False,
+                    notes=fail_notes,
+                )
+                raise
 
-    instances = {itype: list(identifiers)}
-    for_each_instance(instances, delay, do_deploy, "Deploying", show_logs_hint=True)
+        instances = {itype: list(identifiers)}
+        for_each_instance(instances, delay, do_deploy, "Deploying", show_logs_hint=True)
 
 
 @app.command
@@ -478,6 +532,17 @@ def redeploy(
     ] = False,
     dry_run: DryRun = False,
     quiet: Quiet = False,
+    wait_timeout: Annotated[
+        int,
+        cyclopts.Parameter(
+            name=["--wait-timeout", "-w"],
+            help=(
+                "Seconds to wait for the unit to become active after restart. "
+                "0 disables the health wait (default: 0). "
+                "Records success=False in deployment history if unit fails to become active."
+            ),
+        ),
+    ] = 0,
 ):
     """Regenerate quadlet and restart containers.
 
@@ -494,6 +559,7 @@ def redeploy(
         ots instances redeploy --web 7043 7044      # Redeploy specific web
         ots instances redeploy --scheduler main     # Redeploy specific scheduler
         ots instances redeploy --force              # Force teardown+recreate
+        ots instances redeploy --wait-timeout 60    # Wait up to 60s for health
     """
     itype = resolve_instance_type(instance_type, web, worker, scheduler)
     instances = resolve_identifiers(identifiers, itype, running_only=True)
@@ -520,65 +586,93 @@ def redeploy(
             print(f"[dry-run] Would {verb} {inst_type.value}: {', '.join(ids)}")
         return
 
-    # Write quadlet templates for each type being redeployed
-    if InstanceType.WEB in instances:
-        assets.update(cfg, create_volume=force)
-        print(f"Writing quadlet files to {cfg.web_template_path.parent}")
-        quadlet.write_web_template(cfg)
-    if InstanceType.WORKER in instances:
-        print(f"Writing quadlet files to {cfg.worker_template_path.parent}")
-        quadlet.write_worker_template(cfg)
-    if InstanceType.SCHEDULER in instances:
-        print(f"Writing quadlet files to {cfg.scheduler_template_path.parent}")
-        quadlet.write_scheduler_template(cfg)
+    with deploy_lock():
+        # Write quadlet templates for each type being redeployed.
+        # Raises SystemExit(1) if env file or secrets are missing.
+        # Redeploy always enforces secrets check (no --force override for secrets here).
+        if InstanceType.WEB in instances:
+            assets.update(cfg, create_volume=force)
+            logger.info("Writing quadlet files to %s", cfg.web_template_path.parent)
+            quadlet.write_web_template(cfg)
+        if InstanceType.WORKER in instances:
+            logger.info("Writing quadlet files to %s", cfg.worker_template_path.parent)
+            quadlet.write_worker_template(cfg)
+        if InstanceType.SCHEDULER in instances:
+            logger.info("Writing quadlet files to %s", cfg.scheduler_template_path.parent)
+            quadlet.write_scheduler_template(cfg)
 
-    def do_redeploy(inst_type: InstanceType, id_: str) -> None:
-        unit = systemd.unit_name(inst_type.value, id_)
-
-        if force:
-            print(f"Stopping {unit}")
-            systemd.stop(unit)
-
-        try:
-            if force or not systemd.container_exists(unit):
-                print(f"Starting {unit}")
-                systemd.start(unit)
-            else:
-                print(f"Recreating {unit}")
-                systemd.recreate(unit)
-
+        def do_redeploy(inst_type: InstanceType, id_: str) -> None:
+            unit = systemd.unit_name(inst_type.value, id_)
             port = int(id_) if inst_type == InstanceType.WEB else 0
-            db.record_deployment(
-                cfg.db_path,
-                image=image,
-                tag=tag,
-                action=f"redeploy-{inst_type.value}",
-                port=port,
-                success=True,
-                notes=("force" if force else None)
+            base_notes = (
+                ("force" if force else None)
                 if inst_type == InstanceType.WEB
-                else f"{inst_type.value}_id={id_}" + (", force" if force else ""),
+                else f"{inst_type.value}_id={id_}" + (", force" if force else "")
             )
-        except Exception as e:
-            port = int(id_) if inst_type == InstanceType.WEB else 0
-            fail_notes = (
-                str(e)
-                if inst_type == InstanceType.WEB
-                else f"{inst_type.value}_id={id_}; error={e}"
-            )
-            db.record_deployment(
-                cfg.db_path,
-                image=image,
-                tag=tag,
-                action=f"redeploy-{inst_type.value}",
-                port=port,
-                success=False,
-                notes=fail_notes,
-            )
-            raise
 
-    verb = "Force redeploying" if force else "Redeploying"
-    for_each_instance(instances, delay, do_redeploy, verb, show_logs_hint=True)
+            if force:
+                print(f"Stopping {unit}")
+                systemd.stop(unit)
+
+            try:
+                if force or not systemd.container_exists(unit):
+                    print(f"Starting {unit}")
+                    systemd.start(unit)
+                else:
+                    print(f"Recreating {unit}")
+                    systemd.recreate(unit)
+
+                # Optionally wait for the unit to become active
+                if wait_timeout > 0:
+                    if not quiet:
+                        print(f"  Waiting up to {wait_timeout}s for {unit} to become active...")
+                    systemd.wait_for_healthy(unit, timeout=wait_timeout)
+
+                db.record_deployment(
+                    cfg.db_path,
+                    image=image,
+                    tag=tag,
+                    action=f"redeploy-{inst_type.value}",
+                    port=port,
+                    success=True,
+                    notes=base_notes,
+                )
+            except systemd.HealthCheckTimeoutError as e:
+                fail_notes = (
+                    f"health-timeout: {e}"
+                    if inst_type == InstanceType.WEB
+                    else f"{inst_type.value}_id={id_}; health-timeout: {e}"
+                )
+                db.record_deployment(
+                    cfg.db_path,
+                    image=image,
+                    tag=tag,
+                    action=f"redeploy-{inst_type.value}",
+                    port=port,
+                    success=False,
+                    notes=fail_notes,
+                )
+                print(f"  ERROR: {e}", file=sys.stderr)
+                raise SystemExit(1) from None
+            except Exception as e:
+                fail_notes = (
+                    str(e)
+                    if inst_type == InstanceType.WEB
+                    else f"{inst_type.value}_id={id_}; error={e}"
+                )
+                db.record_deployment(
+                    cfg.db_path,
+                    image=image,
+                    tag=tag,
+                    action=f"redeploy-{inst_type.value}",
+                    port=port,
+                    success=False,
+                    notes=fail_notes,
+                )
+                raise
+
+        verb = "Force redeploying" if force else "Redeploying"
+        for_each_instance(instances, delay, do_redeploy, verb, show_logs_hint=True)
 
 
 @app.command
@@ -632,6 +726,8 @@ def undeploy(
         unit = systemd.unit_name(inst_type.value, id_)
         try:
             systemd.stop(unit)
+            # Prevent auto-start on reboot — disable is idempotent (no-op if not enabled)
+            systemd.disable(unit)
             # Clear failed state so unit doesn't appear in discovery
             systemd.reset_failed(unit)
             port = int(id_) if inst_type == InstanceType.WEB else 0
@@ -788,6 +884,7 @@ def enable(
         ots instances enable --web 7043 7044        # Enable specific web
         ots instances enable --scheduler main       # Enable specific scheduler
     """
+    systemd.require_systemctl()
     itype = resolve_instance_type(instance_type, web, worker, scheduler)
     instances = resolve_identifiers(identifiers, itype, running_only=False)
 
@@ -800,7 +897,7 @@ def enable(
             unit = systemd.unit_name(inst_type.value, id_)
             try:
                 subprocess.run(
-                    ["systemctl", "enable", unit],
+                    ["sudo", "systemctl", "enable", unit],
                     check=True,
                     capture_output=True,
                     text=True,
@@ -829,6 +926,7 @@ def disable(
         ots instances disable --web 7043 7044 -y    # Disable specific web
         ots instances disable --scheduler main -y   # Disable specific scheduler
     """
+    systemd.require_systemctl()
     itype = resolve_instance_type(instance_type, web, worker, scheduler)
     instances = resolve_identifiers(identifiers, itype, running_only=False)
 
@@ -851,7 +949,7 @@ def disable(
             unit = systemd.unit_name(inst_type.value, id_)
             try:
                 subprocess.run(
-                    ["systemctl", "disable", unit],
+                    ["sudo", "systemctl", "disable", unit],
                     check=True,
                     capture_output=True,
                     text=True,

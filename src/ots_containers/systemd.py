@@ -1,9 +1,12 @@
 # src/ots_containers/systemd.py
 
+import logging
 import re
 import shutil
 import subprocess
 import sys
+
+logger = logging.getLogger(__name__)
 
 
 class SystemdNotAvailableError(Exception):
@@ -39,7 +42,7 @@ def _fetch_journal(unit: str, lines: int = 20) -> str:
 def _run_systemctl(action: str, unit: str) -> None:
     """Run a systemctl command with diagnostic output on failure."""
     cmd = ["sudo", "systemctl", action, unit]
-    print(f"  $ {' '.join(cmd)}")
+    logger.debug("  $ %s", " ".join(cmd))
     result = subprocess.run(cmd, capture_output=True, text=True, timeout=90)
     if result.returncode != 0:
         journal = _fetch_journal(unit)
@@ -99,6 +102,7 @@ def discover_web_instances(running_only: bool = False) -> list[int]:
         ],
         capture_output=True,
         text=True,
+        timeout=10,
     )
     ports = []
     for line in result.stdout.strip().splitlines():
@@ -141,6 +145,7 @@ def discover_worker_instances(running_only: bool = False) -> list[str]:
         ],
         capture_output=True,
         text=True,
+        timeout=10,
     )
     instances = []
     for line in result.stdout.strip().splitlines():
@@ -184,6 +189,7 @@ def discover_scheduler_instances(running_only: bool = False) -> list[str]:
         ],
         capture_output=True,
         text=True,
+        timeout=10,
     )
     instances = []
     for line in result.stdout.strip().splitlines():
@@ -209,8 +215,8 @@ def discover_scheduler_instances(running_only: bool = False) -> list[str]:
 def daemon_reload() -> None:
     require_systemctl()
     cmd = ["sudo", "systemctl", "daemon-reload"]
-    print(f"  $ {' '.join(cmd)}")
-    subprocess.run(cmd, check=True)  # no unit context, let CalledProcessError propagate
+    logger.debug("  $ %s", " ".join(cmd))
+    subprocess.run(cmd, check=True, timeout=30)  # no unit context, let CalledProcessError propagate
 
 
 def start(unit: str) -> None:
@@ -227,14 +233,27 @@ def reset_failed(unit: str) -> None:
     """Clear failed state for a unit so it doesn't appear in discovery."""
     require_systemctl()
     cmd = ["sudo", "systemctl", "reset-failed", unit]
-    print(f"  $ {' '.join(cmd)}")
+    logger.debug("  $ %s", " ".join(cmd))
     # Suppress stderr - it's fine if the unit wasn't in failed state
-    subprocess.run(cmd, stderr=subprocess.DEVNULL)
+    subprocess.run(cmd, stderr=subprocess.DEVNULL, timeout=10)
 
 
 def restart(unit: str) -> None:
     require_systemctl()
     _run_systemctl("restart", unit)
+
+
+def disable(unit: str) -> None:
+    """Disable a unit so it does not auto-start on reboot.
+
+    Non-fatal if the unit is not currently enabled — systemctl disable is
+    idempotent and exits 0 even when the unit was never enabled.
+    """
+    require_systemctl()
+    cmd = ["sudo", "systemctl", "disable", unit]
+    logger.debug("  $ %s", " ".join(cmd))
+    # Suppress stderr — 'not enabled' is not an error worth surfacing
+    subprocess.run(cmd, stderr=subprocess.DEVNULL, timeout=10)
 
 
 def unit_to_container_name(unit: str) -> str:
@@ -268,8 +287,8 @@ def recreate(unit: str) -> None:
     # Remove the container (Quadlet uses systemd-{name} format with @ -> _)
     container_name = unit_to_container_name(unit)
     rm_cmd = ["sudo", "podman", "rm", "--ignore", container_name]
-    print(f"  $ {' '.join(rm_cmd)}")
-    subprocess.run(rm_cmd, check=True)
+    logger.debug("  $ %s", " ".join(rm_cmd))
+    subprocess.run(rm_cmd, check=True, timeout=30)
 
     # Start creates a fresh container from the updated quadlet
     _run_systemctl("start", unit)
@@ -278,10 +297,11 @@ def recreate(unit: str) -> None:
 def status(unit: str, lines: int = 25) -> None:
     require_systemctl()
     cmd = ["sudo", "systemctl", "--no-pager", f"-n{lines}", "status", unit]
-    print(f"  $ {' '.join(cmd)}")
+    logger.debug("  $ %s", " ".join(cmd))
     subprocess.run(
         cmd,
         check=False,  # status returns non-zero if not running
+        timeout=30,
     )
 
 
@@ -292,6 +312,7 @@ def unit_exists(unit: str) -> bool:
         ["systemctl", "list-unit-files", unit, "--plain", "--no-legend"],
         capture_output=True,
         text=True,
+        timeout=10,
     )
     return bool(result.stdout.strip())
 
@@ -306,5 +327,55 @@ def container_exists(unit: str) -> bool:
     result = subprocess.run(
         ["podman", "container", "exists", container_name],
         capture_output=True,
+        timeout=10,
     )
     return result.returncode == 0
+
+
+class HealthCheckTimeoutError(Exception):
+    """Raised when a unit fails to become active within the configured timeout."""
+
+    def __init__(self, unit: str, timeout: int, last_state: str) -> None:
+        self.unit = unit
+        self.timeout = timeout
+        self.last_state = last_state
+        super().__init__(
+            f"{unit} did not become active within {timeout}s (last state: {last_state})"
+        )
+
+
+def wait_for_healthy(unit: str, timeout: int = 60, poll_interval: float = 2.0) -> None:
+    """Poll systemctl until the unit is active or timeout is reached.
+
+    Args:
+        unit: Systemd unit name (e.g., "onetime-web@7043")
+        timeout: Maximum seconds to wait (default: 60)
+        poll_interval: Seconds between checks (default: 2.0)
+
+    Raises:
+        HealthCheckTimeoutError: If the unit is not active within ``timeout`` seconds.
+    """
+    import time
+
+    require_systemctl()
+    deadline = time.monotonic() + timeout
+    last_state = "unknown"
+
+    while time.monotonic() < deadline:
+        result = subprocess.run(
+            ["systemctl", "is-active", unit],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        last_state = result.stdout.strip()
+        if result.returncode == 0 and last_state == "active":
+            logger.debug("%s is active", unit)
+            return
+        # Stop early on terminal failure states — no point continuing to poll
+        if last_state == "failed":
+            break
+        logger.debug("%s is %s, waiting...", unit, last_state)
+        time.sleep(poll_interval)
+
+    raise HealthCheckTimeoutError(unit, timeout, last_state)

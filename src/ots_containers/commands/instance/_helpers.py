@@ -2,6 +2,8 @@
 
 """Internal helper functions for instance commands."""
 
+import contextlib
+import fcntl
 import shlex
 import sys
 import time
@@ -13,6 +15,83 @@ from ots_containers.environment_file import get_secrets_from_env_file
 from ots_containers.systemd import SystemctlError
 
 from .annotations import InstanceType
+
+#: Default lock file path for serialising concurrent deploy/redeploy operations.
+DEPLOY_LOCK_PATH = Path("/var/lib/onetimesecret/deploy.lock")
+
+
+@contextlib.contextmanager
+def deploy_lock(lock_path: Path = DEPLOY_LOCK_PATH):
+    """Exclusive advisory lock to serialise concurrent deploy/redeploy operations.
+
+    Uses ``fcntl.LOCK_EX | fcntl.LOCK_NB`` so a second caller gets an
+    immediate ``BlockingIOError`` rather than hanging indefinitely.
+
+    Args:
+        lock_path: Path to the lock file.  Created (including parent dirs) if
+                   it does not exist.  Falls back to a tempfile when the
+                   standard path is not writable (e.g. macOS dev environment).
+
+    Raises:
+        SystemExit(1): If the lock is already held by another process.
+
+    Usage::
+
+        with deploy_lock():
+            systemd.start(unit)
+    """
+    # Resolve the actual lock path — fall back when system path is not writable
+    resolved = _resolve_lock_path(lock_path)
+
+    try:
+        resolved.parent.mkdir(parents=True, exist_ok=True)
+        fh = resolved.open("a")  # "a" so we never truncate an existing file
+    except OSError as exc:
+        # Unable to create/open the lock file — non-fatal on dev machines
+        print(
+            f"Warning: cannot open deploy lock file {resolved}: {exc}",
+            file=sys.stderr,
+        )
+        yield
+        return
+
+    try:
+        fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        fh.close()
+        print(
+            "Error: another deploy is already in progress "
+            f"(lock held: {resolved}).\n"
+            "Wait for it to finish or remove the lock file manually if it is stale.",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+
+    try:
+        yield
+    finally:
+        fcntl.flock(fh, fcntl.LOCK_UN)
+        fh.close()
+
+
+def _resolve_lock_path(lock_path: Path) -> Path:
+    """Return *lock_path* if its parent is writable, otherwise a temp-dir path."""
+    import tempfile
+
+    # Try the requested path
+    try:
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        # Test writeability without creating the file permanently
+        test = lock_path.parent / ".ots_lock_probe"
+        test.touch()
+        test.unlink()
+        return lock_path
+    except OSError:
+        pass
+
+    # Fall back to a user-writable temp location
+    tmp = Path(tempfile.gettempdir()) / "ots-deploy.lock"
+    return tmp
 
 
 def format_command(cmd: Sequence[str]) -> str:

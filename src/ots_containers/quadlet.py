@@ -7,6 +7,7 @@ the container. Secret= lines are generated dynamically based on the
 SECRET_VARIABLE_NAMES defined in the environment file.
 """
 
+import sys
 from pathlib import Path
 
 from . import systemd
@@ -58,13 +59,13 @@ WEB_TEMPLATE = """\
 
 [Unit]
 Description=OneTimeSecret Web Container %i
-After=local-fs.target network-online.target
-Wants=network-online.target
+After=local-fs.target network-online.target{valkey_after}
+Wants=network-online.target{valkey_wants}
 
 [Service]
 Restart=on-failure
 RestartSec=5
-
+{resource_limits_section}
 [Container]
 Image={image}
 Network=host
@@ -98,43 +99,109 @@ WantedBy=multi-user.target
 """
 
 
-def get_secrets_section(env_file_path: Path | None = None) -> str:
+def get_secrets_section(env_file_path: Path | None = None, *, force: bool = False) -> str:
     """Generate the secrets section for the quadlet template.
 
     Reads SECRET_VARIABLE_NAMES from the environment file and generates
-    corresponding Secret= directives. Returns empty comment if no secrets
-    are defined.
+    corresponding Secret= directives.
 
     Args:
         env_file_path: Path to environment file (defaults to /etc/default/onetimesecret)
+        force: If True, allow deployment even when secrets are not configured.
+               This will produce a quadlet with no Secret= lines; the application
+               will likely fail at runtime without its required secrets.
 
     Returns:
-        Multi-line string with Secret= directives, or comment if none defined
+        Multi-line string with Secret= directives
+
+    Raises:
+        SystemExit(1): When env file is missing or no secrets are configured,
+                       unless force=True.
     """
     env_path = env_file_path or DEFAULT_ENV_FILE
 
     if not env_path.exists():
-        return "# No secrets configured (env file not found)"
+        msg = (
+            f"ERROR: Environment file not found: {env_path}\n"
+            "\n"
+            "The environment file must exist before deploying. It defines which\n"
+            "variables are secrets and provides infrastructure configuration.\n"
+            "\n"
+            "To create it:\n"
+            f"  sudo cp /usr/share/doc/ots-containers/onetimesecret.env.example {env_path}\n"
+            "  # or: ots init  (scaffolds the file from template)\n"
+            "\n"
+            "Then configure secrets:\n"
+            f"  sudo vi {env_path}  # set SECRET_VARIABLE_NAMES and secret values\n"
+            "  sudo ots env process  # moves secret values into podman secret store\n"
+            "\n"
+            "Use --force to skip this check and write a quadlet with no secrets\n"
+            "(the application will fail at runtime without required secrets)."
+        )
+        if force:
+            print(f"WARNING: {msg}", file=sys.stderr)
+            return "# No secrets configured (env file not found - deployed with --force)"
+        raise SystemExit(msg)
 
     secrets = get_secrets_from_env_file(env_path)
     if not secrets:
-        return "# No secrets configured (SECRET_VARIABLE_NAMES not set in env file)"
+        msg = (
+            f"ERROR: No secrets configured in {env_path}\n"
+            "\n"
+            "SECRET_VARIABLE_NAMES is not set or is empty. The application requires\n"
+            "secrets (HMAC_SECRET, SECRET, SESSION_SECRET, etc.) to function.\n"
+            "\n"
+            "To configure secrets:\n"
+            f"  sudo vi {env_path}  # set SECRET_VARIABLE_NAMES and secret values\n"
+            "  sudo ots env process  # moves secret values into podman secret store\n"
+            "\n"
+            "Use --force to skip this check and write a quadlet with no secrets\n"
+            "(the application will fail at runtime without required secrets)."
+        )
+        if force:
+            print(f"WARNING: {msg}", file=sys.stderr)
+            return "# No secrets configured (SECRET_VARIABLE_NAMES not set - deployed with --force)"
+        raise SystemExit(msg)
 
     # Defense-in-depth: only include secrets that actually exist as podman secrets.
     # A secret may have been processed in the env file but later deleted from the
     # podman secret store. Warn rather than letting podman fail at container start.
     verified = []
+    missing = []
     for spec in secrets:
         if secret_exists(spec.secret_name):
             verified.append(spec)
         else:
-            print(
-                f"Warning: podman secret '{spec.secret_name}' not found, "
-                f"skipping Secret= line for {spec.env_var_name}"
-            )
+            missing.append(spec)
+
+    if missing:
+        names = ", ".join(s.secret_name for s in missing)
+        print(
+            f"WARNING: Podman secrets not found: {names}\n"
+            "These secrets are listed in SECRET_VARIABLE_NAMES but don't exist in\n"
+            "the podman secret store. Run 'ots env process' to create them.\n"
+            "Skipping their Secret= lines in the quadlet.",
+            file=sys.stderr,
+        )
 
     if not verified:
-        return "# No secrets configured (none found in podman secret store)"
+        msg = (
+            "ERROR: No podman secrets found for any configured secret variable.\n"
+            "\n"
+            f"Secrets listed in {env_path} (SECRET_VARIABLE_NAMES) have not been\n"
+            "created in the podman secret store. The application will fail at\n"
+            "runtime without them.\n"
+            "\n"
+            "To create podman secrets:\n"
+            "  sudo ots env process  # reads env file and creates podman secrets\n"
+            "\n"
+            "Use --force to skip this check and write a quadlet with no secrets\n"
+            "(the application will fail at runtime without required secrets)."
+        )
+        if force:
+            print(f"WARNING: {msg}", file=sys.stderr)
+            return "# No secrets configured (no podman secrets found - deployed with --force)"
+        raise SystemExit(msg)
 
     return generate_quadlet_secret_lines(verified)
 
@@ -153,25 +220,115 @@ def get_config_volumes_section(cfg: Config) -> str:
     return "\n".join(lines)
 
 
-def write_web_template(cfg: Config, env_file_path: Path | None = None) -> None:
+def get_resource_limits_section(cfg: Config) -> str:
+    """Generate resource limit directives for the [Service] section.
+
+    Returns the MemoryMax= and CPUQuota= lines (with a trailing newline so
+    the placeholder can be placed inside the section without extra spacing)
+    when the corresponding Config fields are set.  Returns an empty string
+    when neither is configured so the template does not gain spurious blank
+    lines.
+
+    Args:
+        cfg: Configuration object (reads ``memory_max`` and ``cpu_quota``).
+
+    Returns:
+        Multi-line string to substitute for ``{resource_limits_section}``
+        in a quadlet template.
+
+    Example output when both are set::
+
+        MemoryMax=1G
+        CPUQuota=80%
+    """
+    lines = []
+    if cfg.memory_max:
+        lines.append(f"MemoryMax={cfg.memory_max}")
+    if cfg.cpu_quota:
+        lines.append(f"CPUQuota={cfg.cpu_quota}")
+    return "\n".join(lines) + "\n" if lines else ""
+
+
+def _get_valkey_unit_dependencies(cfg: Config) -> tuple[str, str]:
+    """Return (after_fragment, wants_fragment) for the [Unit] section.
+
+    When cfg.valkey_service is set (e.g. "valkey-server@6379.service") the
+    web quadlet declares ordering and a soft dependency on that unit so that
+    on reboot the data store is started before the OTS container.
+
+    Returns:
+        A tuple of two strings to be appended after the existing After= and
+        Wants= values respectively.  Empty strings when no service is configured.
+    """
+    if not cfg.valkey_service:
+        return "", ""
+    return f" {cfg.valkey_service}", f"\nWants={cfg.valkey_service}"
+
+
+def _write_template(
+    template: str,
+    path: Path,
+    cfg: Config,
+    env_file_path: Path | None,
+    *,
+    force: bool,
+    extra_vars: dict | None = None,
+) -> None:
+    """Shared implementation for writing a quadlet template to disk.
+
+    Resolves the secrets section and config volumes section, formats the
+    template string, writes the file, and triggers a systemd daemon-reload.
+
+    Args:
+        template: Template string containing ``{image}``, ``{config_dir}``,
+                  ``{secrets_section}``, ``{config_volumes_section}``, and
+                  any keys in *extra_vars*.
+        path: Destination file path (parent dirs created if absent).
+        cfg: Configuration object.
+        env_file_path: Optional override for the environment file location.
+        force: Pass ``force=True`` to ``get_secrets_section`` to allow deploy
+               without secrets.
+        extra_vars: Additional ``str.format`` keyword arguments (e.g.
+                    ``valkey_after``, ``valkey_wants`` for the web template).
+    """
+    secrets_section = get_secrets_section(env_file_path, force=force)
+    config_volumes_section = get_config_volumes_section(cfg)
+
+    fmt_vars: dict = {
+        "image": cfg.resolved_image_with_tag,
+        "config_dir": cfg.config_dir,
+        "secrets_section": secrets_section,
+        "config_volumes_section": config_volumes_section,
+        "resource_limits_section": get_resource_limits_section(cfg),
+    }
+    if extra_vars:
+        fmt_vars.update(extra_vars)
+
+    content = template.format(**fmt_vars)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content)
+    systemd.daemon_reload()
+
+
+def write_web_template(
+    cfg: Config, env_file_path: Path | None = None, *, force: bool = False
+) -> None:
     """Write the web container quadlet template.
 
     Args:
         cfg: Configuration object with image and paths
         env_file_path: Optional path to environment file for secret discovery
+        force: If True, allow deployment even when secrets are not configured.
     """
-    secrets_section = get_secrets_section(env_file_path)
-    config_volumes_section = get_config_volumes_section(cfg)
-
-    content = WEB_TEMPLATE.format(
-        image=cfg.resolved_image_with_tag,
-        config_dir=cfg.config_dir,
-        secrets_section=secrets_section,
-        config_volumes_section=config_volumes_section,
+    valkey_after, valkey_wants = _get_valkey_unit_dependencies(cfg)
+    _write_template(
+        WEB_TEMPLATE,
+        cfg.web_template_path,
+        cfg,
+        env_file_path,
+        force=force,
+        extra_vars={"valkey_after": valkey_after, "valkey_wants": valkey_wants},
     )
-    cfg.web_template_path.parent.mkdir(parents=True, exist_ok=True)
-    cfg.web_template_path.write_text(content)
-    systemd.daemon_reload()
 
 
 # Worker quadlet template - for background job processing (Sneakers/RabbitMQ)
@@ -224,7 +381,7 @@ Restart=on-failure
 RestartSec=5
 # Allow time for graceful job completion on stop
 TimeoutStopSec=90
-
+{resource_limits_section}
 [Container]
 Image={image}
 Network=host
@@ -258,25 +415,17 @@ WantedBy=multi-user.target
 """
 
 
-def write_worker_template(cfg: Config, env_file_path: Path | None = None) -> None:
+def write_worker_template(
+    cfg: Config, env_file_path: Path | None = None, *, force: bool = False
+) -> None:
     """Write the worker container quadlet template.
 
     Args:
         cfg: Configuration object with image and paths
         env_file_path: Optional path to environment file for secret discovery
+        force: If True, allow deployment even when secrets are not configured.
     """
-    secrets_section = get_secrets_section(env_file_path)
-    config_volumes_section = get_config_volumes_section(cfg)
-
-    content = WORKER_TEMPLATE.format(
-        image=cfg.resolved_image_with_tag,
-        config_dir=cfg.config_dir,
-        secrets_section=secrets_section,
-        config_volumes_section=config_volumes_section,
-    )
-    cfg.worker_template_path.parent.mkdir(parents=True, exist_ok=True)
-    cfg.worker_template_path.write_text(content)
-    systemd.daemon_reload()
+    _write_template(WORKER_TEMPLATE, cfg.worker_template_path, cfg, env_file_path, force=force)
 
 
 # Scheduler quadlet template - for cron-like job scheduling
@@ -329,7 +478,7 @@ Restart=on-failure
 RestartSec=5
 # Allow time for graceful job completion on stop
 TimeoutStopSec=60
-
+{resource_limits_section}
 [Container]
 Image={image}
 Network=host
@@ -363,22 +512,16 @@ WantedBy=multi-user.target
 """
 
 
-def write_scheduler_template(cfg: Config, env_file_path: Path | None = None) -> None:
+def write_scheduler_template(
+    cfg: Config, env_file_path: Path | None = None, *, force: bool = False
+) -> None:
     """Write the scheduler container quadlet template.
 
     Args:
         cfg: Configuration object with image and paths
         env_file_path: Optional path to environment file for secret discovery
+        force: If True, allow deployment even when secrets are not configured.
     """
-    secrets_section = get_secrets_section(env_file_path)
-    config_volumes_section = get_config_volumes_section(cfg)
-
-    content = SCHEDULER_TEMPLATE.format(
-        image=cfg.resolved_image_with_tag,
-        config_dir=cfg.config_dir,
-        secrets_section=secrets_section,
-        config_volumes_section=config_volumes_section,
+    _write_template(
+        SCHEDULER_TEMPLATE, cfg.scheduler_template_path, cfg, env_file_path, force=force
     )
-    cfg.scheduler_template_path.parent.mkdir(parents=True, exist_ok=True)
-    cfg.scheduler_template_path.write_text(content)
-    systemd.daemon_reload()
