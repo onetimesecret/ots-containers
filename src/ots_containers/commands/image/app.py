@@ -248,12 +248,12 @@ def list_remote(
         ),
     ] = None,
     image: Annotated[
-        str,
+        str | None,
         cyclopts.Parameter(
             name=["--image", "-i"],
-            help="Image name to list tags for",
+            help="Image name to list tags for (default: basename of IMAGE env var)",
         ),
-    ] = "onetimesecret",
+    ] = None,
     quiet: Quiet = False,
 ):
     """List image tags on a remote registry.
@@ -283,7 +283,8 @@ def list_remote(
         raise SystemExit(1)
 
     # Build skopeo command
-    image_ref = f"docker://{reg}/{image}"
+    resolved_image = image or cfg.image.split("/")[-1]
+    image_ref = f"docker://{reg}/{resolved_image}"
     cmd = [
         "skopeo",
         "list-tags",
@@ -720,8 +721,10 @@ def push(
         print("Error: Tag required. Use --tag or set TAG env var")
         raise SystemExit(1)
     src = source_image or cfg.image
+    # Derive target image name from source basename (strip host prefix if present)
+    src_basename = src.split("/")[-1]
     source_full = f"{src}:{resolved_tag}"
-    target_full = f"{reg}/onetimesecret:{resolved_tag}"
+    target_full = f"{reg}/{src_basename}:{resolved_tag}"
 
     if not quiet:
         print(f"Tagging {source_full} -> {target_full}")
@@ -754,7 +757,7 @@ def push(
     # Record the push action
     db.record_deployment(
         cfg.db_path,
-        image=f"{reg}/onetimesecret",
+        image=f"{reg}/{src_basename}",
         tag=resolved_tag,
         action="push",
         success=True,
@@ -837,10 +840,11 @@ def rm(
 
     for tag in tags:
         # Try common image patterns, including configured image
+        image_basename = cfg.image.split("/")[-1]
         images_to_try = [
-            f"onetimesecret:{tag}",
+            f"{image_basename}:{tag}",
             f"{cfg.image}:{tag}",
-            f"localhost/onetimesecret:{tag}",
+            f"localhost/{image_basename}:{tag}",
         ]
         if cfg.private_image:
             images_to_try.append(f"{cfg.private_image}:{tag}")
