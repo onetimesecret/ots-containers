@@ -81,10 +81,9 @@ class TestEnvProcess:
             ["secret created: ots_hmac_secret", "secret created: ots_api_key"],
         )
 
-        result = process(env_file=env_file)
+        process(env_file=env_file)
 
         captured = capsys.readouterr()
-        assert result == 0
         assert "ots_hmac_secret" in captured.out
         assert "ots_api_key" in captured.out
         assert "[created]" in captured.out
@@ -100,10 +99,9 @@ class TestEnvProcess:
             [],
         )
 
-        result = process(env_file=env_file, dry_run=True)
+        process(env_file=env_file, dry_run=True)
 
         captured = capsys.readouterr()
-        assert result == 0
         assert "dry-run" in captured.out.lower()
         # Confirm process_env_file was called with dry_run=True
         mock_process.assert_called_once()
@@ -115,24 +113,26 @@ class TestEnvProcess:
         )
 
     def test_env_process_missing_file(self, tmp_path, capsys):
-        """process should report error when file not found."""
+        """process should raise SystemExit(1) when file not found."""
         missing = tmp_path / "nonexistent"
-        result = process(env_file=missing)
+        with pytest.raises(SystemExit) as exc_info:
+            process(env_file=missing)
+        assert exc_info.value.code == 1
         captured = capsys.readouterr()
-        assert result == 1
         assert "not found" in captured.out.lower() or "error" in captured.out.lower()
 
     def test_env_process_no_secret_variable_names(self, tmp_path, capsys):
-        """process should fail when SECRET_VARIABLE_NAMES is missing."""
+        """process should raise SystemExit(1) when SECRET_VARIABLE_NAMES is missing."""
         env_file = _make_env_file(tmp_path, "SOME_VAR=value\n")
-        result = process(env_file=env_file)
+        with pytest.raises(SystemExit) as exc_info:
+            process(env_file=env_file)
+        assert exc_info.value.code == 1
         captured = capsys.readouterr()
-        assert result == 1
         assert "SECRET_VARIABLE_NAMES" in captured.out
 
     @patch("ots_containers.commands.env.app.process_env_file")
     def test_env_process_reports_errors(self, mock_process, tmp_path, capsys):
-        """process should return 1 when secrets have errors (empty/missing)."""
+        """process should raise SystemExit(1) when secrets have errors (empty/missing)."""
         env_content = "SECRET_VARIABLE_NAMES=MISSING_VAR\n"
         env_file = _make_env_file(tmp_path, env_content)
 
@@ -141,9 +141,10 @@ class TestEnvProcess:
             ["MISSING_VAR not found in env file"],
         )
 
-        result = process(env_file=env_file)
+        with pytest.raises(SystemExit) as exc_info:
+            process(env_file=env_file)
+        assert exc_info.value.code == 1
         captured = capsys.readouterr()
-        assert result == 1
         assert "error" in captured.out.lower()
 
 
@@ -170,9 +171,8 @@ class TestEnvShow:
         )
         mock_exists.return_value = True
 
-        result = show(env_file=env_file, json_output=True)
+        show(env_file=env_file, json_output=True)
         captured = capsys.readouterr()
-        assert result == 0
         data = json.loads(captured.out)
         assert "secrets" in data
         assert len(data["secrets"]) == 1
@@ -192,24 +192,23 @@ class TestEnvShow:
         )
         mock_exists.return_value = False
 
-        result = show(env_file=env_file, json_output=False)
+        show(env_file=env_file, json_output=False)
         captured = capsys.readouterr()
-        assert result == 0
         assert "API_KEY" in captured.out
         assert "missing" in captured.out.lower()
 
     def test_env_show_missing_file(self, tmp_path):
-        """show should report error when file not found."""
+        """show should raise SystemExit(1) when file not found."""
         missing = tmp_path / "nonexistent"
-        result = show(env_file=missing)
-        assert result == 1
+        with pytest.raises(SystemExit) as exc_info:
+            show(env_file=missing)
+        assert exc_info.value.code == 1
 
     def test_env_show_no_secret_variable_names(self, tmp_path, capsys):
         """show should warn when SECRET_VARIABLE_NAMES is missing."""
         env_file = _make_env_file(tmp_path, "SOME_VAR=value\n")
-        result = show(env_file=env_file)
+        show(env_file=env_file)
         captured = capsys.readouterr()
-        assert result == 0
         assert "No SECRET_VARIABLE_NAMES" in captured.out or "Warning" in captured.out
 
 
@@ -224,7 +223,7 @@ class TestEnvVerify:
     @patch("ots_containers.commands.env.app.secret_exists")
     @patch("ots_containers.commands.env.app.extract_secrets")
     def test_env_verify_all_exist(self, mock_extract, mock_exists, tmp_path, capsys):
-        """verify should return 0 when all secrets exist."""
+        """verify should succeed when all secrets exist."""
         env_content = (
             "SECRET_VARIABLE_NAMES=HMAC_SECRET,API_KEY\nHMAC_SECRET=abc123\nAPI_KEY=xyz789\n"
         )
@@ -239,15 +238,14 @@ class TestEnvVerify:
         )
         mock_exists.return_value = True
 
-        result = verify(env_file=env_file)
+        verify(env_file=env_file)
         captured = capsys.readouterr()
-        assert result == 0
         assert "All secrets verified" in captured.out
 
     @patch("ots_containers.commands.env.app.secret_exists")
     @patch("ots_containers.commands.env.app.extract_secrets")
     def test_env_verify_missing_secrets(self, mock_extract, mock_exists, tmp_path, capsys):
-        """verify should return 1 when a secret is missing."""
+        """verify should raise SystemExit(1) when a secret is missing."""
         env_content = "SECRET_VARIABLE_NAMES=HMAC_SECRET\nHMAC_SECRET=abc123\n"
         env_file = _make_env_file(tmp_path, env_content)
 
@@ -257,24 +255,25 @@ class TestEnvVerify:
         )
         mock_exists.return_value = False
 
-        result = verify(env_file=env_file)
+        with pytest.raises(SystemExit) as exc_info:
+            verify(env_file=env_file)
+        assert exc_info.value.code == 1
         captured = capsys.readouterr()
-        assert result == 1
         assert "MISSING" in captured.out
         assert "ots env process" in captured.out
 
     def test_env_verify_missing_file(self, tmp_path):
-        """verify should return 1 when file is not found."""
+        """verify should raise SystemExit(1) when file is not found."""
         missing = tmp_path / "nonexistent"
-        result = verify(env_file=missing)
-        assert result == 1
+        with pytest.raises(SystemExit) as exc_info:
+            verify(env_file=missing)
+        assert exc_info.value.code == 1
 
     def test_env_verify_no_secret_variable_names(self, tmp_path, capsys):
-        """verify should return 0 (nothing to verify) when SECRET_VARIABLE_NAMES absent."""
+        """verify should succeed (nothing to verify) when SECRET_VARIABLE_NAMES absent."""
         env_file = _make_env_file(tmp_path, "SOME_VAR=value\n")
-        result = verify(env_file=env_file)
+        verify(env_file=env_file)
         captured = capsys.readouterr()
-        assert result == 0
         assert (
             "nothing to verify" in captured.out.lower()
             or "No SECRET_VARIABLE_NAMES" in captured.out
@@ -305,23 +304,24 @@ class TestEnvQuadletLines:
             [],
         )
 
-        result = quadlet_lines(env_file=env_file)
+        quadlet_lines(env_file=env_file)
         captured = capsys.readouterr()
-        assert result == 0
         assert "Secret=ots_hmac_secret,type=env,target=HMAC_SECRET" in captured.out
         assert "Secret=ots_api_key,type=env,target=API_KEY" in captured.out
 
     def test_quadlet_lines_missing_file(self, tmp_path):
-        """quadlet-lines should return 1 when file not found."""
+        """quadlet-lines should raise SystemExit(1) when file not found."""
         missing = tmp_path / "nonexistent"
-        result = quadlet_lines(env_file=missing)
-        assert result == 1
+        with pytest.raises(SystemExit) as exc_info:
+            quadlet_lines(env_file=missing)
+        assert exc_info.value.code == 1
 
     def test_quadlet_lines_no_secret_variable_names(self, tmp_path, capsys):
-        """quadlet-lines should return 1 when SECRET_VARIABLE_NAMES is absent."""
+        """quadlet-lines should raise SystemExit(1) when SECRET_VARIABLE_NAMES is absent."""
         env_file = _make_env_file(tmp_path, "SOME_VAR=value\n")
-        result = quadlet_lines(env_file=env_file)
-        assert result == 1
+        with pytest.raises(SystemExit) as exc_info:
+            quadlet_lines(env_file=env_file)
+        assert exc_info.value.code == 1
 
 
 # ---------------------------------------------------------------------------

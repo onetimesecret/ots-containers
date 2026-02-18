@@ -795,3 +795,40 @@ class TestRequireSystemctl:
 
         # Should not raise
         systemd.require_systemctl()
+
+
+class TestRequirePodman:
+    """Test require_podman function behavior."""
+
+    def test_require_podman_exits_when_podman_missing(self, mocker):
+        """Should raise SystemExit(1) when podman is not found."""
+        from ots_containers import systemd
+
+        mocker.patch("shutil.which", return_value=None)
+
+        with pytest.raises(SystemExit) as exc_info:
+            systemd.require_podman()
+
+        assert exc_info.value.code == 1
+
+    def test_require_podman_message_mentions_installation(self, mocker, capsys):
+        """Should print error message with installation instructions."""
+        from ots_containers import systemd
+
+        mocker.patch("shutil.which", return_value=None)
+
+        with pytest.raises(SystemExit):
+            systemd.require_podman()
+
+        captured = capsys.readouterr()
+        assert "podman" in captured.err.lower()
+        assert "install" in captured.err.lower()
+
+    def test_require_podman_passes_when_podman_available(self, mocker):
+        """Should not raise when podman is available."""
+        from ots_containers import systemd
+
+        mocker.patch("shutil.which", return_value="/usr/bin/podman")
+
+        # Should not raise
+        systemd.require_podman()

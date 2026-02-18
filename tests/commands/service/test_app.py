@@ -249,6 +249,123 @@ class TestInitCommand:
         assert any("start" in call for call in calls)
 
 
+class TestInitIdempotency:
+    """Tests for init command idempotency (BUG: config modification on re-run)."""
+
+    @patch("ots_containers.commands.service.app.check_default_service_conflict")
+    @patch("ots_containers.commands.service.app.update_config_value")
+    @patch("ots_containers.commands.service.app.copy_default_config")
+    def test_init_skips_modifications_when_config_exists(
+        self,
+        mock_copy,
+        mock_update,
+        mock_check_conflict,
+        capsys,
+    ):
+        """init should skip all modifications when config already exists (idempotent)."""
+        mock_copy.side_effect = FileExistsError("Config already exists: /etc/valkey/...")
+
+        init("valkey", "6379", start=False, enable=False)
+
+        # update_config_value must NOT be called when config already exists
+        mock_update.assert_not_called()
+        captured = capsys.readouterr()
+        assert "already exists" in captured.out
+        assert "Skipping" in captured.out
+
+    @patch("ots_containers.commands.service.app.check_default_service_conflict")
+    @patch("ots_containers.commands.service.app.update_config_value")
+    @patch("ots_containers.commands.service.app.copy_default_config")
+    def test_init_returns_early_when_config_exists(
+        self,
+        mock_copy,
+        mock_update,
+        mock_check_conflict,
+        capsys,
+    ):
+        """init should return early (not reach start/enable) when config already exists."""
+        mock_copy.side_effect = FileExistsError("Config already exists")
+
+        # Should not raise SystemExit - just return cleanly
+        init("valkey", "6379", start=True, enable=True)
+
+        captured = capsys.readouterr()
+        assert "already configured" in captured.out.lower()
+
+    @patch("ots_containers.commands.service.app.check_default_service_conflict")
+    @patch("ots_containers.commands.service.app.systemctl")
+    @patch("ots_containers.commands.service.app.create_secrets_file")
+    @patch("ots_containers.commands.service.app.ensure_data_dir")
+    @patch("ots_containers.commands.service.app.update_config_value")
+    @patch("ots_containers.commands.service.app.copy_default_config")
+    def test_init_force_overwrites_existing_config(
+        self,
+        mock_copy,
+        mock_update,
+        mock_data,
+        mock_secrets,
+        mock_systemctl,
+        mock_check_conflict,
+        tmp_path,
+        capsys,
+    ):
+        """init --force should delete existing config and recreate from defaults."""
+        existing_config = tmp_path / "6379.conf"
+        existing_config.write_text("old config content\n")
+
+        call_count = [0]
+
+        def copy_side_effect(pkg, instance):
+            call_count[0] += 1
+            if call_count[0] == 1:
+                raise FileExistsError("Config already exists")
+            return tmp_path / "6379.conf"
+
+        mock_copy.side_effect = copy_side_effect
+        mock_data.return_value = tmp_path / "data"
+        mock_secrets.return_value = None
+
+        # Mock the pkg.config_file to return our existing config
+        with patch("ots_containers.commands.service.app.get_package") as mock_get_pkg:
+            mock_pkg = MagicMock()
+            mock_pkg.name = "valkey"
+            mock_pkg.template_unit = "valkey-server@.service"
+            mock_pkg.port_config_key = "port"
+            mock_pkg.bind_config_key = "bind"
+            mock_pkg.config_file.return_value = existing_config
+            mock_pkg.data_dir = tmp_path
+            mock_pkg.secrets = None
+            mock_pkg.instance_unit.return_value = "valkey-server@6379.service"
+            mock_pkg.default_config = tmp_path / "default.conf"
+            mock_get_pkg.return_value = mock_pkg
+
+            init("valkey", "6379", force=True, start=False, enable=False)
+
+        captured = capsys.readouterr()
+        assert "force" in captured.out.lower() or "Removed" in captured.out
+
+    def test_init_dry_run_existing_config_shows_skip_notice(self, capsys, tmp_path):
+        """init --dry-run with existing config should show skip notice."""
+        with patch("ots_containers.commands.service.app.get_package") as mock_get_pkg:
+            mock_pkg = MagicMock()
+            mock_pkg.name = "valkey"
+            mock_pkg.template_unit = "valkey-server@.service"
+            mock_pkg.port_config_key = "port"
+            mock_pkg.bind_config_key = "bind"
+            existing_config = tmp_path / "6379.conf"
+            existing_config.write_text("port 6379\n")
+            mock_pkg.config_file.return_value = existing_config
+            mock_pkg.data_dir = tmp_path
+            mock_pkg.secrets = None
+            mock_get_pkg.return_value = mock_pkg
+
+            init("valkey", "6379", dry_run=True, start=False, enable=False)
+
+        captured = capsys.readouterr()
+        assert "already exists" in captured.out
+        assert "skip" in captured.out.lower() or "force" in captured.out.lower()
+
+
 class TestEnableCommand:
     """Tests for enable command."""
 

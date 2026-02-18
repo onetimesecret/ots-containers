@@ -16,7 +16,7 @@ class TestContainerTemplate:
             var_dir=tmp_path / "var",
         )
 
-        quadlet.write_web_template(cfg)
+        quadlet.write_web_template(cfg, force=True)
 
         assert cfg.web_template_path.exists()
 
@@ -34,7 +34,7 @@ class TestContainerTemplate:
             var_dir=tmp_path / "var",
         )
 
-        quadlet.write_web_template(cfg)
+        quadlet.write_web_template(cfg, force=True)
 
         content = cfg.web_template_path.read_text()
         assert "Image=myregistry/myimage:v1.0.0" in content
@@ -50,7 +50,7 @@ class TestContainerTemplate:
             var_dir=tmp_path / "var",
         )
 
-        quadlet.write_web_template(cfg)
+        quadlet.write_web_template(cfg, force=True)
 
         content = cfg.web_template_path.read_text()
         assert "Network=host" in content
@@ -66,7 +66,7 @@ class TestContainerTemplate:
             var_dir=tmp_path / "var",
         )
 
-        quadlet.write_web_template(cfg)
+        quadlet.write_web_template(cfg, force=True)
 
         content = cfg.web_template_path.read_text()
         assert "Environment=PORT=%i" in content
@@ -82,7 +82,7 @@ class TestContainerTemplate:
             var_dir=tmp_path / "var",
         )
 
-        quadlet.write_web_template(cfg)
+        quadlet.write_web_template(cfg, force=True)
 
         content = cfg.web_template_path.read_text()
         # Uses fixed path for infrastructure config (not per-instance)
@@ -99,7 +99,7 @@ class TestContainerTemplate:
             var_dir=tmp_path / "var",
         )
 
-        quadlet.write_web_template(cfg)
+        quadlet.write_web_template(cfg, force=True)
 
         content = cfg.web_template_path.read_text()
         # Syslog tag allows: journalctl -t onetime-web-7043 -f
@@ -123,7 +123,7 @@ class TestContainerTemplate:
             var_dir=tmp_path / "var",
         )
 
-        quadlet.write_web_template(cfg)
+        quadlet.write_web_template(cfg, force=True)
 
         content = cfg.web_template_path.read_text()
         # Per-file volume mounts for each config file
@@ -152,7 +152,7 @@ class TestContainerTemplate:
             var_dir=tmp_path / "var",
         )
 
-        quadlet.write_web_template(cfg, env_file_path=env_file)
+        quadlet.write_web_template(cfg, env_file_path=env_file, force=True)
 
         content = cfg.web_template_path.read_text()
         # Secrets generated from env file's SECRET_VARIABLE_NAMES
@@ -171,7 +171,7 @@ class TestContainerTemplate:
         )
 
         # Pass a non-existent env file path
-        quadlet.write_web_template(cfg, env_file_path=tmp_path / "nonexistent.env")
+        quadlet.write_web_template(cfg, env_file_path=tmp_path / "nonexistent.env", force=True)
 
         content = cfg.web_template_path.read_text()
         assert "No secrets configured" in content
@@ -191,7 +191,7 @@ class TestContainerTemplate:
             var_dir=tmp_path / "var",
         )
 
-        quadlet.write_web_template(cfg, env_file_path=env_file)
+        quadlet.write_web_template(cfg, env_file_path=env_file, force=True)
 
         content = cfg.web_template_path.read_text()
         assert "No secrets configured" in content
@@ -207,7 +207,7 @@ class TestContainerTemplate:
             var_dir=tmp_path / "var",
         )
 
-        quadlet.write_web_template(cfg)
+        quadlet.write_web_template(cfg, force=True)
 
         content = cfg.web_template_path.read_text()
         assert "After=local-fs.target network-online.target" in content
@@ -226,7 +226,7 @@ class TestContainerTemplate:
         )
         cfg.valkey_service = "valkey-server@6379.service"
 
-        quadlet.write_web_template(cfg)
+        quadlet.write_web_template(cfg, force=True)
 
         content = cfg.web_template_path.read_text()
         assert "After=local-fs.target network-online.target valkey-server@6379.service" in content
@@ -244,7 +244,7 @@ class TestContainerTemplate:
         )
         assert cfg.valkey_service is None
 
-        quadlet.write_web_template(cfg)
+        quadlet.write_web_template(cfg, force=True)
 
         content = cfg.web_template_path.read_text()
         assert "valkey-server" not in content
@@ -262,7 +262,7 @@ class TestContainerTemplate:
         cfg.memory_max = "1G"
         cfg.cpu_quota = "80%"
 
-        quadlet.write_web_template(cfg)
+        quadlet.write_web_template(cfg, force=True)
 
         content = cfg.web_template_path.read_text()
         assert "MemoryMax=1G" in content
@@ -281,7 +281,7 @@ class TestContainerTemplate:
         assert cfg.memory_max is None
         assert cfg.cpu_quota is None
 
-        quadlet.write_web_template(cfg)
+        quadlet.write_web_template(cfg, force=True)
 
         content = cfg.web_template_path.read_text()
         assert "MemoryMax=" not in content
@@ -299,7 +299,7 @@ class TestContainerTemplate:
             var_dir=tmp_path / "var",
         )
 
-        quadlet.write_web_template(cfg)
+        quadlet.write_web_template(cfg, force=True)
 
         assert nested_path.exists()
 
@@ -314,7 +314,7 @@ class TestContainerTemplate:
             var_dir=tmp_path / "var",
         )
 
-        quadlet.write_web_template(cfg)
+        quadlet.write_web_template(cfg, force=True)
 
         mock_reload.assert_called_once()
 
@@ -330,7 +330,7 @@ class TestContainerTemplate:
             var_dir=tmp_path / "var",
         )
 
-        quadlet.write_web_template(cfg)
+        quadlet.write_web_template(cfg, force=True)
 
         content = cfg.web_template_path.read_text()
         assert "built-in defaults" in content
@@ -354,7 +354,7 @@ class TestWorkerTemplate:
             var_dir=tmp_path / "var",
         )
 
-        quadlet.write_worker_template(cfg)
+        quadlet.write_worker_template(cfg, force=True)
 
         assert cfg.worker_template_path.exists()
 
@@ -372,7 +372,7 @@ class TestWorkerTemplate:
             var_dir=tmp_path / "var",
         )
 
-        quadlet.write_worker_template(cfg)
+        quadlet.write_worker_template(cfg, force=True)
 
         content = cfg.worker_template_path.read_text()
         assert "Image=myregistry/myimage:v1.0.0" in content
@@ -388,7 +388,7 @@ class TestWorkerTemplate:
             var_dir=tmp_path / "var",
         )
 
-        quadlet.write_worker_template(cfg)
+        quadlet.write_worker_template(cfg, force=True)
 
         content = cfg.worker_template_path.read_text()
         assert "Network=host" in content
@@ -404,7 +404,7 @@ class TestWorkerTemplate:
             var_dir=tmp_path / "var",
         )
 
-        quadlet.write_worker_template(cfg)
+        quadlet.write_worker_template(cfg, force=True)
 
         content = cfg.worker_template_path.read_text()
         # Syslog tag allows: journalctl -t onetime-worker-1 -f
@@ -421,7 +421,7 @@ class TestWorkerTemplate:
             var_dir=tmp_path / "var",
         )
 
-        quadlet.write_worker_template(cfg)
+        quadlet.write_worker_template(cfg, force=True)
 
         content = cfg.worker_template_path.read_text()
         assert "Environment=WORKER_ID=%i" in content
@@ -437,7 +437,7 @@ class TestWorkerTemplate:
             var_dir=tmp_path / "var",
         )
 
-        quadlet.write_worker_template(cfg)
+        quadlet.write_worker_template(cfg, force=True)
 
         content = cfg.worker_template_path.read_text()
         assert "Exec=bin/entrypoint.sh bin/ots worker" in content
@@ -453,7 +453,7 @@ class TestWorkerTemplate:
             var_dir=tmp_path / "var",
         )
 
-        quadlet.write_worker_template(cfg)
+        quadlet.write_worker_template(cfg, force=True)
 
         content = cfg.worker_template_path.read_text()
         assert 'HealthCmd=pgrep -f "sneakers"' in content
@@ -469,7 +469,7 @@ class TestWorkerTemplate:
             var_dir=tmp_path / "var",
         )
 
-        quadlet.write_worker_template(cfg)
+        quadlet.write_worker_template(cfg, force=True)
 
         content = cfg.worker_template_path.read_text()
         assert "TimeoutStopSec=90" in content
@@ -485,7 +485,7 @@ class TestWorkerTemplate:
             var_dir=tmp_path / "var",
         )
 
-        quadlet.write_worker_template(cfg)
+        quadlet.write_worker_template(cfg, force=True)
 
         content = cfg.worker_template_path.read_text()
         assert "static_assets" not in content
@@ -501,7 +501,7 @@ class TestWorkerTemplate:
             var_dir=tmp_path / "var",
         )
 
-        quadlet.write_worker_template(cfg)
+        quadlet.write_worker_template(cfg, force=True)
 
         content = cfg.worker_template_path.read_text()
         assert "EnvironmentFile=/etc/default/onetimesecret" in content
@@ -524,7 +524,7 @@ class TestWorkerTemplate:
             var_dir=tmp_path / "var",
         )
 
-        quadlet.write_worker_template(cfg)
+        quadlet.write_worker_template(cfg, force=True)
 
         content = cfg.worker_template_path.read_text()
         assert f"Volume={config_dir}/config.yaml:/app/etc/config.yaml:ro" in content
@@ -551,7 +551,7 @@ class TestWorkerTemplate:
             var_dir=tmp_path / "var",
         )
 
-        quadlet.write_worker_template(cfg, env_file_path=env_file)
+        quadlet.write_worker_template(cfg, env_file_path=env_file, force=True)
 
         content = cfg.worker_template_path.read_text()
         assert "Secret=ots_api_key,type=env,target=API_KEY" in content
@@ -568,7 +568,7 @@ class TestWorkerTemplate:
             var_dir=tmp_path / "var",
         )
 
-        quadlet.write_worker_template(cfg)
+        quadlet.write_worker_template(cfg, force=True)
 
         mock_reload.assert_called_once()
 
@@ -584,7 +584,7 @@ class TestWorkerTemplate:
             var_dir=tmp_path / "var",
         )
 
-        quadlet.write_worker_template(cfg)
+        quadlet.write_worker_template(cfg, force=True)
 
         content = cfg.worker_template_path.read_text()
         assert "built-in defaults" in content
@@ -607,7 +607,7 @@ class TestSchedulerTemplate:
             var_dir=tmp_path / "var",
         )
 
-        quadlet.write_scheduler_template(cfg)
+        quadlet.write_scheduler_template(cfg, force=True)
 
         assert cfg.scheduler_template_path.exists()
 
@@ -625,7 +625,7 @@ class TestSchedulerTemplate:
             var_dir=tmp_path / "var",
         )
 
-        quadlet.write_scheduler_template(cfg)
+        quadlet.write_scheduler_template(cfg, force=True)
 
         content = cfg.scheduler_template_path.read_text()
         assert "Image=myregistry/myimage:v1.0.0" in content
@@ -641,7 +641,7 @@ class TestSchedulerTemplate:
             var_dir=tmp_path / "var",
         )
 
-        quadlet.write_scheduler_template(cfg)
+        quadlet.write_scheduler_template(cfg, force=True)
 
         content = cfg.scheduler_template_path.read_text()
         assert "Network=host" in content
@@ -657,7 +657,7 @@ class TestSchedulerTemplate:
             var_dir=tmp_path / "var",
         )
 
-        quadlet.write_scheduler_template(cfg)
+        quadlet.write_scheduler_template(cfg, force=True)
 
         content = cfg.scheduler_template_path.read_text()
         # Syslog tag allows: journalctl -t onetime-scheduler-main -f
@@ -674,7 +674,7 @@ class TestSchedulerTemplate:
             var_dir=tmp_path / "var",
         )
 
-        quadlet.write_scheduler_template(cfg)
+        quadlet.write_scheduler_template(cfg, force=True)
 
         content = cfg.scheduler_template_path.read_text()
         assert "Environment=SCHEDULER_ID=%i" in content
@@ -690,7 +690,7 @@ class TestSchedulerTemplate:
             var_dir=tmp_path / "var",
         )
 
-        quadlet.write_scheduler_template(cfg)
+        quadlet.write_scheduler_template(cfg, force=True)
 
         content = cfg.scheduler_template_path.read_text()
         assert "bin/entrypoint.sh bin/ots scheduler" in content
@@ -706,7 +706,7 @@ class TestSchedulerTemplate:
             var_dir=tmp_path / "var",
         )
 
-        quadlet.write_scheduler_template(cfg)
+        quadlet.write_scheduler_template(cfg, force=True)
 
         content = cfg.scheduler_template_path.read_text()
         assert 'pgrep -f "bin/ots scheduler"' in content
@@ -722,7 +722,7 @@ class TestSchedulerTemplate:
             var_dir=tmp_path / "var",
         )
 
-        quadlet.write_scheduler_template(cfg)
+        quadlet.write_scheduler_template(cfg, force=True)
 
         content = cfg.scheduler_template_path.read_text()
         assert "TimeoutStopSec=60" in content
@@ -738,7 +738,7 @@ class TestSchedulerTemplate:
             var_dir=tmp_path / "var",
         )
 
-        quadlet.write_scheduler_template(cfg)
+        quadlet.write_scheduler_template(cfg, force=True)
 
         content = cfg.scheduler_template_path.read_text()
         assert "static_assets" not in content
@@ -754,7 +754,7 @@ class TestSchedulerTemplate:
             var_dir=tmp_path / "var",
         )
 
-        quadlet.write_scheduler_template(cfg)
+        quadlet.write_scheduler_template(cfg, force=True)
 
         content = cfg.scheduler_template_path.read_text()
         assert "Environment=PORT=" not in content
@@ -770,7 +770,7 @@ class TestSchedulerTemplate:
             var_dir=tmp_path / "var",
         )
 
-        quadlet.write_scheduler_template(cfg)
+        quadlet.write_scheduler_template(cfg, force=True)
 
         content = cfg.scheduler_template_path.read_text()
         assert "EnvironmentFile=/etc/default/onetimesecret" in content
@@ -793,7 +793,7 @@ class TestSchedulerTemplate:
             var_dir=tmp_path / "var",
         )
 
-        quadlet.write_scheduler_template(cfg)
+        quadlet.write_scheduler_template(cfg, force=True)
 
         content = cfg.scheduler_template_path.read_text()
         assert f"Volume={config_dir}/config.yaml:/app/etc/config.yaml:ro" in content
@@ -819,7 +819,7 @@ class TestSchedulerTemplate:
             var_dir=tmp_path / "var",
         )
 
-        quadlet.write_scheduler_template(cfg, env_file_path=env_file)
+        quadlet.write_scheduler_template(cfg, env_file_path=env_file, force=True)
 
         content = cfg.scheduler_template_path.read_text()
         assert "Secret=ots_api_key,type=env,target=API_KEY" in content
@@ -837,7 +837,7 @@ class TestSchedulerTemplate:
             var_dir=tmp_path / "var",
         )
 
-        quadlet.write_scheduler_template(cfg)
+        quadlet.write_scheduler_template(cfg, force=True)
 
         assert nested_path.exists()
 
@@ -852,7 +852,7 @@ class TestSchedulerTemplate:
             var_dir=tmp_path / "var",
         )
 
-        quadlet.write_scheduler_template(cfg)
+        quadlet.write_scheduler_template(cfg, force=True)
 
         mock_reload.assert_called_once()
 
@@ -868,7 +868,7 @@ class TestSchedulerTemplate:
             var_dir=tmp_path / "var",
         )
 
-        quadlet.write_scheduler_template(cfg)
+        quadlet.write_scheduler_template(cfg, force=True)
 
         content = cfg.scheduler_template_path.read_text()
         assert "built-in defaults" in content
@@ -1005,7 +1005,7 @@ class TestGetSecretsSection:
         env_file = tmp_path / "onetimesecret.env"
         env_file.write_text("SECRET_VARIABLE_NAMES=API_KEY\n_API_KEY=ots_api_key\n")
 
-        result = get_secrets_section(env_file_path=env_file)
+        result = get_secrets_section(env_file_path=env_file, force=True)
 
         # When all secrets are filtered out, should not contain Secret= lines
         assert "Secret=" not in result
