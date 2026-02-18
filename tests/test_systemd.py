@@ -162,7 +162,9 @@ class TestDaemonReload:
 
         systemd.daemon_reload()
 
-        mock_run.assert_called_once_with(["sudo", "systemctl", "daemon-reload"], check=True)
+        mock_run.assert_called_once_with(
+            ["sudo", "systemctl", "daemon-reload"], check=True, timeout=30
+        )
 
     def test_daemon_reload_raises_on_failure(self, mocker):
         """Should propagate CalledProcessError on failure."""
@@ -300,6 +302,7 @@ class TestStatus:
                 "onetime-web@7043",
             ],
             check=False,
+            timeout=30,
         )
 
     def test_status_custom_lines(self, mocker):
@@ -320,6 +323,7 @@ class TestStatus:
                 "onetime-web@7043",
             ],
             check=False,
+            timeout=30,
         )
 
     def test_status_does_not_raise_on_nonzero_exit(self, mocker):
@@ -437,6 +441,7 @@ class TestContainerExists:
         mock_run.assert_called_once_with(
             ["podman", "container", "exists", "systemd-onetime-web_7044"],
             capture_output=True,
+            timeout=10,
         )
 
 
@@ -483,6 +488,7 @@ class TestUnitExists:
             ],
             capture_output=True,
             text=True,
+            timeout=10,
         )
 
 
@@ -586,6 +592,7 @@ class TestDiscoverWorkerInstances:
             ["systemctl", "list-units", "onetime-worker@*", "--plain", "--no-legend", "--all"],
             capture_output=True,
             text=True,
+            timeout=10,
         )
 
     def test_discover_worker_instances_running_only(self, mocker):
@@ -665,6 +672,7 @@ class TestDiscoverSchedulerInstances:
             ["systemctl", "list-units", "onetime-scheduler@*", "--plain", "--no-legend", "--all"],
             capture_output=True,
             text=True,
+            timeout=10,
         )
 
     def test_discover_scheduler_instances_running_only(self, mocker):
@@ -740,6 +748,7 @@ class TestWorkerContainerExists:
         mock_run.assert_called_once_with(
             ["podman", "container", "exists", "systemd-onetime-worker_billing"],
             capture_output=True,
+            timeout=10,
         )
 
     def test_worker_container_exists_with_numeric_id(self, mocker):
@@ -755,6 +764,7 @@ class TestWorkerContainerExists:
         mock_run.assert_called_once_with(
             ["podman", "container", "exists", "systemd-onetime-worker_1"],
             capture_output=True,
+            timeout=10,
         )
 
 
