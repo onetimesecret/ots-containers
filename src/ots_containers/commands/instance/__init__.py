@@ -14,6 +14,7 @@ from .annotations import (
 )
 from .app import (
     app,
+    cleanup,
     config_transform,
     deploy,
     disable,
@@ -23,6 +24,7 @@ from .app import (
     logs,
     redeploy,
     restart,
+    rollback,
     run,
     shell,
     show_env,
@@ -41,6 +43,7 @@ __all__ = [
     "WebFlag",
     "WorkerFlag",
     "app",
+    "cleanup",
     "config_transform",
     "deploy",
     "disable",
@@ -51,6 +54,7 @@ __all__ = [
     "redeploy",
     "resolve_instance_type",
     "restart",
+    "rollback",
     "run",
     "shell",
     "show_env",

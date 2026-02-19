@@ -1292,3 +1292,654 @@ class TestDeployPartialFailure:
         assert exc is not None
         # The error message must identify the path that could not be written
         assert "/etc/containers/systemd" in str(exc) or "onetime-web" in str(exc)
+
+
+class TestDeployWaitFlag:
+    """Tests for the --wait HTTP health check flag in deploy."""
+
+    def _make_mock_config(self, mocker, tmp_path):
+        """Build a standard mock Config for deploy tests."""
+        mock_config = mocker.MagicMock()
+        mock_config.config_dir = mocker.MagicMock()
+        mock_config.config_yaml = mocker.MagicMock()
+        mock_config.var_dir = mocker.MagicMock()
+        mock_config.web_template_path = mocker.MagicMock()
+        mock_config.db_path = tmp_path / "test.db"
+        mock_config.existing_config_files = []
+        mock_config.has_custom_config = False
+        mock_config.resolve_image_tag.return_value = ("ghcr.io/test/image", "v1.0.0")
+        return mock_config
+
+    def test_deploy_with_wait_calls_wait_for_http_healthy(self, mocker, tmp_path):
+        """--wait should call wait_for_http_healthy with correct port and 60s timeout."""
+        mock_config = self._make_mock_config(mocker, tmp_path)
+        mocker.patch("ots_containers.commands.instance.app.Config", return_value=mock_config)
+        mocker.patch("ots_containers.commands.instance.app.assets.update")
+        mocker.patch("ots_containers.commands.instance.app.quadlet.write_web_template")
+        mocker.patch("ots_containers.commands.instance.app.systemd.start")
+        mocker.patch("ots_containers.commands.instance.app.db.record_deployment")
+        mock_http_healthy = mocker.patch(
+            "ots_containers.commands.instance.app.systemd.wait_for_http_healthy"
+        )
+
+        instance.deploy(identifiers=("7043",), web=True, wait=True)
+
+        mock_http_healthy.assert_called_once_with(7043, timeout=60)
+
+    def test_deploy_without_wait_does_not_call_wait_for_http_healthy(self, mocker, tmp_path):
+        """Omitting --wait should not call wait_for_http_healthy."""
+        mock_config = self._make_mock_config(mocker, tmp_path)
+        mocker.patch("ots_containers.commands.instance.app.Config", return_value=mock_config)
+        mocker.patch("ots_containers.commands.instance.app.assets.update")
+        mocker.patch("ots_containers.commands.instance.app.quadlet.write_web_template")
+        mocker.patch("ots_containers.commands.instance.app.systemd.start")
+        mocker.patch("ots_containers.commands.instance.app.db.record_deployment")
+        mock_http_healthy = mocker.patch(
+            "ots_containers.commands.instance.app.systemd.wait_for_http_healthy"
+        )
+
+        instance.deploy(identifiers=("7043",), web=True, wait=False)
+
+        mock_http_healthy.assert_not_called()
+
+    def test_deploy_wait_is_noop_for_worker_instances(self, mocker, tmp_path):
+        """--wait should be a no-op for worker instances (no HTTP endpoint)."""
+        mock_config = mocker.MagicMock()
+        mock_config.config_dir = mocker.MagicMock()
+        mock_config.config_yaml = mocker.MagicMock()
+        mock_config.var_dir = mocker.MagicMock()
+        mock_config.worker_template_path = mocker.MagicMock()
+        mock_config.worker_template_path.parent = mocker.MagicMock()
+        mock_config.db_path = tmp_path / "test.db"
+        mock_config.existing_config_files = []
+        mock_config.has_custom_config = False
+        mock_config.resolve_image_tag.return_value = ("ghcr.io/test/image", "v1.0.0")
+        mocker.patch("ots_containers.commands.instance.app.Config", return_value=mock_config)
+        mocker.patch("ots_containers.commands.instance.app.quadlet.write_worker_template")
+        mocker.patch("ots_containers.commands.instance.app.systemd.start")
+        mocker.patch("ots_containers.commands.instance.app.db.record_deployment")
+        mock_http_healthy = mocker.patch(
+            "ots_containers.commands.instance.app.systemd.wait_for_http_healthy"
+        )
+
+        instance.deploy(identifiers=("1",), worker=True, wait=True)
+
+        mock_http_healthy.assert_not_called()
+
+    def test_deploy_wait_is_noop_for_scheduler_instances(self, mocker, tmp_path):
+        """--wait should be a no-op for scheduler instances (no HTTP endpoint)."""
+        mock_config = mocker.MagicMock()
+        mock_config.config_dir = mocker.MagicMock()
+        mock_config.config_yaml = mocker.MagicMock()
+        mock_config.var_dir = mocker.MagicMock()
+        mock_config.scheduler_template_path = mocker.MagicMock()
+        mock_config.scheduler_template_path.parent = mocker.MagicMock()
+        mock_config.db_path = tmp_path / "test.db"
+        mock_config.existing_config_files = []
+        mock_config.has_custom_config = False
+        mock_config.resolve_image_tag.return_value = ("ghcr.io/test/image", "v1.0.0")
+        mocker.patch("ots_containers.commands.instance.app.Config", return_value=mock_config)
+        mocker.patch("ots_containers.commands.instance.app.quadlet.write_scheduler_template")
+        mocker.patch("ots_containers.commands.instance.app.systemd.start")
+        mocker.patch("ots_containers.commands.instance.app.db.record_deployment")
+        mock_http_healthy = mocker.patch(
+            "ots_containers.commands.instance.app.systemd.wait_for_http_healthy"
+        )
+
+        instance.deploy(identifiers=("main",), scheduler=True, wait=True)
+
+        mock_http_healthy.assert_not_called()
+
+    def test_deploy_wait_http_timeout_records_failure_and_exits(self, mocker, tmp_path):
+        """When wait_for_http_healthy times out, deployment failure is recorded and exits 1."""
+        from ots_containers.systemd import HttpHealthCheckTimeoutError
+
+        mock_config = self._make_mock_config(mocker, tmp_path)
+        mocker.patch("ots_containers.commands.instance.app.Config", return_value=mock_config)
+        mocker.patch("ots_containers.commands.instance.app.assets.update")
+        mocker.patch("ots_containers.commands.instance.app.quadlet.write_web_template")
+        mocker.patch("ots_containers.commands.instance.app.systemd.start")
+        mock_record = mocker.patch("ots_containers.commands.instance.app.db.record_deployment")
+        mocker.patch(
+            "ots_containers.commands.instance.app.systemd.wait_for_http_healthy",
+            side_effect=HttpHealthCheckTimeoutError(7043, 60, "Connection refused"),
+        )
+
+        with pytest.raises(SystemExit) as exc_info:
+            instance.deploy(identifiers=("7043",), web=True, wait=True)
+
+        assert exc_info.value.code == 1
+        # Should have recorded a failure in deployment history
+        calls = mock_record.call_args_list
+        failure_recorded = any(
+            call.kwargs.get("success") is False or (len(call.args) > 4 and call.args[4] is False)
+            for call in calls
+        )
+        assert failure_recorded, "Expected a failure deployment record"
+
+
+class TestRedeployWaitFlag:
+    """Tests for the --wait HTTP health check flag in redeploy."""
+
+    def _make_mock_config(self, mocker, tmp_path):
+        """Build a standard mock Config for redeploy tests."""
+        mock_config = mocker.MagicMock()
+        mock_config.config_dir = mocker.MagicMock()
+        mock_config.config_yaml = mocker.MagicMock()
+        mock_config.var_dir = mocker.MagicMock()
+        mock_config.web_template_path = tmp_path / "template"
+        mock_config.db_path = tmp_path / "test.db"
+        mock_config.existing_config_files = []
+        mock_config.has_custom_config = False
+        mock_config.resolve_image_tag.return_value = ("ghcr.io/test/image", "v1.0.0")
+        return mock_config
+
+    def _patch_discover(self, mocker, web_ports=(7043,)):
+        """Patch instance discovery to return specific ports."""
+        mocker.patch(
+            "ots_containers.commands.instance._helpers.systemd.discover_web_instances",
+            return_value=list(web_ports),
+        )
+        mocker.patch(
+            "ots_containers.commands.instance._helpers.systemd.discover_worker_instances",
+            return_value=[],
+        )
+        mocker.patch(
+            "ots_containers.commands.instance._helpers.systemd.discover_scheduler_instances",
+            return_value=[],
+        )
+
+    def test_redeploy_with_wait_calls_wait_for_http_healthy(self, mocker, tmp_path):
+        """--wait on redeploy should call wait_for_http_healthy with correct port."""
+        mock_config = self._make_mock_config(mocker, tmp_path)
+        mocker.patch("ots_containers.commands.instance.app.Config", return_value=mock_config)
+        self._patch_discover(mocker)
+        mocker.patch("ots_containers.commands.instance.app.assets.update")
+        mocker.patch("ots_containers.commands.instance.app.quadlet.write_web_template")
+        mocker.patch("ots_containers.commands.instance.app.systemd.recreate")
+        mocker.patch("ots_containers.commands.instance.app.db.record_deployment")
+        mocker.patch(
+            "ots_containers.commands.instance.app.systemd.container_exists",
+            return_value=True,
+        )
+        mock_http_healthy = mocker.patch(
+            "ots_containers.commands.instance.app.systemd.wait_for_http_healthy"
+        )
+
+        instance.redeploy(identifiers=(), web=True, wait=True)
+
+        mock_http_healthy.assert_called_once_with(7043, timeout=60)
+
+    def test_redeploy_without_wait_does_not_call_wait_for_http_healthy(self, mocker, tmp_path):
+        """Omitting --wait on redeploy should not call wait_for_http_healthy."""
+        mock_config = self._make_mock_config(mocker, tmp_path)
+        mocker.patch("ots_containers.commands.instance.app.Config", return_value=mock_config)
+        self._patch_discover(mocker)
+        mocker.patch("ots_containers.commands.instance.app.assets.update")
+        mocker.patch("ots_containers.commands.instance.app.quadlet.write_web_template")
+        mocker.patch("ots_containers.commands.instance.app.systemd.recreate")
+        mocker.patch("ots_containers.commands.instance.app.db.record_deployment")
+        mocker.patch(
+            "ots_containers.commands.instance.app.systemd.container_exists",
+            return_value=True,
+        )
+        mock_http_healthy = mocker.patch(
+            "ots_containers.commands.instance.app.systemd.wait_for_http_healthy"
+        )
+
+        instance.redeploy(identifiers=(), web=True, wait=False)
+
+        mock_http_healthy.assert_not_called()
+
+    def test_redeploy_wait_records_failure_on_http_timeout(self, mocker, tmp_path):
+        """When wait_for_http_healthy times out during redeploy, failure is recorded."""
+        from ots_containers.systemd import HttpHealthCheckTimeoutError
+
+        mock_config = self._make_mock_config(mocker, tmp_path)
+        mocker.patch("ots_containers.commands.instance.app.Config", return_value=mock_config)
+        self._patch_discover(mocker)
+        mocker.patch("ots_containers.commands.instance.app.assets.update")
+        mocker.patch("ots_containers.commands.instance.app.quadlet.write_web_template")
+        mocker.patch("ots_containers.commands.instance.app.systemd.recreate")
+        mock_record = mocker.patch("ots_containers.commands.instance.app.db.record_deployment")
+        mocker.patch(
+            "ots_containers.commands.instance.app.systemd.container_exists",
+            return_value=True,
+        )
+        mocker.patch(
+            "ots_containers.commands.instance.app.systemd.wait_for_http_healthy",
+            side_effect=HttpHealthCheckTimeoutError(7043, 60, "Connection refused"),
+        )
+
+        with pytest.raises(SystemExit) as exc_info:
+            instance.redeploy(identifiers=(), web=True, wait=True)
+
+        assert exc_info.value.code == 1
+        calls = mock_record.call_args_list
+        failure_recorded = any(
+            call.kwargs.get("success") is False or (len(call.args) > 4 and call.args[4] is False)
+            for call in calls
+        )
+        assert failure_recorded, "Expected a failure deployment record"
+
+
+class TestCleanupCommand:
+    """Tests for the cleanup command (remove static_assets Podman volume)."""
+
+    def test_cleanup_calls_podman_volume_rm(self, mocker, tmp_path):
+        """cleanup should call 'podman volume rm static_assets'."""
+        mock_result = mocker.MagicMock()
+        mock_result.returncode = 0
+        mock_result.stderr = ""
+        mock_run = mocker.patch("subprocess.run", return_value=mock_result)
+
+        instance.cleanup(yes=True)
+
+        mock_run.assert_called_once()
+        cmd = mock_run.call_args[0][0]
+        assert "podman" in cmd
+        assert "volume" in cmd
+        assert "rm" in cmd
+        assert "static_assets" in cmd
+
+    def test_cleanup_volume_not_found_is_treated_as_success(self, mocker, tmp_path, capsys):
+        """When volume doesn't exist, cleanup should report success (idempotent)."""
+        mock_result = mocker.MagicMock()
+        mock_result.returncode = 1
+        mock_result.stderr = "Error: no such volume static_assets"
+        mocker.patch("subprocess.run", return_value=mock_result)
+
+        instance.cleanup(yes=True)
+
+        captured = capsys.readouterr()
+        assert "not found" in captured.out.lower() or "already removed" in captured.out.lower()
+
+    def test_cleanup_failure_exits_nonzero(self, mocker, capsys):
+        """Unexpected failure from podman should exit 1."""
+        mock_result = mocker.MagicMock()
+        mock_result.returncode = 1
+        mock_result.stderr = "Error: some unexpected error"
+        mocker.patch("subprocess.run", return_value=mock_result)
+
+        with pytest.raises(SystemExit) as exc_info:
+            instance.cleanup(yes=True)
+
+        assert exc_info.value.code == 1
+
+    def test_cleanup_json_output_success(self, mocker, capsys):
+        """cleanup --json should output valid JSON with success=True."""
+        import json
+
+        mock_result = mocker.MagicMock()
+        mock_result.returncode = 0
+        mock_result.stderr = ""
+        mocker.patch("subprocess.run", return_value=mock_result)
+
+        instance.cleanup(yes=True, json_output=True)
+
+        captured = capsys.readouterr()
+        data = json.loads(captured.out)
+        assert data["success"] is True
+        assert data["volume"] == "static_assets"
+
+    def test_cleanup_podman_not_found_exits_nonzero(self, mocker, capsys):
+        """FileNotFoundError (podman not installed) should exit 1."""
+        mocker.patch("subprocess.run", side_effect=FileNotFoundError("podman not found"))
+
+        with pytest.raises(SystemExit) as exc_info:
+            instance.cleanup(yes=True)
+
+        assert exc_info.value.code == 1
+        captured = capsys.readouterr()
+        assert "podman" in captured.out.lower()
+
+
+class TestRollbackCommand:
+    """Tests for the rollback command (roll back to previous deployment)."""
+
+    def _make_config_mock(self, mocker, tmp_path):
+        """Create a mocked Config with a tmp db_path."""
+        cfg_mock = mocker.MagicMock()
+        cfg_mock.db_path = tmp_path / "deployments.db"
+        cfg_mock.web_template_path = tmp_path / "onetime-web@.container"
+        cfg_mock.worker_template_path = tmp_path / "onetime-worker@.container"
+        cfg_mock.scheduler_template_path = tmp_path / "onetime-scheduler@.container"
+        mocker.patch("ots_containers.commands.instance.app.Config", return_value=cfg_mock)
+        return cfg_mock
+
+    def test_rollback_exits_when_no_history(self, mocker, tmp_path, capsys):
+        """rollback should exit 1 when deployment history has fewer than 2 entries."""
+        self._make_config_mock(mocker, tmp_path)
+        mocker.patch(
+            "ots_containers.commands.instance.app.db.get_previous_tags",
+            return_value=[("ghcr.io/ots/ots", "v1.0.0", "2025-01-01T00:00:00")],
+        )
+
+        with pytest.raises(SystemExit) as exc_info:
+            instance.rollback(web=True)
+
+        assert exc_info.value.code == 1
+        captured = capsys.readouterr()
+        assert "no previous deployment" in captured.out.lower()
+
+    def test_rollback_exits_when_empty_history(self, mocker, tmp_path, capsys):
+        """rollback should exit 1 when deployment history is completely empty."""
+        self._make_config_mock(mocker, tmp_path)
+        mocker.patch(
+            "ots_containers.commands.instance.app.db.get_previous_tags",
+            return_value=[],
+        )
+
+        with pytest.raises(SystemExit) as exc_info:
+            instance.rollback(web=True)
+
+        assert exc_info.value.code == 1
+
+    def test_rollback_dry_run_shows_from_to(self, mocker, tmp_path, capsys):
+        """rollback --dry-run should show from/to image:tag without systemd calls."""
+        self._make_config_mock(mocker, tmp_path)
+        mocker.patch(
+            "ots_containers.commands.instance.app.db.get_previous_tags",
+            return_value=[
+                ("ghcr.io/ots/ots", "v2.0.0", "2025-02-01T00:00:00"),
+                ("ghcr.io/ots/ots", "v1.0.0", "2025-01-01T00:00:00"),
+            ],
+        )
+        mocker.patch(
+            "ots_containers.commands.instance.app.resolve_identifiers",
+            return_value={},
+        )
+        mock_recreate = mocker.patch("ots_containers.commands.instance.app.systemd.recreate")
+
+        instance.rollback(web=True, dry_run=True)
+
+        captured = capsys.readouterr()
+        assert "v2.0.0" in captured.out
+        assert "v1.0.0" in captured.out
+        assert "dry-run" in captured.out.lower()
+        mock_recreate.assert_not_called()
+
+    def test_rollback_dry_run_json_output(self, mocker, tmp_path, capsys):
+        """rollback --dry-run --json should output valid JSON with action/from/to fields."""
+        import json
+
+        self._make_config_mock(mocker, tmp_path)
+        mocker.patch(
+            "ots_containers.commands.instance.app.db.get_previous_tags",
+            return_value=[
+                ("ghcr.io/ots/ots", "v2.0.0", "2025-02-01T00:00:00"),
+                ("ghcr.io/ots/ots", "v1.0.0", "2025-01-01T00:00:00"),
+            ],
+        )
+        mocker.patch(
+            "ots_containers.commands.instance.app.resolve_identifiers",
+            return_value={},
+        )
+
+        instance.rollback(web=True, dry_run=True, json_output=True)
+
+        captured = capsys.readouterr()
+        data = json.loads(captured.out)
+        assert data["action"] == "rollback"
+        assert data["dry_run"] is True
+        assert "from" in data
+        assert "to" in data
+        assert data["from"]["tag"] == "v2.0.0"
+        assert data["to"]["tag"] == "v1.0.0"
+
+    def test_rollback_updates_aliases_and_redeploys(self, mocker, tmp_path, capsys):
+        """rollback should call db.rollback then recreate running instances."""
+        from ots_containers.commands.instance.annotations import InstanceType
+
+        self._make_config_mock(mocker, tmp_path)
+        mocker.patch(
+            "ots_containers.commands.instance.app.db.get_previous_tags",
+            return_value=[
+                ("ghcr.io/ots/ots", "v2.0.0", "2025-02-01T00:00:00"),
+                ("ghcr.io/ots/ots", "v1.0.0", "2025-01-01T00:00:00"),
+            ],
+        )
+        mock_db_rollback = mocker.patch(
+            "ots_containers.commands.instance.app.db.rollback",
+            return_value=("ghcr.io/ots/ots", "v1.0.0"),
+        )
+        mocker.patch(
+            "ots_containers.commands.instance.app.resolve_identifiers",
+            return_value={InstanceType.WEB: ["7043"]},
+        )
+        mocker.patch("ots_containers.commands.instance.app.assets.update")
+        mocker.patch("ots_containers.commands.instance.app.quadlet.write_web_template")
+        mock_recreate = mocker.patch("ots_containers.commands.instance.app.systemd.recreate")
+        mock_record = mocker.patch("ots_containers.commands.instance.app.db.record_deployment")
+
+        instance.rollback(web=True, yes=True)
+
+        mock_db_rollback.assert_called_once()
+        mock_recreate.assert_called_once()
+        mock_record.assert_called()
+
+    def test_rollback_db_rollback_failure_exits(self, mocker, tmp_path, capsys):
+        """When db.rollback returns None, rollback should exit 1."""
+        self._make_config_mock(mocker, tmp_path)
+        mocker.patch(
+            "ots_containers.commands.instance.app.db.get_previous_tags",
+            return_value=[
+                ("ghcr.io/ots/ots", "v2.0.0", "2025-02-01T00:00:00"),
+                ("ghcr.io/ots/ots", "v1.0.0", "2025-01-01T00:00:00"),
+            ],
+        )
+        mocker.patch(
+            "ots_containers.commands.instance.app.db.rollback",
+            return_value=None,
+        )
+
+        with pytest.raises(SystemExit) as exc_info:
+            instance.rollback(web=True, yes=True)
+
+        assert exc_info.value.code == 1
+
+    def test_rollback_no_running_instances_succeeds(self, mocker, tmp_path, capsys):
+        """rollback when no instances are running should succeed (just update aliases)."""
+        self._make_config_mock(mocker, tmp_path)
+        mocker.patch(
+            "ots_containers.commands.instance.app.db.get_previous_tags",
+            return_value=[
+                ("ghcr.io/ots/ots", "v2.0.0", "2025-02-01T00:00:00"),
+                ("ghcr.io/ots/ots", "v1.0.0", "2025-01-01T00:00:00"),
+            ],
+        )
+        mocker.patch(
+            "ots_containers.commands.instance.app.db.rollback",
+            return_value=("ghcr.io/ots/ots", "v1.0.0"),
+        )
+        mocker.patch(
+            "ots_containers.commands.instance.app.resolve_identifiers",
+            return_value={},  # no running instances
+        )
+        mock_recreate = mocker.patch("ots_containers.commands.instance.app.systemd.recreate")
+
+        instance.rollback(web=True, yes=True)
+
+        # Should succeed without redeploying
+        mock_recreate.assert_not_called()
+        captured = capsys.readouterr()
+        assert "no running" in captured.out.lower()
+
+
+class TestDeployHooks:
+    """Tests for --pre-hook and --post-hook in deploy."""
+
+    def _make_mock_config(self, mocker, tmp_path):
+        """Build a standard mock Config for deploy tests."""
+        mock_config = mocker.MagicMock()
+        mock_config.config_dir = mocker.MagicMock()
+        mock_config.config_yaml = mocker.MagicMock()
+        mock_config.var_dir = mocker.MagicMock()
+        mock_config.web_template_path = mocker.MagicMock()
+        mock_config.db_path = tmp_path / "test.db"
+        mock_config.existing_config_files = []
+        mock_config.has_custom_config = False
+        mock_config.resolve_image_tag.return_value = ("ghcr.io/test/image", "v1.0.0")
+        return mock_config
+
+    def test_pre_hook_is_called_before_deploy(self, mocker, tmp_path):
+        """--pre-hook command must run before the deployment starts."""
+        mock_config = self._make_mock_config(mocker, tmp_path)
+        mocker.patch("ots_containers.commands.instance.app.Config", return_value=mock_config)
+        mocker.patch("ots_containers.commands.instance.app.assets.update")
+        mocker.patch("ots_containers.commands.instance.app.quadlet.write_web_template")
+        mocker.patch("ots_containers.commands.instance.app.systemd.start")
+        mocker.patch("ots_containers.commands.instance.app.db.record_deployment")
+        mock_run_hook = mocker.patch("ots_containers.commands.instance.app.run_hook")
+
+        instance.deploy(identifiers=("7043",), web=True, pre_hook="./scan.sh")
+
+        mock_run_hook.assert_called_once_with("./scan.sh", "pre-hook", quiet=False)
+
+    def test_post_hook_is_called_after_successful_deploy(self, mocker, tmp_path):
+        """--post-hook command must run after all instances deploy successfully."""
+        mock_config = self._make_mock_config(mocker, tmp_path)
+        mocker.patch("ots_containers.commands.instance.app.Config", return_value=mock_config)
+        mocker.patch("ots_containers.commands.instance.app.assets.update")
+        mocker.patch("ots_containers.commands.instance.app.quadlet.write_web_template")
+        mocker.patch("ots_containers.commands.instance.app.systemd.start")
+        mocker.patch("ots_containers.commands.instance.app.db.record_deployment")
+        mock_run_hook = mocker.patch("ots_containers.commands.instance.app.run_hook")
+
+        instance.deploy(identifiers=("7043",), web=True, post_hook="./notify.sh")
+
+        mock_run_hook.assert_called_once_with("./notify.sh", "post-hook", quiet=False)
+
+    def test_pre_hook_failure_aborts_deploy(self, mocker, tmp_path):
+        """When --pre-hook exits non-zero, deployment must be aborted."""
+        mock_config = self._make_mock_config(mocker, tmp_path)
+        mocker.patch("ots_containers.commands.instance.app.Config", return_value=mock_config)
+        mock_start = mocker.patch("ots_containers.commands.instance.app.systemd.start")
+        mocker.patch(
+            "ots_containers.commands.instance.app.run_hook",
+            side_effect=SystemExit(1),
+        )
+
+        with pytest.raises(SystemExit) as exc_info:
+            instance.deploy(identifiers=("7043",), web=True, pre_hook="./failing-scan.sh")
+
+        assert exc_info.value.code == 1
+        # systemd.start should never have been called
+        mock_start.assert_not_called()
+
+    def test_pre_hook_skipped_on_dry_run(self, mocker, tmp_path):
+        """--pre-hook should not run during --dry-run."""
+        mock_config = self._make_mock_config(mocker, tmp_path)
+        mock_config.web_template_path = tmp_path / "template"
+        mock_config.web_template_path.touch()
+        mocker.patch("ots_containers.commands.instance.app.Config", return_value=mock_config)
+        mocker.patch(
+            "ots_containers.commands.instance.app.quadlet.render_web_template", return_value=""
+        )
+        mock_run_hook = mocker.patch("ots_containers.commands.instance.app.run_hook")
+
+        instance.deploy(identifiers=("7043",), web=True, pre_hook="./scan.sh", dry_run=True)
+
+        mock_run_hook.assert_not_called()
+
+    def test_post_hook_skipped_on_dry_run(self, mocker, tmp_path):
+        """--post-hook should not run during --dry-run."""
+        mock_config = self._make_mock_config(mocker, tmp_path)
+        mock_config.web_template_path = tmp_path / "template"
+        mock_config.web_template_path.touch()
+        mocker.patch("ots_containers.commands.instance.app.Config", return_value=mock_config)
+        mocker.patch(
+            "ots_containers.commands.instance.app.quadlet.render_web_template", return_value=""
+        )
+        mock_run_hook = mocker.patch("ots_containers.commands.instance.app.run_hook")
+
+        instance.deploy(identifiers=("7043",), web=True, post_hook="./notify.sh", dry_run=True)
+
+        mock_run_hook.assert_not_called()
+
+
+class TestRedeployHooks:
+    """Tests for --pre-hook and --post-hook in redeploy."""
+
+    def _patch_discover(self, mocker, web_ports=(7043,)):
+        """Patch instance discovery to return specific ports."""
+        mocker.patch(
+            "ots_containers.commands.instance._helpers.systemd.discover_web_instances",
+            return_value=list(web_ports),
+        )
+        mocker.patch(
+            "ots_containers.commands.instance._helpers.systemd.discover_worker_instances",
+            return_value=[],
+        )
+        mocker.patch(
+            "ots_containers.commands.instance._helpers.systemd.discover_scheduler_instances",
+            return_value=[],
+        )
+
+    def _make_mock_config(self, mocker, tmp_path):
+        """Build a standard mock Config for redeploy tests."""
+        mock_config = mocker.MagicMock()
+        mock_config.config_dir = mocker.MagicMock()
+        mock_config.config_yaml = mocker.MagicMock()
+        mock_config.var_dir = mocker.MagicMock()
+        mock_config.web_template_path = tmp_path / "template"
+        mock_config.db_path = tmp_path / "test.db"
+        mock_config.existing_config_files = []
+        mock_config.has_custom_config = False
+        mock_config.resolve_image_tag.return_value = ("ghcr.io/test/image", "v1.0.0")
+        return mock_config
+
+    def test_pre_hook_is_called_before_redeploy(self, mocker, tmp_path):
+        """--pre-hook must run before redeployment."""
+        mock_config = self._make_mock_config(mocker, tmp_path)
+        mocker.patch("ots_containers.commands.instance.app.Config", return_value=mock_config)
+        self._patch_discover(mocker)
+        mocker.patch("ots_containers.commands.instance.app.assets.update")
+        mocker.patch("ots_containers.commands.instance.app.quadlet.write_web_template")
+        mocker.patch("ots_containers.commands.instance.app.systemd.recreate")
+        mocker.patch("ots_containers.commands.instance.app.db.record_deployment")
+        mocker.patch(
+            "ots_containers.commands.instance.app.systemd.container_exists",
+            return_value=True,
+        )
+        mock_run_hook = mocker.patch("ots_containers.commands.instance.app.run_hook")
+
+        instance.redeploy(identifiers=(), web=True, pre_hook="./scan.sh")
+
+        mock_run_hook.assert_called_once_with("./scan.sh", "pre-hook", quiet=False)
+
+    def test_post_hook_is_called_after_successful_redeploy(self, mocker, tmp_path):
+        """--post-hook must run after successful redeployment."""
+        mock_config = self._make_mock_config(mocker, tmp_path)
+        mocker.patch("ots_containers.commands.instance.app.Config", return_value=mock_config)
+        self._patch_discover(mocker)
+        mocker.patch("ots_containers.commands.instance.app.assets.update")
+        mocker.patch("ots_containers.commands.instance.app.quadlet.write_web_template")
+        mocker.patch("ots_containers.commands.instance.app.systemd.recreate")
+        mocker.patch("ots_containers.commands.instance.app.db.record_deployment")
+        mocker.patch(
+            "ots_containers.commands.instance.app.systemd.container_exists",
+            return_value=True,
+        )
+        mock_run_hook = mocker.patch("ots_containers.commands.instance.app.run_hook")
+
+        instance.redeploy(identifiers=(), web=True, post_hook="./notify.sh")
+
+        mock_run_hook.assert_called_once_with("./notify.sh", "post-hook", quiet=False)
+
+    def test_pre_hook_failure_aborts_redeploy(self, mocker, tmp_path):
+        """When --pre-hook exits non-zero, redeployment must be aborted."""
+        mock_config = self._make_mock_config(mocker, tmp_path)
+        mocker.patch("ots_containers.commands.instance.app.Config", return_value=mock_config)
+        self._patch_discover(mocker)
+        mock_recreate = mocker.patch("ots_containers.commands.instance.app.systemd.recreate")
+        mocker.patch(
+            "ots_containers.commands.instance.app.run_hook",
+            side_effect=SystemExit(1),
+        )
+
+        with pytest.raises(SystemExit) as exc_info:
+            instance.redeploy(identifiers=(), web=True, pre_hook="./failing-scan.sh")
+
+        assert exc_info.value.code == 1
+        mock_recreate.assert_not_called()

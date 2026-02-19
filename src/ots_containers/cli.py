@@ -221,7 +221,9 @@ def doctor():
             if not web_running:
                 web_running_detail = "no onetime-web@* units found"
         except Exception:
-            web_running_detail = "systemctl query failed"
+            web_running_detail = (
+                "systemctl query failed; run: systemctl status onetime-web@*.service"
+            )
     _check("web instance(s) running", web_running, web_running_detail)
 
     # 9. Caddy (proxy) running (best-effort)
@@ -237,7 +239,7 @@ def doctor():
             )
             caddy_ok = result.stdout.strip() == "active"
         except Exception:
-            caddy_detail = "systemctl query failed"
+            caddy_detail = "systemctl query failed; run: systemctl status caddy"
     _check("caddy running", caddy_ok, caddy_detail)
 
     # --- Report ---

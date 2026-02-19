@@ -274,3 +274,81 @@ class TestForEachInstance:
         instances = {InstanceType.WEB: ["7043", "7044"]}
         for_each_instance(instances, delay=0, action=lambda t, i: None, verb="Testing")
         mock_sleep.assert_not_called()
+
+
+class TestRunHook:
+    """Tests for the run_hook helper."""
+
+    def test_successful_hook_does_not_raise(self, mocker):
+        """A hook exiting 0 should complete without raising."""
+        from ots_containers.commands.instance._helpers import run_hook
+
+        mocker.patch(
+            "subprocess.run",
+            return_value=mocker.MagicMock(returncode=0),
+        )
+
+        # Should not raise
+        run_hook("echo ok", "pre-hook")
+
+    def test_failed_hook_raises_system_exit(self, mocker):
+        """A hook exiting non-zero should raise SystemExit(1)."""
+        import pytest
+
+        from ots_containers.commands.instance._helpers import run_hook
+
+        mocker.patch(
+            "subprocess.run",
+            return_value=mocker.MagicMock(returncode=1),
+        )
+
+        with pytest.raises(SystemExit) as exc_info:
+            run_hook("./failing-scan.sh", "pre-hook")
+
+        assert exc_info.value.code == 1
+
+    def test_failed_hook_message_includes_command_and_stage(self, mocker, capsys):
+        """Error output should identify both the stage and command."""
+        import pytest
+
+        from ots_containers.commands.instance._helpers import run_hook
+
+        mocker.patch(
+            "subprocess.run",
+            return_value=mocker.MagicMock(returncode=2),
+        )
+
+        with pytest.raises(SystemExit):
+            run_hook("./custom-scan.sh", "pre-hook")
+
+        captured = capsys.readouterr()
+        assert "pre-hook" in captured.err
+        assert "./custom-scan.sh" in captured.err
+
+    def test_hook_is_run_via_shell(self, mocker):
+        """Hook commands must be run through the shell (shell=True)."""
+        from ots_containers.commands.instance._helpers import run_hook
+
+        mock_run = mocker.patch(
+            "subprocess.run",
+            return_value=mocker.MagicMock(returncode=0),
+        )
+
+        run_hook("echo ok", "post-hook")
+
+        call_kwargs = mock_run.call_args[1]
+        assert call_kwargs.get("shell") is True
+
+    def test_quiet_mode_suppresses_output(self, mocker, capsys):
+        """quiet=True should not print hook stage messages."""
+        from ots_containers.commands.instance._helpers import run_hook
+
+        mocker.patch(
+            "subprocess.run",
+            return_value=mocker.MagicMock(returncode=0),
+        )
+
+        run_hook("echo ok", "pre-hook", quiet=True)
+
+        captured = capsys.readouterr()
+        assert "pre-hook" not in captured.out

@@ -503,3 +503,89 @@ class TestListCommand:
         call_args = mock_run.call_args[0][0]
         assert "list-units" in call_args
         assert "--type=service" in call_args
+
+
+class TestInitDefaults:
+    """Verify that --start and --enable default to False (opt-in, not opt-out)."""
+
+    @patch("ots_containers.commands.service.app.check_default_service_conflict")
+    @patch("ots_containers.commands.service.app.systemctl")
+    @patch("ots_containers.commands.service.app.create_secrets_file")
+    @patch("ots_containers.commands.service.app.ensure_data_dir")
+    @patch("ots_containers.commands.service.app.update_config_value")
+    @patch("ots_containers.commands.service.app.copy_default_config")
+    def test_init_does_not_start_by_default(
+        self,
+        mock_copy,
+        mock_update,
+        mock_data,
+        mock_secrets,
+        mock_systemctl,
+        mock_check_conflict,
+        tmp_path,
+    ):
+        """init() must not call systemctl start unless --start is explicitly set."""
+        mock_copy.return_value = tmp_path / "test.conf"
+        mock_data.return_value = tmp_path / "data"
+        mock_secrets.return_value = None
+
+        # Call with all defaults — neither start nor enable specified
+        init("valkey", "6379")
+
+        calls = [str(call) for call in mock_systemctl.call_args_list]
+        assert not any("start" in call for call in calls), (
+            "systemctl start was called despite --start defaulting to False"
+        )
+
+    @patch("ots_containers.commands.service.app.check_default_service_conflict")
+    @patch("ots_containers.commands.service.app.systemctl")
+    @patch("ots_containers.commands.service.app.create_secrets_file")
+    @patch("ots_containers.commands.service.app.ensure_data_dir")
+    @patch("ots_containers.commands.service.app.update_config_value")
+    @patch("ots_containers.commands.service.app.copy_default_config")
+    def test_init_does_not_enable_by_default(
+        self,
+        mock_copy,
+        mock_update,
+        mock_data,
+        mock_secrets,
+        mock_systemctl,
+        mock_check_conflict,
+        tmp_path,
+    ):
+        """init() must not call systemctl enable unless --enable is explicitly set."""
+        mock_copy.return_value = tmp_path / "test.conf"
+        mock_data.return_value = tmp_path / "data"
+        mock_secrets.return_value = None
+
+        init("valkey", "6379")
+
+        calls = [str(call) for call in mock_systemctl.call_args_list]
+        assert not any("enable" in call for call in calls), (
+            "systemctl enable was called despite --enable defaulting to False"
+        )
+
+    @patch("ots_containers.commands.service.app.check_default_service_conflict")
+    @patch("ots_containers.commands.service.app.systemctl")
+    @patch("ots_containers.commands.service.app.create_secrets_file")
+    @patch("ots_containers.commands.service.app.ensure_data_dir")
+    @patch("ots_containers.commands.service.app.update_config_value")
+    @patch("ots_containers.commands.service.app.copy_default_config")
+    def test_init_no_systemctl_calls_by_default(
+        self,
+        mock_copy,
+        mock_update,
+        mock_data,
+        mock_secrets,
+        mock_systemctl,
+        mock_check_conflict,
+        tmp_path,
+    ):
+        """init() with all defaults should not invoke systemctl at all."""
+        mock_copy.return_value = tmp_path / "test.conf"
+        mock_data.return_value = tmp_path / "data"
+        mock_secrets.return_value = None
+
+        init("valkey", "6379")
+
+        mock_systemctl.assert_not_called()
