@@ -6,7 +6,15 @@ from pathlib import Path
 
 # Default image registry (public)
 DEFAULT_IMAGE = "ghcr.io/onetimesecret/onetimesecret"
-DEFAULT_TAG = "current"
+
+# Sentinel value for the default tag.  The leading '@' makes it an invalid
+# OCI registry tag so it can never be confused with a real tag on the registry.
+# When TAG env var is not set, the tool resolves the CURRENT DB alias.
+# This prevents accidental pulls of a registry tag literally named "current".
+DEFAULT_TAG = "@current"
+
+# Default environment file path (infrastructure env vars for OTS containers)
+DEFAULT_ENV_FILE = Path("/etc/default/onetimesecret")
 
 # Config files that ship as defaults in the container image (etc/defaults/*.defaults.yaml).
 # Only files present on the host override the container's built-in defaults.
@@ -45,6 +53,21 @@ class Config:
     # Private registry configuration (optional, set via OTS_REGISTRY env var)
     registry: str | None = field(default_factory=lambda: os.environ.get("OTS_REGISTRY"))
     _registry_auth_file: Path | None = field(default=None, repr=False)
+
+    # Valkey/Redis service dependency for quadlet ordering (optional).
+    # Set OTS_VALKEY_SERVICE to the systemd unit name, e.g. "valkey-server@6379.service".
+    # When set, the web quadlet adds After= and Wants= entries so the OTS container
+    # only starts after the data store is ready on reboot.
+    valkey_service: str | None = field(default_factory=lambda: os.environ.get("OTS_VALKEY_SERVICE"))
+
+    # Container resource limits (optional, applied to all quadlet templates).
+    # Set via environment variables before deploying.
+    #
+    # MEMORY_MAX: Hard memory limit — container is OOM-killed if exceeded.
+    #             Systemd format: "512M", "1G", "2G".  Example: MEMORY_MAX=1G
+    # CPU_QUOTA:  CPU time quota as a percentage.  Example: CPU_QUOTA=80%
+    memory_max: str | None = field(default_factory=lambda: os.environ.get("MEMORY_MAX"))
+    cpu_quota: str | None = field(default_factory=lambda: os.environ.get("CPU_QUOTA"))
 
     # Proxy (Caddy) configuration - uses HOST environment, not container .env
     proxy_template: Path = Path("/etc/onetimesecret/Caddyfile.template")
@@ -155,19 +178,27 @@ class Config:
     def resolve_image_tag(self) -> tuple[str, str]:
         """Resolve image and tag, checking database aliases if tag is an alias.
 
-        If tag is 'current' or 'rollback', looks up the actual tag from the
-        deployment database. Falls back to the literal tag if no alias found.
+        Sentinel tags (@current, @rollback) and bare alias names (current,
+        rollback) are looked up in the deployment database. Falls back to the
+        literal tag if no alias is found.
 
         Returns (image, tag) tuple.
         """
         from . import db
 
-        # Check if tag is an alias
-        if self.tag.lower() in ("current", "rollback"):
-            alias = db.get_alias(self.db_path, self.tag)
+        # Normalize: strip the leading '@' from sentinel values so the lookup
+        # key is the plain alias name ("current", "rollback").
+        tag_key = self.tag.lstrip("@")
+
+        # Check if tag is an alias name (sentinel or bare)
+        if tag_key.lower() in ("current", "rollback"):
+            alias = db.get_alias(self.db_path, tag_key)
             if alias:
                 return (alias.image, alias.tag)
 
+        # Not an alias (or alias not set) — return as-is.
+        # Callers that need a real tag (e.g. pull) should check for the
+        # sentinel '@current' / '@rollback' and raise an appropriate error.
         return (self.image, self.tag)
 
     @property

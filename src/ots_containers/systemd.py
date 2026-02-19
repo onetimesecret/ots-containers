@@ -1,9 +1,12 @@
 # src/ots_containers/systemd.py
 
+import logging
 import re
 import shutil
 import subprocess
 import sys
+
+logger = logging.getLogger(__name__)
 
 
 class SystemdNotAvailableError(Exception):
@@ -39,7 +42,7 @@ def _fetch_journal(unit: str, lines: int = 20) -> str:
 def _run_systemctl(action: str, unit: str) -> None:
     """Run a systemctl command with diagnostic output on failure."""
     cmd = ["sudo", "systemctl", action, unit]
-    print(f"  $ {' '.join(cmd)}")
+    logger.debug("  $ %s", " ".join(cmd))
     result = subprocess.run(cmd, capture_output=True, text=True, timeout=90)
     if result.returncode != 0:
         journal = _fetch_journal(unit)
@@ -62,6 +65,31 @@ def require_systemctl() -> None:
         )
         print(
             "Note: 'ots instance shell' works on macOS for local development.",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+
+
+def require_podman() -> None:
+    """Check that podman is available, exit with helpful message if not.
+
+    Call this at the start of any function that shells out to podman directly.
+    """
+    if not shutil.which("podman"):
+        print(
+            "Error: podman not found. This command requires Podman to be installed.",
+            file=sys.stderr,
+        )
+        print(
+            "\nInstall Podman: https://podman.io/docs/installation",
+            file=sys.stderr,
+        )
+        print(
+            "  Linux (Debian/Ubuntu): sudo apt-get install -y podman",
+            file=sys.stderr,
+        )
+        print(
+            "  macOS: brew install podman && podman machine init && podman machine start",
             file=sys.stderr,
         )
         raise SystemExit(1)
@@ -99,6 +127,7 @@ def discover_web_instances(running_only: bool = False) -> list[int]:
         ],
         capture_output=True,
         text=True,
+        timeout=10,
     )
     ports = []
     for line in result.stdout.strip().splitlines():
@@ -141,6 +170,7 @@ def discover_worker_instances(running_only: bool = False) -> list[str]:
         ],
         capture_output=True,
         text=True,
+        timeout=10,
     )
     instances = []
     for line in result.stdout.strip().splitlines():
@@ -184,6 +214,7 @@ def discover_scheduler_instances(running_only: bool = False) -> list[str]:
         ],
         capture_output=True,
         text=True,
+        timeout=10,
     )
     instances = []
     for line in result.stdout.strip().splitlines():
@@ -209,8 +240,8 @@ def discover_scheduler_instances(running_only: bool = False) -> list[str]:
 def daemon_reload() -> None:
     require_systemctl()
     cmd = ["sudo", "systemctl", "daemon-reload"]
-    print(f"  $ {' '.join(cmd)}")
-    subprocess.run(cmd, check=True)  # no unit context, let CalledProcessError propagate
+    logger.debug("  $ %s", " ".join(cmd))
+    subprocess.run(cmd, check=True, timeout=30)  # no unit context, let CalledProcessError propagate
 
 
 def start(unit: str) -> None:
@@ -227,9 +258,9 @@ def reset_failed(unit: str) -> None:
     """Clear failed state for a unit so it doesn't appear in discovery."""
     require_systemctl()
     cmd = ["sudo", "systemctl", "reset-failed", unit]
-    print(f"  $ {' '.join(cmd)}")
+    logger.debug("  $ %s", " ".join(cmd))
     # Suppress stderr - it's fine if the unit wasn't in failed state
-    subprocess.run(cmd, stderr=subprocess.DEVNULL)
+    subprocess.run(cmd, stderr=subprocess.DEVNULL, timeout=10)
 
 
 def restart(unit: str) -> None:
@@ -237,16 +268,36 @@ def restart(unit: str) -> None:
     _run_systemctl("restart", unit)
 
 
+def disable(unit: str) -> None:
+    """Disable a unit so it does not auto-start on reboot.
+
+    Non-fatal if the unit is not currently enabled — systemctl disable is
+    idempotent and exits 0 even when the unit was never enabled.
+    """
+    require_systemctl()
+    cmd = ["sudo", "systemctl", "disable", unit]
+    logger.debug("  $ %s", " ".join(cmd))
+    # Suppress stderr — 'not enabled' is not an error worth surfacing
+    subprocess.run(cmd, stderr=subprocess.DEVNULL, timeout=10)
+
+
 def unit_to_container_name(unit: str) -> str:
     """Convert systemd unit name to Quadlet container name.
 
-    Quadlet names containers as: systemd-{unit_with_underscores}
-    Example: onetime-web@7044 -> systemd-onetime-web_7044
+    Quadlet names containers as: systemd-{unit_with_separator}
+    Example: onetime-web@7044 -> systemd-onetime-web--7044
+
+    Uses ``--`` (double dash) as the separator between the template base name
+    and the instance identifier.  A single ``_`` was previously used but is
+    ambiguous because ``_`` can also appear in unit names, making it impossible
+    to distinguish ``onetime-web@7043`` from a hypothetical ``onetime-web_7043``.
+    Double dashes are the conventional systemd escaping character and will not
+    collide with naturally occurring underscores in unit names.
     """
     # Remove .service suffix if present
     name = unit.removesuffix(".service")
-    # Replace @ with _ (Quadlet convention)
-    name = name.replace("@", "_")
+    # Replace @ with -- (distinctive separator that won't collide with underscores)
+    name = name.replace("@", "--")
     return f"systemd-{name}"
 
 
@@ -268,8 +319,8 @@ def recreate(unit: str) -> None:
     # Remove the container (Quadlet uses systemd-{name} format with @ -> _)
     container_name = unit_to_container_name(unit)
     rm_cmd = ["sudo", "podman", "rm", "--ignore", container_name]
-    print(f"  $ {' '.join(rm_cmd)}")
-    subprocess.run(rm_cmd, check=True)
+    logger.debug("  $ %s", " ".join(rm_cmd))
+    subprocess.run(rm_cmd, check=True, timeout=30)
 
     # Start creates a fresh container from the updated quadlet
     _run_systemctl("start", unit)
@@ -278,10 +329,11 @@ def recreate(unit: str) -> None:
 def status(unit: str, lines: int = 25) -> None:
     require_systemctl()
     cmd = ["sudo", "systemctl", "--no-pager", f"-n{lines}", "status", unit]
-    print(f"  $ {' '.join(cmd)}")
+    logger.debug("  $ %s", " ".join(cmd))
     subprocess.run(
         cmd,
         check=False,  # status returns non-zero if not running
+        timeout=30,
     )
 
 
@@ -292,6 +344,7 @@ def unit_exists(unit: str) -> bool:
         ["systemctl", "list-unit-files", unit, "--plain", "--no-legend"],
         capture_output=True,
         text=True,
+        timeout=10,
     )
     return bool(result.stdout.strip())
 
@@ -306,5 +359,77 @@ def container_exists(unit: str) -> bool:
     result = subprocess.run(
         ["podman", "container", "exists", container_name],
         capture_output=True,
+        timeout=10,
     )
     return result.returncode == 0
+
+
+class HealthCheckTimeoutError(Exception):
+    """Raised when a unit fails to become active within the configured timeout."""
+
+    def __init__(self, unit: str, timeout: int, last_state: str) -> None:
+        self.unit = unit
+        self.timeout = timeout
+        self.last_state = last_state
+        super().__init__(
+            f"{unit} did not become active within {timeout}s (last state: {last_state})"
+        )
+
+
+def wait_for_healthy(
+    unit: str,
+    timeout: int = 60,
+    poll_interval: float = 2.0,
+    consecutive_failures_threshold: int = 3,
+) -> None:
+    """Poll systemctl until the unit is active or timeout is reached.
+
+    Args:
+        unit: Systemd unit name (e.g., "onetime-web@7043")
+        timeout: Maximum seconds to wait (default: 60)
+        poll_interval: Seconds between checks (default: 2.0)
+        consecutive_failures_threshold: Number of consecutive "failed" polls
+            required before treating the failure as terminal and stopping early
+            (default: 3).  A single "failed" reading can be transient — the unit
+            may be in the process of restarting — so we tolerate a few before
+            giving up.
+
+    Raises:
+        HealthCheckTimeoutError: If the unit is not active within ``timeout`` seconds.
+    """
+    import time
+
+    require_systemctl()
+    deadline = time.monotonic() + timeout
+    last_state = "unknown"
+    consecutive_failures = 0
+
+    while time.monotonic() < deadline:
+        result = subprocess.run(
+            ["systemctl", "is-active", unit],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        last_state = result.stdout.strip()
+        if result.returncode == 0 and last_state == "active":
+            logger.debug("%s is active", unit)
+            return
+        if last_state == "failed":
+            consecutive_failures += 1
+            logger.debug(
+                "%s is failed (consecutive: %d/%d), waiting...",
+                unit,
+                consecutive_failures,
+                consecutive_failures_threshold,
+            )
+            # Only exit early once the failure has persisted across multiple
+            # consecutive polls — a transient "failed" during restart is normal.
+            if consecutive_failures >= consecutive_failures_threshold:
+                break
+        else:
+            consecutive_failures = 0
+            logger.debug("%s is %s, waiting...", unit, last_state)
+        time.sleep(poll_interval)
+
+    raise HealthCheckTimeoutError(unit, timeout, last_state)

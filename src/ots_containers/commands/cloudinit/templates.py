@@ -54,14 +54,38 @@ def generate_cloudinit_config(
         include_postgresql: Include PostgreSQL official repository
         include_valkey: Include Valkey repository
         include_xcaddy: Include xcaddy repo and build custom Caddy binary
-        postgresql_gpg_key: PostgreSQL GPG public key content
-        valkey_gpg_key: Valkey GPG public key content
+        postgresql_gpg_key: PostgreSQL GPG public key content (required when
+            include_postgresql=True). Obtain with:
+            ``curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc``
+        valkey_gpg_key: Valkey GPG public key content (required when
+            include_valkey=True). Obtain with:
+            ``curl -fsSL https://packages.valkey.io/valkey.gpg``
         caddy_version: Caddy version to build (default: v2.10.2)
         caddy_plugins: Caddy plugins to include (default: OTS web profile)
 
     Returns:
         Complete cloud-init YAML configuration as string
+
+    Raises:
+        ValueError: When a repository key is required but not provided.
+            cloud-init silently fails to add the repository when the key is
+            invalid, so refusing to generate is safer than emitting a
+            placeholder.
     """
+    if include_postgresql and not postgresql_gpg_key:
+        raise ValueError(
+            "PostgreSQL GPG key is required when --include-postgresql is used.\n"
+            "Obtain the key with:\n"
+            "  curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc\n"
+            "Then pass it with: --postgresql-key /path/to/key.asc"
+        )
+    if include_valkey and not valkey_gpg_key:
+        raise ValueError(
+            "Valkey GPG key is required when --include-valkey is used.\n"
+            "Obtain the key with:\n"
+            "  curl -fsSL https://packages.valkey.io/valkey.gpg\n"
+            "Then pass it with: --valkey-key /path/to/key.gpg"
+        )
     # Base configuration with Debian 13 main repositories
     # Get the sources list and indent it for YAML
     sources_list = get_debian13_sources_list().rstrip("\n")
@@ -150,7 +174,17 @@ def generate_cloudinit_config(
             ]
         )
 
-    # Add runcmd section for xcaddy repo setup and build
+    # Always include base runcmd: create required OTS directories
+    config_parts.extend(
+        [
+            "",
+            "runcmd:",
+            "  - mkdir -p /etc/onetimesecret /var/lib/onetimesecret",
+            "  - chown onetimesecret:onetimesecret /etc/onetimesecret /var/lib/onetimesecret",
+        ]
+    )
+
+    # Add xcaddy repo setup and build commands
     if include_xcaddy:
         import shlex
 
@@ -160,8 +194,6 @@ def generate_cloudinit_config(
 
         config_parts.extend(
             [
-                "",
-                "runcmd:",
                 "  # xcaddy: add Cloudsmith apt repository",
                 "  - >-",
                 "    curl -1sLf 'https://dl.cloudsmith.io/public/caddy/xcaddy/gpg.key'",

@@ -15,6 +15,8 @@ import cyclopts
 
 from ots_containers import db
 from ots_containers.config import CONFIG_FILES, Config
+from ots_containers.environment_file import ENV_FILE_TEMPLATE
+from ots_containers.quadlet import DEFAULT_ENV_FILE
 
 app = cyclopts.App(
     name="init",
@@ -235,6 +237,34 @@ def init(
                     print(f"  [denied] {cfg.db_path} - permission denied (run with sudo?)")
                     all_ok = False
 
+    # 4. Infrastructure environment file (required before deploy)
+    if not quiet or check:
+        print("\nInfrastructure Configuration:")
+    if check:
+        if DEFAULT_ENV_FILE.exists():
+            print(f"  [ok] {DEFAULT_ENV_FILE}")
+        else:
+            print(f"  [missing] {DEFAULT_ENV_FILE}")
+            print("  Run 'ots init' to scaffold this file, then configure it.")
+            all_ok = False
+    else:
+        if DEFAULT_ENV_FILE.exists():
+            if not quiet:
+                print(f"  [ok] {DEFAULT_ENV_FILE}")
+        else:
+            try:
+                DEFAULT_ENV_FILE.parent.mkdir(parents=True, exist_ok=True)
+                DEFAULT_ENV_FILE.write_text(ENV_FILE_TEMPLATE)
+                uid, gid = _get_owner_group()
+                os.chown(DEFAULT_ENV_FILE, uid, gid)
+                if not quiet:
+                    print(f"  [created] {DEFAULT_ENV_FILE}")
+                    print("    Edit it to add your connection strings and secret values,")
+                    print("    then run: sudo ots env process")
+            except PermissionError:
+                print(f"  [denied] {DEFAULT_ENV_FILE} - permission denied (run with sudo?)")
+                all_ok = False
+
     # Summary
     if check:
         print()
@@ -252,8 +282,8 @@ def init(
             print("Try running with elevated privileges: sudo ots init")
         print("\nNext steps:")
         print(f"  1. (Optional) Place config overrides in {cfg.config_dir}/")
-        print("  2. Create /etc/default/onetimesecret with infrastructure env vars")
-        print("  3. Create Podman secrets: ots_hmac_secret, ots_secret, ots_session_secret")
+        print(f"  2. Edit {DEFAULT_ENV_FILE} with infrastructure env vars and secret values")
+        print("  3. Run 'sudo ots env process' to move secret values into podman secret store")
         print("  4. Run 'ots image pull --tag <version>' to pull an image")
         print("  5. Run 'ots instance deploy <port>' to start an instance")
 

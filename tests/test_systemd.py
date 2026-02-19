@@ -147,6 +147,7 @@ class TestDiscoverWebInstances:
             ["systemctl", "list-units", "onetime-web@*", "--plain", "--no-legend", "--all"],
             capture_output=True,
             text=True,
+            timeout=10,
         )
 
 
@@ -161,7 +162,9 @@ class TestDaemonReload:
 
         systemd.daemon_reload()
 
-        mock_run.assert_called_once_with(["sudo", "systemctl", "daemon-reload"], check=True)
+        mock_run.assert_called_once_with(
+            ["sudo", "systemctl", "daemon-reload"], check=True, timeout=30
+        )
 
     def test_daemon_reload_raises_on_failure(self, mocker):
         """Should propagate CalledProcessError on failure."""
@@ -299,6 +302,7 @@ class TestStatus:
                 "onetime-web@7043",
             ],
             check=False,
+            timeout=30,
         )
 
     def test_status_custom_lines(self, mocker):
@@ -319,6 +323,7 @@ class TestStatus:
                 "onetime-web@7043",
             ],
             check=False,
+            timeout=30,
         )
 
     def test_status_does_not_raise_on_nonzero_exit(self, mocker):
@@ -346,25 +351,36 @@ class TestUnitToContainerName:
     """Test unit_to_container_name function."""
 
     def test_converts_web_template_instance_unit(self):
-        """Should convert onetime-web@7044 to systemd-onetime-web_7044."""
+        """Should convert onetime-web@7044 to systemd-onetime-web--7044."""
         from ots_containers import systemd
 
-        assert systemd.unit_to_container_name("onetime-web@7044") == "systemd-onetime-web_7044"
+        assert systemd.unit_to_container_name("onetime-web@7044") == "systemd-onetime-web--7044"
 
     def test_handles_service_suffix(self):
         """Should strip .service suffix before converting."""
         from ots_containers import systemd
 
         assert (
-            systemd.unit_to_container_name("onetime-web@7043.service") == "systemd-onetime-web_7043"
+            systemd.unit_to_container_name("onetime-web@7043.service")
+            == "systemd-onetime-web--7043"
         )
 
     def test_handles_different_ports(self):
         """Should work with various port numbers."""
         from ots_containers import systemd
 
-        assert systemd.unit_to_container_name("onetime-web@3000") == "systemd-onetime-web_3000"
-        assert systemd.unit_to_container_name("onetime-web@8080") == "systemd-onetime-web_8080"
+        assert systemd.unit_to_container_name("onetime-web@3000") == "systemd-onetime-web--3000"
+        assert systemd.unit_to_container_name("onetime-web@8080") == "systemd-onetime-web--8080"
+
+    def test_double_dash_avoids_underscore_collision(self):
+        """@ -> -- must not collide with a unit that has a literal underscore."""
+        from ots_containers import systemd
+
+        # onetime-web@7043 and a hypothetical onetime-web_7043 must produce
+        # different container names.
+        at_name = systemd.unit_to_container_name("onetime-web@7043")
+        underscore_name = "systemd-onetime-web_7043"
+        assert at_name != underscore_name
 
 
 class TestRecreate:
@@ -384,7 +400,7 @@ class TestRecreate:
         assert mock_run.call_count == 3
         calls = mock_run.call_args_list
         assert calls[0][0][0] == ["sudo", "systemctl", "stop", "onetime-web@7044"]
-        assert calls[1][0][0] == ["sudo", "podman", "rm", "--ignore", "systemd-onetime-web_7044"]
+        assert calls[1][0][0] == ["sudo", "podman", "rm", "--ignore", "systemd-onetime-web--7044"]
         assert calls[2][0][0] == ["sudo", "systemctl", "start", "onetime-web@7044"]
 
     def test_recreate_raises_on_stop_failure(self, mocker):
@@ -434,8 +450,9 @@ class TestContainerExists:
         systemd.container_exists("onetime-web@7044")
 
         mock_run.assert_called_once_with(
-            ["podman", "container", "exists", "systemd-onetime-web_7044"],
+            ["podman", "container", "exists", "systemd-onetime-web--7044"],
             capture_output=True,
+            timeout=10,
         )
 
 
@@ -482,6 +499,7 @@ class TestUnitExists:
             ],
             capture_output=True,
             text=True,
+            timeout=10,
         )
 
 
@@ -585,6 +603,7 @@ class TestDiscoverWorkerInstances:
             ["systemctl", "list-units", "onetime-worker@*", "--plain", "--no-legend", "--all"],
             capture_output=True,
             text=True,
+            timeout=10,
         )
 
     def test_discover_worker_instances_running_only(self, mocker):
@@ -664,6 +683,7 @@ class TestDiscoverSchedulerInstances:
             ["systemctl", "list-units", "onetime-scheduler@*", "--plain", "--no-legend", "--all"],
             capture_output=True,
             text=True,
+            timeout=10,
         )
 
     def test_discover_scheduler_instances_running_only(self, mocker):
@@ -686,18 +706,18 @@ class TestWorkerUnitToContainerName:
     """Test unit_to_container_name for worker units."""
 
     def test_converts_worker_unit_with_numeric_id(self):
-        """Should convert onetime-worker@1 to systemd-onetime-worker_1."""
+        """Should convert onetime-worker@1 to systemd-onetime-worker--1."""
         from ots_containers import systemd
 
-        assert systemd.unit_to_container_name("onetime-worker@1") == "systemd-onetime-worker_1"
+        assert systemd.unit_to_container_name("onetime-worker@1") == "systemd-onetime-worker--1"
 
     def test_converts_worker_unit_with_string_id(self):
-        """Should convert onetime-worker@billing to systemd-onetime-worker_billing."""
+        """Should convert onetime-worker@billing to systemd-onetime-worker--billing."""
         from ots_containers import systemd
 
         assert (
             systemd.unit_to_container_name("onetime-worker@billing")
-            == "systemd-onetime-worker_billing"
+            == "systemd-onetime-worker--billing"
         )
 
     def test_handles_worker_service_suffix(self):
@@ -706,7 +726,7 @@ class TestWorkerUnitToContainerName:
 
         assert (
             systemd.unit_to_container_name("onetime-worker@emails.service")
-            == "systemd-onetime-worker_emails"
+            == "systemd-onetime-worker--emails"
         )
 
 
@@ -714,12 +734,12 @@ class TestSchedulerUnitToContainerName:
     """Test unit_to_container_name for scheduler units."""
 
     def test_converts_scheduler_unit(self):
-        """Should convert onetime-scheduler@main to systemd-onetime-scheduler_main."""
+        """Should convert onetime-scheduler@main to systemd-onetime-scheduler--main."""
         from ots_containers import systemd
 
         assert (
             systemd.unit_to_container_name("onetime-scheduler@main")
-            == "systemd-onetime-scheduler_main"
+            == "systemd-onetime-scheduler--main"
         )
 
 
@@ -737,8 +757,9 @@ class TestWorkerContainerExists:
         systemd.container_exists("onetime-worker@billing")
 
         mock_run.assert_called_once_with(
-            ["podman", "container", "exists", "systemd-onetime-worker_billing"],
+            ["podman", "container", "exists", "systemd-onetime-worker--billing"],
             capture_output=True,
+            timeout=10,
         )
 
     def test_worker_container_exists_with_numeric_id(self, mocker):
@@ -752,8 +773,9 @@ class TestWorkerContainerExists:
         systemd.container_exists("onetime-worker@1")
 
         mock_run.assert_called_once_with(
-            ["podman", "container", "exists", "systemd-onetime-worker_1"],
+            ["podman", "container", "exists", "systemd-onetime-worker--1"],
             capture_output=True,
+            timeout=10,
         )
 
 
@@ -795,3 +817,175 @@ class TestRequireSystemctl:
 
         # Should not raise
         systemd.require_systemctl()
+
+
+class TestRequirePodman:
+    """Test require_podman function behavior."""
+
+    def test_require_podman_exits_when_podman_missing(self, mocker):
+        """Should raise SystemExit(1) when podman is not found."""
+        from ots_containers import systemd
+
+        mocker.patch("shutil.which", return_value=None)
+
+        with pytest.raises(SystemExit) as exc_info:
+            systemd.require_podman()
+
+        assert exc_info.value.code == 1
+
+    def test_require_podman_message_mentions_installation(self, mocker, capsys):
+        """Should print error message with installation instructions."""
+        from ots_containers import systemd
+
+        mocker.patch("shutil.which", return_value=None)
+
+        with pytest.raises(SystemExit):
+            systemd.require_podman()
+
+        captured = capsys.readouterr()
+        assert "podman" in captured.err.lower()
+        assert "install" in captured.err.lower()
+
+    def test_require_podman_passes_when_podman_available(self, mocker):
+        """Should not raise when podman is available."""
+        from ots_containers import systemd
+
+        mocker.patch("shutil.which", return_value="/usr/bin/podman")
+
+        # Should not raise
+        systemd.require_podman()
+
+
+class TestWaitForHealthy:
+    """Test wait_for_healthy polling logic."""
+
+    def _make_is_active_result(self, mocker, state: str, returncode: int | None = None):
+        """Build a CompletedProcess mock for systemctl is-active output."""
+        if returncode is None:
+            returncode = 0 if state == "active" else 1
+        result = mocker.Mock()
+        result.stdout = state
+        result.returncode = returncode
+        return result
+
+    def test_returns_immediately_when_already_active(self, mocker):
+        """Should return without sleeping when unit is active on first poll."""
+        from ots_containers import systemd
+
+        active = self._make_is_active_result(mocker, "active", returncode=0)
+        mocker.patch("subprocess.run", return_value=active)
+        mock_sleep = mocker.patch("time.sleep")
+
+        systemd.wait_for_healthy("onetime-web@7043", timeout=10)
+
+        mock_sleep.assert_not_called()
+
+    def test_raises_timeout_error_when_never_active(self, mocker):
+        """Should raise HealthCheckTimeoutError when unit stays activating past timeout."""
+        from ots_containers import systemd
+        from ots_containers.systemd import HealthCheckTimeoutError
+
+        activating = self._make_is_active_result(mocker, "activating")
+        mocker.patch("subprocess.run", return_value=activating)
+        mocker.patch("time.sleep")
+
+        # Use a very short timeout and fake monotonic so we can control time
+        times = iter([0.0, 0.0, 5.0, 5.0, 11.0])
+        mocker.patch("time.monotonic", side_effect=times)
+
+        with pytest.raises(HealthCheckTimeoutError) as exc_info:
+            systemd.wait_for_healthy("onetime-web@7043", timeout=10)
+
+        assert exc_info.value.unit == "onetime-web@7043"
+        assert exc_info.value.last_state == "activating"
+
+    def test_single_failed_does_not_exit_early(self, mocker):
+        """A single 'failed' poll should not abort — it may be transient."""
+        from ots_containers import systemd
+
+        failed = self._make_is_active_result(mocker, "failed")
+        active = self._make_is_active_result(mocker, "active", returncode=0)
+        # First poll: failed (transient), second poll: active
+        mocker.patch("subprocess.run", side_effect=[failed, active])
+        mock_sleep = mocker.patch("time.sleep")
+
+        # Should NOT raise; should recover after the transient failure
+        systemd.wait_for_healthy("onetime-web@7043", timeout=30, poll_interval=0.1)
+
+        assert mock_sleep.call_count == 1
+
+    def test_two_consecutive_failed_does_not_exit_early(self, mocker):
+        """Two consecutive 'failed' polls should still not abort (threshold is 3)."""
+        from ots_containers import systemd
+
+        failed = self._make_is_active_result(mocker, "failed")
+        active = self._make_is_active_result(mocker, "active", returncode=0)
+        mocker.patch("subprocess.run", side_effect=[failed, failed, active])
+        mock_sleep = mocker.patch("time.sleep")
+
+        systemd.wait_for_healthy("onetime-web@7043", timeout=30, poll_interval=0.1)
+
+        assert mock_sleep.call_count == 2
+
+    def test_three_consecutive_failed_exits_early(self, mocker):
+        """Three consecutive 'failed' polls must raise immediately (terminal failure)."""
+        from ots_containers import systemd
+        from ots_containers.systemd import HealthCheckTimeoutError
+
+        failed = self._make_is_active_result(mocker, "failed")
+        mocker.patch("subprocess.run", return_value=failed)
+        mocker.patch("time.sleep")
+        # Ensure deadline never expires so we confirm it's the counter, not the clock
+        mocker.patch("time.monotonic", return_value=0.0)
+
+        with pytest.raises(HealthCheckTimeoutError) as exc_info:
+            systemd.wait_for_healthy(
+                "onetime-web@7043",
+                timeout=9999,
+                poll_interval=0.01,
+                consecutive_failures_threshold=3,
+            )
+
+        assert exc_info.value.last_state == "failed"
+
+    def test_failed_counter_resets_on_non_failed_state(self, mocker):
+        """Counter should reset when a non-failed state is seen between failures."""
+        from ots_containers import systemd
+
+        failed = self._make_is_active_result(mocker, "failed")
+        activating = self._make_is_active_result(mocker, "activating")
+        active = self._make_is_active_result(mocker, "active", returncode=0)
+        # Pattern: failed, failed, activating (resets counter), failed, failed, active
+        mocker.patch(
+            "subprocess.run",
+            side_effect=[failed, failed, activating, failed, failed, active],
+        )
+        mock_sleep = mocker.patch("time.sleep")
+
+        # With threshold=3, the counter never reaches 3 because activating resets it
+        systemd.wait_for_healthy(
+            "onetime-web@7043",
+            timeout=30,
+            poll_interval=0.1,
+            consecutive_failures_threshold=3,
+        )
+
+        assert mock_sleep.call_count == 5
+
+    def test_custom_consecutive_failures_threshold(self, mocker):
+        """Should respect a custom threshold value."""
+        from ots_containers import systemd
+        from ots_containers.systemd import HealthCheckTimeoutError
+
+        failed = self._make_is_active_result(mocker, "failed")
+        mocker.patch("subprocess.run", return_value=failed)
+        mocker.patch("time.sleep")
+        mocker.patch("time.monotonic", return_value=0.0)
+
+        with pytest.raises(HealthCheckTimeoutError):
+            systemd.wait_for_healthy(
+                "onetime-web@7043",
+                timeout=9999,
+                poll_interval=0.01,
+                consecutive_failures_threshold=1,
+            )

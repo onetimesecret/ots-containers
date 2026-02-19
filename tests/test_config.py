@@ -65,12 +65,12 @@ class TestConfigImageSettings:
         assert cfg.image == "custom/image"
 
     def test_default_tag(self, monkeypatch):
-        """Should default to 'current'."""
+        """Should default to '@current' sentinel (not the literal registry tag 'current')."""
         monkeypatch.delenv("TAG", raising=False)
         from ots_containers.config import Config
 
         cfg = Config()
-        assert cfg.tag == "current"
+        assert cfg.tag == "@current"
 
     def test_tag_from_env(self, monkeypatch):
         """Should use TAG env var when set."""
@@ -407,7 +407,7 @@ class TestConfigPrivateImage:
         from ots_containers.config import Config
 
         cfg = Config()
-        assert cfg.private_image_with_tag == "registry.example.com/myorg/onetimesecret:current"
+        assert cfg.private_image_with_tag == "registry.example.com/myorg/onetimesecret:@current"
 
 
 class TestConfigResolveImageTag:
@@ -451,8 +451,12 @@ class TestConfigResolveImageTag:
         assert image == "ghcr.io/onetimesecret/onetimesecret"
         assert tag == "v1.0.0"
 
-    def test_falls_back_to_literal_tag_when_no_alias(self, monkeypatch, tmp_path):
-        """Should return literal image/tag when 'current' has no alias in the database."""
+    def test_falls_back_to_sentinel_when_no_alias(self, monkeypatch, tmp_path):
+        """When no CURRENT alias is set, resolve_image_tag returns the sentinel '@current'.
+
+        Callers (e.g. image pull) are expected to detect the sentinel and raise
+        a helpful error rather than passing '@current' to the registry.
+        """
         from ots_containers import db
         from ots_containers.config import Config
 
@@ -465,7 +469,8 @@ class TestConfigResolveImageTag:
         cfg = Config(var_dir=tmp_path)
         image, tag = cfg.resolve_image_tag()
         assert image == "ghcr.io/onetimesecret/onetimesecret"
-        assert tag == "current"
+        # The sentinel is returned unchanged so callers can detect the unresolved case
+        assert tag == "@current"
 
     def test_non_alias_tag_passes_through(self, monkeypatch, tmp_path):
         """A concrete tag like 'v3.0.0' should pass through without database lookup."""

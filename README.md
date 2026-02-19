@@ -160,7 +160,7 @@ FHS-compliant directory structure:
 ├── onetime-worker@.container
 └── onetime-scheduler@.container
 
-/var/opt/onetimesecret/          # Runtime data
+/var/lib/onetimesecret/          # Runtime data
 └── deployments.db               # Deployment timeline (SQLite)
 ```
 

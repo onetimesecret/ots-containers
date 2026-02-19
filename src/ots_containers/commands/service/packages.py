@@ -205,11 +205,11 @@ def get_package(name: str) -> ServicePackage:
         ServicePackage definition
 
     Raises:
-        KeyError: If package is not registered
+        SystemExit: If the package name is not registered, with available names listed.
     """
     if name not in PACKAGES:
         available = ", ".join(sorted(PACKAGES.keys()))
-        raise KeyError(f"Unknown package '{name}'. Available: {available}")
+        raise SystemExit(f"Unknown service package '{name}'. Available packages: {available}")
     return PACKAGES[name]
 
 

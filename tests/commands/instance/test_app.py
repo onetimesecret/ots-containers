@@ -276,7 +276,7 @@ class TestDeployCommand:
         instance.deploy(identifiers=("7143",), web=True)
 
         mock_assets.assert_called_once_with(mock_config, create_volume=True)
-        mock_quadlet.assert_called_once_with(mock_config)
+        mock_quadlet.assert_called_once_with(mock_config, force=False)
 
 
 class TestDeployWorkerCommand:
@@ -303,7 +303,7 @@ class TestDeployWorkerCommand:
 
         instance.deploy(identifiers=("1",), worker=True)
 
-        mock_quadlet.assert_called_once_with(mock_config)
+        mock_quadlet.assert_called_once_with(mock_config, force=False)
 
     def test_deploy_worker_does_not_update_assets(self, mocker, tmp_path):
         """deploy --worker should NOT update static assets."""
@@ -480,8 +480,8 @@ class TestExecCommand:
         mock_run.assert_called_once()
         call_args = mock_run.call_args[0][0]
         assert call_args[:3] == ["podman", "exec", "-it"]
-        # Container name is now systemd-onetime-web_7043
-        assert "systemd-onetime-web_7043" in call_args
+        # Container name uses -- as separator: systemd-onetime-web--7043
+        assert "systemd-onetime-web--7043" in call_args
         assert "/bin/bash" in call_args
 
 

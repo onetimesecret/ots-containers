@@ -15,11 +15,14 @@ Convention:
 
 from __future__ import annotations
 
+import logging
 import re
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -379,6 +382,10 @@ def ensure_podman_secret(secret_name: str, value: str) -> str:
     Returns:
         "created" if new, "replaced" if existing was overwritten
     """
+    from .systemd import require_podman
+
+    require_podman()
+
     # Check if secret exists
     result = subprocess.run(
         ["podman", "secret", "exists", secret_name],

@@ -147,11 +147,11 @@ class TestPackageRegistry:
         assert pkg is REDIS
 
     def test_get_package_unknown_raises(self):
-        """Test get_package raises KeyError for unknown package."""
-        with pytest.raises(KeyError) as exc_info:
+        """Test get_package raises SystemExit for unknown package."""
+        with pytest.raises(SystemExit) as exc_info:
             get_package("unknown")
-        assert "Unknown package 'unknown'" in str(exc_info.value)
-        assert "Available:" in str(exc_info.value)
+        assert "unknown" in str(exc_info.value)
+        assert "Available" in str(exc_info.value)
 
     def test_list_packages(self):
         """Test list_packages returns sorted list."""

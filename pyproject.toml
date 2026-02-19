@@ -38,7 +38,7 @@ dev = ["pre-commit>=3.0", "pyright>=1.1.390"]
 test = ["pytest>=8.0", "pytest-mock>=3.14", "pytest-cov>=6.0", "coverage>=7.10"]
 
 [project.scripts]
-ots-containers = "ots_containers.cli:app"
+ots-containers = "ots_containers.cli:main"
 
 [project.urls]
 Homepage = "https://onetimesecret.com"

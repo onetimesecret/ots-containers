@@ -7,6 +7,7 @@ on Debian 13 systems. Uses package-provided templates rather than custom
 unit files.
 """
 
+import logging
 import subprocess
 from typing import Annotated
 
@@ -25,6 +26,8 @@ from ._helpers import (
     update_config_value,
 )
 from .packages import get_package, list_packages
+
+logger = logging.getLogger(__name__)
 
 app = cyclopts.App(
     name=["service", "services"],
@@ -66,6 +69,7 @@ def list_all(json_output: JsonOutput = False):
             ],
             capture_output=True,
             text=True,
+            timeout=10,
         )
 
         if result.stdout.strip():
@@ -161,6 +165,13 @@ def init(
             help="Enable service at boot",
         ),
     ] = True,
+    force: Annotated[
+        bool,
+        cyclopts.Parameter(
+            name=["--force", "-f"],
+            help="Overwrite existing config and recreate instance (not idempotent by default)",
+        ),
+    ] = False,
     dry_run: DryRun = False,
 ):
     """Initialize a new service instance.
@@ -168,13 +179,25 @@ def init(
     Creates config files, sets up directories, optionally starts service.
     Config is copy-on-write from package default to /etc/<pkg>/instances/.
 
+    Idempotent by default: if the config already exists, prints a notice and
+    skips all modifications. Use --force to overwrite the existing config.
+
     Examples:
         ots service init valkey 6379
         ots service init redis 6380 --port 6380 --bind 0.0.0.0
         ots service init valkey 6379 --dry-run
+        ots service init valkey 6379 --force   # Overwrite existing config
     """
     pkg = get_package(package)
-    port_num = port or int(instance)
+    if port is not None:
+        port_num = port
+    elif instance.isnumeric():
+        port_num = int(instance)
+    else:
+        raise SystemExit(
+            f"--port is required when instance name '{instance}' is not a port number.\n"
+            f"Example: ots service init {package} {instance} --port 6379"
+        )
 
     print(f"Initializing {pkg.name} instance '{instance}'")
     print(f"  Template: {pkg.template_unit}")
@@ -183,11 +206,17 @@ def init(
     print()
 
     if dry_run:
-        print("[dry-run] Would create:")
-        print(f"  Config: {pkg.config_file(instance)}")
-        print(f"  Data:   {pkg.data_dir / instance}")
-        if not no_secrets and pkg.secrets:
-            print(f"  Secrets: {pkg.secrets_file(instance)}")
+        config_exists = pkg.config_file(instance).exists()
+        if config_exists and not force:
+            print(f"[dry-run] Config already exists: {pkg.config_file(instance)}")
+            print("[dry-run] Would skip (use --force to overwrite)")
+        else:
+            verb = "overwrite" if config_exists else "create"
+            print(f"[dry-run] Would {verb}:")
+            print(f"  Config: {pkg.config_file(instance)}")
+            print(f"  Data:   {pkg.data_dir / instance}")
+            if not no_secrets and pkg.secrets:
+                print(f"  Secrets: {pkg.secrets_file(instance)}")
         return
 
     # Check for default service conflict
@@ -199,11 +228,28 @@ def init(
         config_path = copy_default_config(pkg, instance)
         print(f"  Created: {config_path}")
     except FileExistsError:
-        print(f"  Config already exists: {pkg.config_file(instance)}")
-        config_path = pkg.config_file(instance)
+        if not force:
+            # Idempotent: skip all modifications when config already exists
+            print(f"  Config already exists: {pkg.config_file(instance)}")
+            print("  Skipping config modifications (use --force to overwrite)")
+            print()
+            print(f"Instance '{instance}' already configured.")
+            print(f"  Status: ots service status {package} {instance}")
+            return
+        # --force: delete and recreate from package default
+        import os
+
+        os.unlink(pkg.config_file(instance))
+        print("  Removed existing config (--force)")
+        try:
+            config_path = copy_default_config(pkg, instance)
+            print(f"  Recreated: {config_path}")
+        except FileNotFoundError as e:
+            print(f"  ERROR: {e}")
+            raise SystemExit(1)
     except FileNotFoundError as e:
         print(f"  ERROR: {e}")
-        return
+        raise SystemExit(1)
 
     # Step 2: Update port and bind in config
     print("Updating config values...")
@@ -245,7 +291,7 @@ def init(
             print("  Started")
         except subprocess.CalledProcessError as e:
             print(f"  ERROR: Could not start: {e.stderr}")
-            return
+            raise SystemExit(1)
 
     print()
     print(f"Instance '{instance}' initialized successfully!")
@@ -270,6 +316,7 @@ def enable(package: Package, instance: Instance):
         print("Enabled")
     except subprocess.CalledProcessError as e:
         print(f"ERROR: {e.stderr}")
+        raise SystemExit(1)
 
 
 @app.command
@@ -306,6 +353,7 @@ def disable(
         print("Disabled")
     except subprocess.CalledProcessError as e:
         print(f"ERROR: {e.stderr}")
+        raise SystemExit(1)
 
 
 @app.command
@@ -337,6 +385,7 @@ def status(package: Package, instance: OptInstance = None):
             ],
             capture_output=True,
             text=True,
+            timeout=10,
         )
         print(result.stdout)
 
@@ -357,6 +406,7 @@ def start(package: Package, instance: Instance):
         print("Started")
     except subprocess.CalledProcessError as e:
         print(f"ERROR: {e.stderr}")
+        raise SystemExit(1)
 
 
 @app.command
@@ -375,6 +425,7 @@ def stop(package: Package, instance: Instance):
         print("Stopped")
     except subprocess.CalledProcessError as e:
         print(f"ERROR: {e.stderr}")
+        raise SystemExit(1)
 
 
 @app.command
@@ -393,6 +444,7 @@ def restart(package: Package, instance: Instance):
         print("Restarted")
     except subprocess.CalledProcessError as e:
         print(f"ERROR: {e.stderr}")
+        raise SystemExit(1)
 
 
 @app.command
@@ -450,6 +502,7 @@ def list_instances(
         ],
         capture_output=True,
         text=True,
+        timeout=10,
     )
 
     if result.stdout.strip():
