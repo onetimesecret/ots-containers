@@ -7,7 +7,7 @@ All common flags use long+short forms for consistency:
   --dry-run, -n
   --yes, -y
   --follow, -f
-  --lines, -n
+  --lines, -l
   --json, -j
 """
 
@@ -56,7 +56,7 @@ Follow = Annotated[
 Lines = Annotated[
     int,
     cyclopts.Parameter(
-        name=["--lines", "-n"],
+        name=["--lines", "-l"],
         help="Number of lines to show",
     ),
 ]

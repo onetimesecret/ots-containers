@@ -1091,3 +1091,204 @@ class TestRedeployEnvVarResolution:
         mock_record.assert_called_once()
         assert mock_record.call_args.kwargs["image"] == "custom.registry.io/myorg/myapp"
         assert mock_record.call_args.kwargs["tag"] == "v3.0.0"
+
+
+class TestDeployPermissionError:
+    """Tests for deploy failure when /etc/containers/systemd/ is not writable.
+
+    Scenario: quadlet.write_web_template raises PermissionError because the
+    target directory is owned by root and the process is unprivileged.
+    """
+
+    def test_deploy_quadlet_write_permission_denied_exits(self, mocker, tmp_path):
+        """PermissionError writing quadlet file should propagate and exit non-zero."""
+        mock_config = mocker.MagicMock()
+        mock_config.config_dir = mocker.MagicMock()
+        mock_config.config_yaml = mocker.MagicMock()
+        mock_config.var_dir = mocker.MagicMock()
+        mock_config.web_template_path = mocker.MagicMock()
+        mock_config.db_path = tmp_path / "test.db"
+        mock_config.existing_config_files = []
+        mock_config.has_custom_config = False
+        mock_config.resolve_image_tag.return_value = ("ghcr.io/test/image", "v1.0.0")
+        mocker.patch("ots_containers.commands.instance.app.Config", return_value=mock_config)
+
+        mocker.patch("ots_containers.commands.instance.app.assets.update")
+        mocker.patch(
+            "ots_containers.commands.instance.app.quadlet.write_web_template",
+            side_effect=PermissionError(
+                "[Errno 13] Permission denied: '/etc/containers/systemd/onetime-web@.container'"
+            ),
+        )
+
+        with pytest.raises(PermissionError):
+            instance.deploy(identifiers=("7143",), web=True)
+
+    def test_deploy_quadlet_write_permission_denied_does_not_start_unit(self, mocker, tmp_path):
+        """When quadlet write fails, systemd.start must not be called."""
+        mock_config = mocker.MagicMock()
+        mock_config.config_dir = mocker.MagicMock()
+        mock_config.config_yaml = mocker.MagicMock()
+        mock_config.var_dir = mocker.MagicMock()
+        mock_config.web_template_path = mocker.MagicMock()
+        mock_config.db_path = tmp_path / "test.db"
+        mock_config.existing_config_files = []
+        mock_config.has_custom_config = False
+        mock_config.resolve_image_tag.return_value = ("ghcr.io/test/image", "v1.0.0")
+        mocker.patch("ots_containers.commands.instance.app.Config", return_value=mock_config)
+
+        mocker.patch("ots_containers.commands.instance.app.assets.update")
+        mocker.patch(
+            "ots_containers.commands.instance.app.quadlet.write_web_template",
+            side_effect=PermissionError(
+                "[Errno 13] Permission denied: '/etc/containers/systemd/onetime-web@.container'"
+            ),
+        )
+        mock_start = mocker.patch("ots_containers.commands.instance.app.systemd.start")
+
+        with pytest.raises(PermissionError):
+            instance.deploy(identifiers=("7143",), web=True)
+
+        mock_start.assert_not_called()
+
+
+class TestDeployPortConflict:
+    """Tests for deploy failure when the target port is already bound.
+
+    Scenario: quadlet writes successfully but systemctl start fails because
+    the port is in use by another process.
+    """
+
+    def test_deploy_systemctl_start_failure_records_failure(self, mocker, tmp_path):
+        """SystemctlError from start should be caught, recorded as failed, and re-raised."""
+        from ots_containers.systemd import SystemctlError
+
+        mock_config = mocker.MagicMock()
+        mock_config.config_dir = mocker.MagicMock()
+        mock_config.config_yaml = mocker.MagicMock()
+        mock_config.var_dir = mocker.MagicMock()
+        mock_config.web_template_path = mocker.MagicMock()
+        mock_config.db_path = tmp_path / "test.db"
+        mock_config.existing_config_files = []
+        mock_config.has_custom_config = False
+        mock_config.resolve_image_tag.return_value = ("ghcr.io/test/image", "v1.0.0")
+        mocker.patch("ots_containers.commands.instance.app.Config", return_value=mock_config)
+
+        mocker.patch("ots_containers.commands.instance.app.assets.update")
+        mocker.patch("ots_containers.commands.instance.app.quadlet.write_web_template")
+        mocker.patch(
+            "ots_containers.commands.instance.app.systemd.start",
+            side_effect=SystemctlError(
+                "onetime-web@7143",
+                "start",
+                "Error response from daemon: address already in use: bind: 0.0.0.0:7143",
+            ),
+        )
+        mock_record = mocker.patch("ots_containers.commands.instance.app.db.record_deployment")
+
+        with pytest.raises(SystemExit):
+            instance.deploy(identifiers=("7143",), web=True)
+
+        # db.record_deployment must have been called at least once with success=False
+        assert mock_record.called
+        failure_calls = [c for c in mock_record.call_args_list if c.kwargs.get("success") is False]
+        assert failure_calls, "Expected a failed deployment record"
+
+    def test_deploy_systemctl_start_failure_does_not_start_further_instances(
+        self, mocker, tmp_path
+    ):
+        """After a start failure the loop should abort; subsequent instances must not start."""
+        from ots_containers.systemd import SystemctlError
+
+        mock_config = mocker.MagicMock()
+        mock_config.config_dir = mocker.MagicMock()
+        mock_config.config_yaml = mocker.MagicMock()
+        mock_config.var_dir = mocker.MagicMock()
+        mock_config.web_template_path = mocker.MagicMock()
+        mock_config.db_path = tmp_path / "test.db"
+        mock_config.existing_config_files = []
+        mock_config.has_custom_config = False
+        mock_config.resolve_image_tag.return_value = ("ghcr.io/test/image", "v1.0.0")
+        mocker.patch("ots_containers.commands.instance.app.Config", return_value=mock_config)
+
+        mocker.patch("ots_containers.commands.instance.app.assets.update")
+        mocker.patch("ots_containers.commands.instance.app.quadlet.write_web_template")
+        mock_start = mocker.patch(
+            "ots_containers.commands.instance.app.systemd.start",
+            side_effect=SystemctlError("onetime-web@7143", "start", "address already in use"),
+        )
+        mocker.patch("ots_containers.commands.instance.app.db.record_deployment")
+
+        with pytest.raises(SystemExit):
+            instance.deploy(identifiers=("7143", "7144"), web=True)
+
+        # Only one start should have been attempted
+        assert mock_start.call_count == 1
+
+
+class TestDeployPartialFailure:
+    """Tests for partial deploy: assets succeed but quadlet write fails.
+
+    Scenario: assets.update() completes successfully (data extracted to volume),
+    but the subsequent quadlet write raises PermissionError.
+    """
+
+    def test_partial_deploy_assets_succeed_quadlet_fails(self, mocker, tmp_path):
+        """Assets update should complete before the PermissionError is raised."""
+        mock_config = mocker.MagicMock()
+        mock_config.config_dir = mocker.MagicMock()
+        mock_config.config_yaml = mocker.MagicMock()
+        mock_config.var_dir = mocker.MagicMock()
+        mock_config.web_template_path = mocker.MagicMock()
+        mock_config.db_path = tmp_path / "test.db"
+        mock_config.existing_config_files = []
+        mock_config.has_custom_config = False
+        mock_config.resolve_image_tag.return_value = ("ghcr.io/test/image", "v1.0.0")
+        mocker.patch("ots_containers.commands.instance.app.Config", return_value=mock_config)
+
+        mock_assets = mocker.patch("ots_containers.commands.instance.app.assets.update")
+        mocker.patch(
+            "ots_containers.commands.instance.app.quadlet.write_web_template",
+            side_effect=PermissionError(
+                "[Errno 13] Permission denied: '/etc/containers/systemd/onetime-web@.container'"
+            ),
+        )
+        mock_start = mocker.patch("ots_containers.commands.instance.app.systemd.start")
+
+        with pytest.raises(PermissionError):
+            instance.deploy(identifiers=("7143",), web=True)
+
+        # Assets ran to completion
+        mock_assets.assert_called_once_with(mock_config, create_volume=True)
+        # systemd was never reached
+        mock_start.assert_not_called()
+
+    def test_partial_deploy_error_message_is_actionable(self, mocker, tmp_path, capsys):
+        """The PermissionError message should include the path so operators know what to fix."""
+        mock_config = mocker.MagicMock()
+        mock_config.config_dir = mocker.MagicMock()
+        mock_config.config_yaml = mocker.MagicMock()
+        mock_config.var_dir = mocker.MagicMock()
+        mock_config.web_template_path = mocker.MagicMock()
+        mock_config.db_path = tmp_path / "test.db"
+        mock_config.existing_config_files = []
+        mock_config.has_custom_config = False
+        mock_config.resolve_image_tag.return_value = ("ghcr.io/test/image", "v1.0.0")
+        mocker.patch("ots_containers.commands.instance.app.Config", return_value=mock_config)
+
+        mocker.patch("ots_containers.commands.instance.app.assets.update")
+        target_path = "/etc/containers/systemd/onetime-web@.container"
+        mocker.patch(
+            "ots_containers.commands.instance.app.quadlet.write_web_template",
+            side_effect=PermissionError(f"[Errno 13] Permission denied: '{target_path}'"),
+        )
+
+        exc = None
+        try:
+            instance.deploy(identifiers=("7143",), web=True)
+        except PermissionError as e:
+            exc = e
+
+        assert exc is not None
+        # The error message must identify the path that could not be written
+        assert "/etc/containers/systemd" in str(exc) or "onetime-web" in str(exc)

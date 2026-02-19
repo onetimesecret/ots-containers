@@ -34,6 +34,17 @@ jobs:
             --cov-report=xml \
             --cov-fail-under=70
 
+      - name: Check per-file coverage minimums
+        run: |
+          # cli.py: baseline 26% (target: 80% — add tests for subcommand registration)
+          python -m coverage report \
+            --include="*/ots_containers/cli.py" \
+            --fail-under=26
+          # commands/db.py: baseline 29% (target: 70% — add tests for deploy history queries)
+          python -m coverage report \
+            --include="*/ots_containers/commands/db.py" \
+            --fail-under=29
+
       - name: Upload coverage to Codecov
         if: matrix.python-version == '3.11'
         uses: codecov/codecov-action@v4

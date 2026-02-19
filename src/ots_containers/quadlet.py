@@ -265,6 +265,68 @@ def _get_valkey_unit_dependencies(cfg: Config) -> tuple[str, str]:
     return f" {cfg.valkey_service}", f"\nWants={cfg.valkey_service}"
 
 
+def _build_fmt_vars(
+    template: str,
+    cfg: Config,
+    env_file_path: Path | None,
+    *,
+    force: bool,
+    extra_vars: dict | None = None,
+) -> dict:
+    """Build the format variables dict for a quadlet template.
+
+    Shared by both ``_write_template`` (which writes to disk) and
+    ``render_template`` (dry-run, no disk I/O).
+    """
+    secrets_section = get_secrets_section(env_file_path, force=force)
+    config_volumes_section = get_config_volumes_section(cfg)
+
+    fmt_vars: dict = {
+        "image": cfg.resolved_image_with_tag,
+        "config_dir": cfg.config_dir,
+        "secrets_section": secrets_section,
+        "config_volumes_section": config_volumes_section,
+        "resource_limits_section": get_resource_limits_section(cfg),
+    }
+    if extra_vars:
+        fmt_vars.update(extra_vars)
+    return fmt_vars
+
+
+def render_web_template(
+    cfg: Config, env_file_path: Path | None = None, *, force: bool = False
+) -> str:
+    """Render the web quadlet template content without writing to disk.
+
+    Used by dry-run to preview what would be written.
+    """
+    valkey_after, valkey_wants = _get_valkey_unit_dependencies(cfg)
+    fmt_vars = _build_fmt_vars(
+        WEB_TEMPLATE,
+        cfg,
+        env_file_path,
+        force=force,
+        extra_vars={"valkey_after": valkey_after, "valkey_wants": valkey_wants},
+    )
+    return WEB_TEMPLATE.format(**fmt_vars)
+
+
+def render_worker_template(
+    cfg: Config, env_file_path: Path | None = None, *, force: bool = False
+) -> str:
+    """Render the worker quadlet template content without writing to disk."""
+    fmt_vars = _build_fmt_vars(WORKER_TEMPLATE, cfg, env_file_path, force=force)
+    return WORKER_TEMPLATE.format(**fmt_vars)
+
+
+def render_scheduler_template(
+    cfg: Config, env_file_path: Path | None = None, *, force: bool = False
+) -> str:
+    """Render the scheduler quadlet template content without writing to disk."""
+    fmt_vars = _build_fmt_vars(SCHEDULER_TEMPLATE, cfg, env_file_path, force=force)
+    return SCHEDULER_TEMPLATE.format(**fmt_vars)
+
+
 def _write_template(
     template: str,
     path: Path,
@@ -291,19 +353,7 @@ def _write_template(
         extra_vars: Additional ``str.format`` keyword arguments (e.g.
                     ``valkey_after``, ``valkey_wants`` for the web template).
     """
-    secrets_section = get_secrets_section(env_file_path, force=force)
-    config_volumes_section = get_config_volumes_section(cfg)
-
-    fmt_vars: dict = {
-        "image": cfg.resolved_image_with_tag,
-        "config_dir": cfg.config_dir,
-        "secrets_section": secrets_section,
-        "config_volumes_section": config_volumes_section,
-        "resource_limits_section": get_resource_limits_section(cfg),
-    }
-    if extra_vars:
-        fmt_vars.update(extra_vars)
-
+    fmt_vars = _build_fmt_vars(template, cfg, env_file_path, force=force, extra_vars=extra_vars)
     content = template.format(**fmt_vars)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content)

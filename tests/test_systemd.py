@@ -989,3 +989,123 @@ class TestWaitForHealthy:
                 poll_interval=0.01,
                 consecutive_failures_threshold=1,
             )
+
+
+class TestSystemctlErrorOnPortConflict:
+    """Verify that a port-conflict start failure surfaces as a SystemctlError.
+
+    In production, if port 7043 is already bound by another process, podman
+    will fail to start the container. systemctl propagates the failure and
+    returns a non-zero exit code, which _run_systemctl converts to
+    SystemctlError. These tests confirm that behaviour.
+    """
+
+    def test_start_raises_systemctl_error_when_port_in_use(self, mocker):
+        """start() must raise SystemctlError when systemctl reports non-zero exit."""
+        from ots_containers import systemd
+        from ots_containers.systemd import SystemctlError
+
+        # Simulate: systemctl start fails (port conflict → podman error → non-zero)
+        failed_result = subprocess.CompletedProcess(
+            args=["sudo", "systemctl", "start", "onetime-web@7043"],
+            returncode=1,
+            stdout="",
+            stderr="",
+        )
+        mocker.patch("subprocess.run", return_value=failed_result)
+
+        with pytest.raises(SystemctlError) as exc_info:
+            systemd.start("onetime-web@7043")
+
+        assert exc_info.value.unit == "onetime-web@7043"
+        assert exc_info.value.action == "start"
+
+    def test_systemctl_error_message_identifies_unit_and_action(self, mocker):
+        """SystemctlError str representation must name the unit and action."""
+        from ots_containers import systemd
+        from ots_containers.systemd import SystemctlError
+
+        mocker.patch(
+            "subprocess.run",
+            return_value=subprocess.CompletedProcess([], 1, stdout="", stderr=""),
+        )
+
+        with pytest.raises(SystemctlError) as exc_info:
+            systemd.start("onetime-web@7143")
+
+        err_str = str(exc_info.value)
+        assert "onetime-web@7143" in err_str
+        assert "start" in err_str
+
+    def test_journal_context_attached_to_error(self, mocker):
+        """SystemctlError should carry journal output from _fetch_journal."""
+        from ots_containers import systemd
+        from ots_containers.systemd import SystemctlError
+
+        journal_text = "Error: address already in use: bind: 0.0.0.0:7043"
+
+        def fake_run(cmd, **kwargs):
+            if "journalctl" in cmd:
+                return subprocess.CompletedProcess(cmd, 0, stdout=journal_text)
+            # systemctl start fails
+            return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="")
+
+        mocker.patch("subprocess.run", side_effect=fake_run)
+
+        with pytest.raises(SystemctlError) as exc_info:
+            systemd.start("onetime-web@7043")
+
+        assert exc_info.value.journal == journal_text
+
+
+class TestQuadletWritePermissionError:
+    """Verify behaviour when /etc/containers/systemd/ is not writable.
+
+    The quadlet _write_template function calls path.write_text(content).
+    If the directory is owned by root and the process is unprivileged,
+    Python raises PermissionError. We confirm the error propagates
+    unchanged so callers (deploy command) can handle or surface it.
+    """
+
+    def test_write_template_propagates_permission_error(self, tmp_path, mocker):
+        """PermissionError from path.write_text must propagate out of _write_template."""
+        from ots_containers import quadlet
+        from ots_containers.config import Config
+
+        cfg = mocker.MagicMock(spec=Config)
+        cfg.existing_config_files = []
+        cfg.memory_max = None
+        cfg.cpu_quota = None
+        cfg.valkey_service = None
+        cfg.config_dir = tmp_path / "etc"
+        cfg.resolved_image_with_tag = "ghcr.io/test/image:v1.0.0"
+
+        # secrets section: use a real env file with no secrets → force bypasses check
+        env_file = tmp_path / "onetimesecret"
+        env_file.write_text("")  # empty → no secrets
+
+        # Use WORKER_TEMPLATE which needs no extra_vars (no valkey placeholders)
+        target = tmp_path / "quadlet" / "onetime-worker@.container"
+
+        # Patch path.write_text on the Path class to simulate a permission denied
+        # error only for our specific target path
+        original_write = type(target).write_text
+
+        def patched_write(self, *args, **kwargs):
+            if self == target:
+                raise PermissionError(f"[Errno 13] Permission denied: '{target}'")
+            return original_write(self, *args, **kwargs)
+
+        mocker.patch.object(type(target), "write_text", patched_write)
+
+        # Also mock daemon_reload so it doesn't try real systemctl
+        mocker.patch("ots_containers.quadlet.systemd.daemon_reload")
+
+        with pytest.raises(PermissionError, match="Permission denied"):
+            quadlet._write_template(
+                quadlet.WORKER_TEMPLATE,
+                target,
+                cfg,
+                env_file,
+                force=True,  # skip secrets check
+            )

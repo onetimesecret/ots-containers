@@ -2,6 +2,7 @@
 
 """Instance management app and commands for OTS containers."""
 
+import difflib
 import logging
 import subprocess
 import sys
@@ -51,6 +52,7 @@ def _list_instances_impl(
 
     if not instances:
         print("No configured instances found")
+        print("Deploy one first: ots instances deploy --help")
         return
 
     cfg = Config()
@@ -443,6 +445,29 @@ def deploy(
             print("Config: using container built-in defaults")
 
     if dry_run:
+        # Render the quadlet template and diff vs existing file (if any).
+        # force=True here: dry-run is a preview; secrets may not be fully
+        # configured yet and we don't want that to block the diff output.
+        if itype == InstanceType.WEB:
+            template_path = cfg.web_template_path
+            new_content = quadlet.render_web_template(cfg, force=True)
+        elif itype == InstanceType.WORKER:
+            template_path = cfg.worker_template_path
+            new_content = quadlet.render_worker_template(cfg, force=True)
+        else:
+            template_path = cfg.scheduler_template_path
+            new_content = quadlet.render_scheduler_template(cfg, force=True)
+
+        old_content = template_path.read_text() if template_path.exists() else ""
+        diff_lines = list(
+            difflib.unified_diff(
+                old_content.splitlines(keepends=True),
+                new_content.splitlines(keepends=True),
+                fromfile=f"a/{template_path.name}",
+                tofile=f"b/{template_path.name}",
+            )
+        )
+
         result = {
             "action": "deploy",
             "dry_run": True,
@@ -450,11 +475,23 @@ def deploy(
             "identifiers": list(identifiers),
             "image": image,
             "tag": tag,
+            "quadlet_path": str(template_path),
+            "quadlet_changed": bool(diff_lines),
         }
         if json_output:
+            result["quadlet_diff"] = "".join(diff_lines)
             print(json_mod.dumps(result, indent=2))
         else:
             print(f"[dry-run] Would deploy {itype.value}: {', '.join(identifiers)}")
+            print(f"Quadlet: {template_path}")
+            if diff_lines:
+                print("--- quadlet diff ---")
+                print("".join(diff_lines), end="")
+            elif old_content:
+                print("(quadlet unchanged)")
+            else:
+                print("--- new quadlet ---")
+                print(new_content, end="")
         return
 
     deploy_results: list[dict] = []
@@ -637,6 +674,8 @@ def redeploy(
             print(json_mod.dumps({"action": "redeploy", "success": True, "instances": []}))
         else:
             print("No running instances found")
+            print("Start existing instances with: ots instances start")
+            print("Or deploy new ones with:       ots instances deploy --help")
         return
 
     cfg = Config()
@@ -654,6 +693,32 @@ def redeploy(
     if dry_run:
         verb = "force redeploy" if force else "redeploy"
         dry_items = [{"instance_type": t.value, "identifiers": ids} for t, ids in instances.items()]
+
+        # Collect quadlet diffs for each type being redeployed.
+        # force=True here: dry-run is a preview; don't block on missing secrets.
+        quadlet_diffs: dict[str, str] = {}
+        for inst_type in instances:
+            if inst_type == InstanceType.WEB:
+                template_path = cfg.web_template_path
+                new_content = quadlet.render_web_template(cfg, force=True)
+            elif inst_type == InstanceType.WORKER:
+                template_path = cfg.worker_template_path
+                new_content = quadlet.render_worker_template(cfg, force=True)
+            else:
+                template_path = cfg.scheduler_template_path
+                new_content = quadlet.render_scheduler_template(cfg, force=True)
+
+            old_content = template_path.read_text() if template_path.exists() else ""
+            diff_lines = list(
+                difflib.unified_diff(
+                    old_content.splitlines(keepends=True),
+                    new_content.splitlines(keepends=True),
+                    fromfile=f"a/{template_path.name}",
+                    tofile=f"b/{template_path.name}",
+                )
+            )
+            quadlet_diffs[inst_type.value] = "".join(diff_lines)
+
         if json_output:
             print(
                 json_mod.dumps(
@@ -663,6 +728,7 @@ def redeploy(
                         "image": image,
                         "tag": tag,
                         "instances": dry_items,
+                        "quadlet_diffs": quadlet_diffs,
                     },
                     indent=2,
                 )
@@ -670,6 +736,19 @@ def redeploy(
         else:
             for inst_type, ids in instances.items():
                 print(f"[dry-run] Would {verb} {inst_type.value}: {', '.join(ids)}")
+            for inst_type_val, diff_text in quadlet_diffs.items():
+                if inst_type_val == InstanceType.WEB.value:
+                    tpath = cfg.web_template_path
+                elif inst_type_val == InstanceType.WORKER.value:
+                    tpath = cfg.worker_template_path
+                else:
+                    tpath = cfg.scheduler_template_path
+                print(f"Quadlet ({inst_type_val}): {tpath}")
+                if diff_text:
+                    print("--- quadlet diff ---")
+                    print(diff_text, end="")
+                else:
+                    print("(quadlet unchanged)")
         return
 
     redeploy_results: list[dict] = []
@@ -848,6 +927,7 @@ def undeploy(
             print(json_mod.dumps({"action": "undeploy", "success": True, "instances": []}))
         else:
             print("No running instances found")
+            print("List all configured instances with: ots instances list")
         return
 
     # --json implies --yes (non-interactive)
@@ -976,6 +1056,7 @@ def start(
 
     if not instances:
         print("No configured instances found")
+        print("Deploy one first: ots instances deploy --help")
         return
 
     for inst_type, ids in instances.items():
@@ -1013,6 +1094,7 @@ def stop(
 
     if not instances:
         print("No running instances found")
+        print("List all configured instances with: ots instances list")
         return
 
     for inst_type, ids in instances.items():
@@ -1049,6 +1131,7 @@ def restart(
 
     if not instances:
         print("No running instances found")
+        print("Start existing instances with: ots instances start")
         return
 
     def do_restart(inst_type: InstanceType, id_: str) -> None:
@@ -1082,6 +1165,7 @@ def enable(
 
     if not instances:
         print("No configured instances found")
+        print("Deploy one first: ots instances deploy --help")
         return
 
     for inst_type, ids in instances.items():
@@ -1124,6 +1208,7 @@ def disable(
 
     if not instances:
         print("No configured instances found")
+        print("List all configured instances with: ots instances list")
         return
 
     if not yes:
