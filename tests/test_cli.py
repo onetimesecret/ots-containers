@@ -119,27 +119,24 @@ class TestDefaultCommand:
 class TestConfigureLogging:
     """Test _configure_logging helper."""
 
-    def test_verbose_sets_debug_level(self):
-        """_configure_logging(True) should configure basicConfig with DEBUG."""
+    def test_verbose_suppresses_urllib3(self):
+        """_configure_logging(True) should suppress urllib3 logger."""
         import logging
 
         from ots_containers.cli import _configure_logging
 
-        # Capture the call without mutating the live logger permanently
         _configure_logging(True)
-        # urllib3 should be suppressed even in verbose mode
         assert logging.getLogger("urllib3").level == logging.WARNING
         # Restore root logger level for test isolation
         logging.getLogger().setLevel(logging.WARNING)
 
-    def test_non_verbose_suppresses_debug(self, caplog):
-        """_configure_logging(False) should not emit debug messages."""
+    def test_non_verbose_configures_warning(self):
+        """_configure_logging(False) should not raise."""
         import logging
 
         from ots_containers.cli import _configure_logging
 
         _configure_logging(False)
-        # Should not raise; just configures logging
         assert logging.getLogger("urllib3").level == logging.WARNING
 
 
@@ -198,7 +195,6 @@ class TestVersionCommand:
         mocker.patch("subprocess.run", side_effect=Exception("git not found"))
         version()
         captured = capsys.readouterr()
-        # Still prints version even when git fails
         assert __version__ in captured.out
 
     def test_version_git_nonzero_returncode(self, mocker, capsys):
@@ -218,13 +214,18 @@ class TestVersionCommand:
 
 
 class TestDoctorCommand:
-    """Test the doctor command."""
+    """Test the doctor command.
 
-    def _make_all_pass_mocks(self, mocker, tmp_path):
-        """Set up mocks so all doctor checks pass."""
+    doctor() imports Config, EnvFile, secret_exists, DEFAULT_ENV_FILE locally
+    inside the function body. Patch at their source modules:
+      - ots_containers.config.Config
+      - ots_containers.quadlet.DEFAULT_ENV_FILE
+      - ots_containers.environment_file.EnvFile
+      - ots_containers.environment_file.secret_exists
+    """
 
-        mocker.patch("shutil.which", return_value="/usr/bin/systemctl")
-
+    def _make_cfg_mock(self, mocker, tmp_path):
+        """Config mock with real tmp_path directories."""
         cfg_mock = mocker.MagicMock()
         cfg_mock.config_dir = tmp_path / "onetimesecret"
         cfg_mock.config_dir.mkdir()
@@ -232,31 +233,31 @@ class TestDoctorCommand:
         cfg_mock.var_dir.mkdir()
         cfg_mock.web_template_path = tmp_path / "onetime-web@.container"
         cfg_mock.web_template_path.touch()
-        mocker.patch("ots_containers.cli.Config", return_value=cfg_mock)
+        return cfg_mock
+
+    def test_doctor_all_pass(self, mocker, tmp_path, capsys):
+        """When all checks pass, doctor exits 0 and prints success."""
+        mocker.patch("shutil.which", return_value="/usr/bin/systemctl")
+        mocker.patch("os.access", return_value=True)
+
+        cfg_mock = self._make_cfg_mock(mocker, tmp_path)
+        mocker.patch("ots_containers.config.Config", return_value=cfg_mock)
 
         env_file = tmp_path / "onetimesecret_env"
         env_file.write_text("SECRET_VARIABLE_NAMES=HMAC_SECRET\nHMAC_SECRET=abc\n")
-        mocker.patch("ots_containers.cli.DEFAULT_ENV_FILE", env_file)
+        mocker.patch("ots_containers.quadlet.DEFAULT_ENV_FILE", env_file)
 
         parsed_mock = mocker.MagicMock()
         parsed_mock.secret_variable_names = ["HMAC_SECRET"]
-        mocker.patch("ots_containers.cli.EnvFile.parse", return_value=parsed_mock)
-        mocker.patch("ots_containers.cli.secret_exists", return_value=True)
-        mocker.patch("os.access", return_value=True)
+        mocker.patch("ots_containers.environment_file.EnvFile.parse", return_value=parsed_mock)
+        mocker.patch("ots_containers.environment_file.secret_exists", return_value=True)
 
-        # systemctl queries
         running_result = mocker.MagicMock()
         running_result.stdout = "onetime-web@7043.service loaded active running\n"
         caddy_result = mocker.MagicMock()
         caddy_result.stdout = "active\n"
-        mocker.patch(
-            "subprocess.run",
-            side_effect=[running_result, caddy_result],
-        )
+        mocker.patch("subprocess.run", side_effect=[running_result, caddy_result])
 
-    def test_doctor_all_pass(self, mocker, tmp_path, capsys):
-        """When all checks pass, doctor exits 0 and prints success."""
-        self._make_all_pass_mocks(mocker, tmp_path)
         from ots_containers.cli import doctor
 
         doctor()
@@ -272,8 +273,10 @@ class TestDoctorCommand:
         cfg_mock.config_dir = tmp_path / "missing_config"
         cfg_mock.var_dir = tmp_path / "missing_var"
         cfg_mock.web_template_path = tmp_path / "missing.container"
-        mocker.patch("ots_containers.cli.Config", return_value=cfg_mock)
-        mocker.patch("ots_containers.cli.DEFAULT_ENV_FILE", tmp_path / "noenv")
+        mocker.patch("ots_containers.config.Config", return_value=cfg_mock)
+
+        no_env = tmp_path / "noenv"
+        mocker.patch("ots_containers.quadlet.DEFAULT_ENV_FILE", no_env)
 
         from ots_containers.cli import doctor
 
@@ -292,8 +295,10 @@ class TestDoctorCommand:
         cfg_mock.config_dir = tmp_path / "missing"
         cfg_mock.var_dir = tmp_path / "missing_var"
         cfg_mock.web_template_path = tmp_path / "missing.container"
-        mocker.patch("ots_containers.cli.Config", return_value=cfg_mock)
-        mocker.patch("ots_containers.cli.DEFAULT_ENV_FILE", tmp_path / "noenv")
+        mocker.patch("ots_containers.config.Config", return_value=cfg_mock)
+
+        no_env = tmp_path / "noenv"
+        mocker.patch("ots_containers.quadlet.DEFAULT_ENV_FILE", no_env)
 
         running_result = mocker.MagicMock()
         running_result.stdout = ""
@@ -314,22 +319,16 @@ class TestDoctorCommand:
         mocker.patch("shutil.which", return_value="/usr/bin/systemctl")
         mocker.patch("os.access", return_value=True)
 
-        cfg_mock = mocker.MagicMock()
-        cfg_mock.config_dir = tmp_path / "onetimesecret"
-        cfg_mock.config_dir.mkdir()
-        cfg_mock.var_dir = tmp_path / "var"
-        cfg_mock.var_dir.mkdir()
-        cfg_mock.web_template_path = tmp_path / "onetime-web@.container"
-        cfg_mock.web_template_path.touch()
-        mocker.patch("ots_containers.cli.Config", return_value=cfg_mock)
+        cfg_mock = self._make_cfg_mock(mocker, tmp_path)
+        mocker.patch("ots_containers.config.Config", return_value=cfg_mock)
 
         env_file = tmp_path / "env"
         env_file.touch()
-        mocker.patch("ots_containers.cli.DEFAULT_ENV_FILE", env_file)
+        mocker.patch("ots_containers.quadlet.DEFAULT_ENV_FILE", env_file)
 
         parsed_mock = mocker.MagicMock()
         parsed_mock.secret_variable_names = []  # no secrets declared
-        mocker.patch("ots_containers.cli.EnvFile.parse", return_value=parsed_mock)
+        mocker.patch("ots_containers.environment_file.EnvFile.parse", return_value=parsed_mock)
 
         running_result = mocker.MagicMock()
         running_result.stdout = "onetime-web@7043.service active\n"
@@ -350,19 +349,16 @@ class TestDoctorCommand:
         mocker.patch("shutil.which", return_value="/usr/bin/systemctl")
         mocker.patch("os.access", return_value=True)
 
-        cfg_mock = mocker.MagicMock()
-        cfg_mock.config_dir = tmp_path / "onetimesecret"
-        cfg_mock.config_dir.mkdir()
-        cfg_mock.var_dir = tmp_path / "var"
-        cfg_mock.var_dir.mkdir()
-        cfg_mock.web_template_path = tmp_path / "onetime-web@.container"
-        cfg_mock.web_template_path.touch()
-        mocker.patch("ots_containers.cli.Config", return_value=cfg_mock)
+        cfg_mock = self._make_cfg_mock(mocker, tmp_path)
+        mocker.patch("ots_containers.config.Config", return_value=cfg_mock)
 
         env_file = tmp_path / "env"
         env_file.touch()
-        mocker.patch("ots_containers.cli.DEFAULT_ENV_FILE", env_file)
-        mocker.patch("ots_containers.cli.EnvFile.parse", side_effect=ValueError("bad format"))
+        mocker.patch("ots_containers.quadlet.DEFAULT_ENV_FILE", env_file)
+        mocker.patch(
+            "ots_containers.environment_file.EnvFile.parse",
+            side_effect=ValueError("bad format"),
+        )
 
         running_result = mocker.MagicMock()
         running_result.stdout = ""
@@ -389,23 +385,17 @@ class TestDoctorCommand:
         mocker.patch("shutil.which", return_value="/usr/bin/systemctl")
         mocker.patch("os.access", return_value=True)
 
-        cfg_mock = mocker.MagicMock()
-        cfg_mock.config_dir = tmp_path / "onetimesecret"
-        cfg_mock.config_dir.mkdir()
-        cfg_mock.var_dir = tmp_path / "var"
-        cfg_mock.var_dir.mkdir()
-        cfg_mock.web_template_path = tmp_path / "onetime-web@.container"
-        cfg_mock.web_template_path.touch()
-        mocker.patch("ots_containers.cli.Config", return_value=cfg_mock)
+        cfg_mock = self._make_cfg_mock(mocker, tmp_path)
+        mocker.patch("ots_containers.config.Config", return_value=cfg_mock)
 
         env_file = tmp_path / "env"
         env_file.touch()
-        mocker.patch("ots_containers.cli.DEFAULT_ENV_FILE", env_file)
+        mocker.patch("ots_containers.quadlet.DEFAULT_ENV_FILE", env_file)
 
         parsed_mock = mocker.MagicMock()
         parsed_mock.secret_variable_names = ["SECRET"]
-        mocker.patch("ots_containers.cli.EnvFile.parse", return_value=parsed_mock)
-        mocker.patch("ots_containers.cli.secret_exists", return_value=True)
+        mocker.patch("ots_containers.environment_file.EnvFile.parse", return_value=parsed_mock)
+        mocker.patch("ots_containers.environment_file.secret_exists", return_value=True)
 
         mocker.patch("subprocess.run", side_effect=Exception("timeout"))
 
