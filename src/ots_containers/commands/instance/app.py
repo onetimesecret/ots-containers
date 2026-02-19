@@ -175,31 +175,8 @@ def _list_instances_impl(
             print(row)
 
 
-@app.command(name="list")
-def list_cmd(
-    identifiers: Identifiers = (),
-    instance_type: TypeSelector = None,
-    web: WebFlag = False,
-    worker: WorkerFlag = False,
-    scheduler: SchedulerFlag = False,
-    json_output: JsonOutput = False,
-):
-    """List instances with status, image, and deployment info.
-
-    Auto-discovers all instances if no identifiers specified.
-
-    Examples:
-        ots instances list                       # List all instances
-        ots instances list --web                 # List web instances only
-        ots instances list --web 7043 7044       # List specific web instances
-        ots instances list --worker              # List worker instances
-        ots instances list --json                # JSON output
-    """
-    itype = resolve_instance_type(instance_type, web, worker, scheduler)
-    _list_instances_impl(identifiers, itype, json_output)
-
-
 @app.default
+@app.command(name="list")
 def list_instances(
     identifiers: Identifiers = (),
     instance_type: TypeSelector = None,
@@ -213,9 +190,10 @@ def list_instances(
     Auto-discovers all instances if no identifiers specified.
 
     Examples:
-        ots instances                            # List all instances
+        ots instances                            # List all instances (default)
+        ots instances list                       # List all instances (explicit)
         ots instances --web                      # List web instances only
-        ots instances --web 7043 7044            # List specific web instances
+        ots instances list --web 7043 7044       # List specific web instances
         ots instances --worker                   # List worker instances
         ots instances --scheduler                # List scheduler instances
         ots instances --json                     # JSON output
@@ -1989,6 +1967,135 @@ def cleanup(
         else:
             print(f"Error: {msg}")
         raise SystemExit(1)
+
+
+@app.command
+def metrics(
+    identifiers: Identifiers = (),
+    instance_type: TypeSelector = None,
+    web: WebFlag = False,
+    worker: WorkerFlag = False,
+    scheduler: SchedulerFlag = False,
+    json_output: JsonOutput = False,
+):
+    """Show resource usage metrics for instance(s).
+
+    Shells out to 'podman stats --no-stream' to collect per-container
+    CPU, memory, network I/O, and block I/O metrics. Also reports
+    systemd active state for each unit.
+
+    Containers must be running for podman stats to return data.
+
+    Examples:
+        ots instances metrics                    # Metrics for all instances
+        ots instances metrics --web              # Web instances only
+        ots instances metrics --web 7043         # Specific instance
+        ots instances metrics --json             # JSON output
+    """
+    import json as json_mod
+
+    itype = resolve_instance_type(instance_type, web, worker, scheduler)
+    instances = resolve_identifiers(identifiers, itype, running_only=False)
+
+    if not instances:
+        if json_output:
+            print(json_mod.dumps({"instances": []}))
+        else:
+            print("No configured instances found")
+            print("Deploy one first: ots instances deploy --help")
+        return
+
+    results = []
+
+    for inst_type, ids in instances.items():
+        for id_ in ids:
+            unit = systemd.unit_name(inst_type.value, id_)
+            container = systemd.unit_to_container_name(unit)
+
+            # Get systemd active state
+            try:
+                state_result = subprocess.run(
+                    ["systemctl", "is-active", f"{unit}.service"],
+                    capture_output=True,
+                    text=True,
+                    timeout=10,
+                )
+                active_state = state_result.stdout.strip()
+            except Exception:
+                active_state = "unknown"
+
+            # Get podman stats (non-streaming, single snapshot)
+            stats_data = None
+            try:
+                stats_result = subprocess.run(
+                    [
+                        "podman",
+                        "stats",
+                        "--no-stream",
+                        "--format",
+                        "json",
+                        container,
+                    ],
+                    capture_output=True,
+                    text=True,
+                    timeout=15,
+                )
+                if stats_result.returncode == 0 and stats_result.stdout.strip():
+                    raw = json_mod.loads(stats_result.stdout)
+                    # podman stats --format json returns a list
+                    if isinstance(raw, list) and raw:
+                        stats_data = raw[0]
+            except (subprocess.TimeoutExpired, json_mod.JSONDecodeError, Exception):
+                stats_data = None
+
+            entry: dict = {
+                "unit": unit,
+                "container": container,
+                "instance_type": inst_type.value,
+                "identifier": id_,
+                "active_state": active_state,
+            }
+
+            if stats_data:
+                entry["cpu_percent"] = stats_data.get("CPU", "n/a")
+                entry["mem_usage"] = stats_data.get("MemUsage", "n/a")
+                entry["mem_percent"] = stats_data.get("MemPerc", "n/a")
+                entry["net_input"] = stats_data.get("NetInput", "n/a")
+                entry["net_output"] = stats_data.get("NetOutput", "n/a")
+                entry["block_input"] = stats_data.get("BlockInput", "n/a")
+                entry["block_output"] = stats_data.get("BlockOutput", "n/a")
+            else:
+                entry["cpu_percent"] = "n/a"
+                entry["mem_usage"] = "n/a"
+                entry["mem_percent"] = "n/a"
+                entry["net_input"] = "n/a"
+                entry["net_output"] = "n/a"
+                entry["block_input"] = "n/a"
+                entry["block_output"] = "n/a"
+
+            results.append(entry)
+
+    if json_output:
+        print(json_mod.dumps({"instances": results}, indent=2))
+        return
+
+    # Table output
+    header = (
+        f"{'TYPE':<10} {'ID':<10} {'UNIT':<28} {'STATE':<10} "
+        f"{'CPU%':<8} {'MEM':<20} {'MEM%':<8} {'NET IN/OUT':<24}"
+    )
+    print(header)
+    print("-" * 120)
+
+    for entry in results:
+        net_io = f"{entry['net_input']}/{entry['net_output']}"
+        row = (
+            f"{entry['instance_type']:<10} {entry['identifier']:<10} "
+            f"{entry['unit']:<28} {entry['active_state']:<10} "
+            f"{entry['cpu_percent']:<8} {entry['mem_usage']:<20} "
+            f"{entry['mem_percent']:<8} {net_io:<24}"
+        )
+        print(row)
 
 
 @app.command

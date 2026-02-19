@@ -1,15 +1,149 @@
 # tests/commands/instance/test_helpers.py
 """Tests for instance command helpers."""
 
+import fcntl
+
 import pytest
 
 from ots_containers.commands.instance._helpers import (
+    _resolve_lock_path,
+    deploy_lock,
     for_each_instance,
     format_command,
     format_journalctl_hint,
     resolve_identifiers,
 )
 from ots_containers.commands.instance.annotations import InstanceType
+
+
+class TestDeployLock:
+    """Tests for deploy_lock() context manager."""
+
+    def test_yields_normally_when_lock_acquired(self, tmp_path):
+        """deploy_lock() should yield without error when lock file can be created."""
+        lock_path = tmp_path / "deploy.lock"
+        reached = []
+        with deploy_lock(lock_path):
+            reached.append(True)
+        assert reached == [True]
+
+    def test_raises_system_exit_when_lock_already_held(self, tmp_path):
+        """deploy_lock() should raise SystemExit(1) when another process holds the lock."""
+        lock_path = tmp_path / "deploy.lock"
+        # Hold the lock manually before entering the context manager
+        lock_path.touch()
+        fh = lock_path.open("a")
+        fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        try:
+            with pytest.raises(SystemExit) as exc_info:
+                with deploy_lock(lock_path):
+                    pass  # Should not reach here
+            assert exc_info.value.code == 1
+        finally:
+            fcntl.flock(fh, fcntl.LOCK_UN)
+            fh.close()
+
+    def test_error_message_mentions_lock_file(self, tmp_path, capsys):
+        """SystemExit message should mention the lock file path."""
+        lock_path = tmp_path / "deploy.lock"
+        lock_path.touch()
+        fh = lock_path.open("a")
+        fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        try:
+            with pytest.raises(SystemExit):
+                with deploy_lock(lock_path):
+                    pass
+            captured = capsys.readouterr()
+            assert str(lock_path) in captured.err
+            assert "deploy" in captured.err.lower()
+        finally:
+            fcntl.flock(fh, fcntl.LOCK_UN)
+            fh.close()
+
+    def test_releases_lock_after_context_exits(self, tmp_path):
+        """Lock should be released in the finally block so a second acquire works."""
+        lock_path = tmp_path / "deploy.lock"
+        with deploy_lock(lock_path):
+            pass
+        # If the lock were not released this would raise BlockingIOError
+        with deploy_lock(lock_path):
+            pass
+
+    def test_releases_lock_even_on_exception(self, tmp_path):
+        """Lock must be released even when body raises."""
+        lock_path = tmp_path / "deploy.lock"
+        with pytest.raises(RuntimeError):
+            with deploy_lock(lock_path):
+                raise RuntimeError("boom")
+        # Lock should be free now
+        with deploy_lock(lock_path):
+            pass
+
+    def test_falls_back_to_stderr_warning_when_file_cannot_be_opened(self, tmp_path, capsys):
+        """When the lock file cannot be opened, warn to stderr and yield (no-op)."""
+        # Point at a path where the parent cannot be created/written to
+        unwritable = tmp_path / "deploy.lock"
+        reached = []
+
+        with pytest.MonkeyPatch.context() as mp:
+            # Make open() raise OSError to simulate unwritable path after mkdir
+            def fake_open(self, mode="r", **kwargs):
+                raise OSError("Permission denied")
+
+            mp.setattr(unwritable.__class__, "open", fake_open)
+            # Also make mkdir a no-op so we don't fail on that
+            mp.setattr(unwritable.__class__, "mkdir", lambda *a, **kw: None)
+
+            with deploy_lock(unwritable):
+                reached.append(True)
+
+        captured = capsys.readouterr()
+        assert "Warning" in captured.err
+        assert reached == [True]
+
+    def test_multiple_sequential_deploys_succeed(self, tmp_path):
+        """Sequential deploy_lock() calls must all succeed without interference."""
+        lock_path = tmp_path / "deploy.lock"
+        results = []
+        for i in range(3):
+            with deploy_lock(lock_path):
+                results.append(i)
+        assert results == [0, 1, 2]
+
+
+class TestResolveLockPath:
+    """Tests for _resolve_lock_path() helper."""
+
+    def test_returns_given_path_when_parent_is_writable(self, tmp_path):
+        """Should return the original path when its parent directory is writable."""
+        lock_path = tmp_path / "deploy.lock"
+        result = _resolve_lock_path(lock_path)
+        assert result == lock_path
+
+    def test_returns_tempfile_path_when_parent_is_not_writable(self, tmp_path):
+        """Should fall back to a temp dir path when the requested parent is not writable."""
+        import tempfile
+
+        nonexistent = tmp_path / "nonexistent" / "deeply" / "nested" / "deploy.lock"
+        # Patch mkdir on Path to raise OSError, simulating an unwritable filesystem
+        with pytest.MonkeyPatch.context() as mp:
+
+            def failing_mkdir(self, *args, **kwargs):
+                raise OSError("read-only filesystem")
+
+            mp.setattr(nonexistent.__class__, "mkdir", failing_mkdir)
+            result = _resolve_lock_path(nonexistent)
+
+        expected = str(tempfile.gettempdir())
+        assert str(result).startswith(expected)
+        assert "ots" in result.name.lower() or "lock" in result.name.lower()
+
+    def test_probe_file_is_cleaned_up(self, tmp_path):
+        """The temporary probe file used for writeability testing must be removed."""
+        lock_path = tmp_path / "deploy.lock"
+        _resolve_lock_path(lock_path)
+        probe = tmp_path / ".ots_lock_probe"
+        assert not probe.exists()
 
 
 class TestFormatJournalctlHint:

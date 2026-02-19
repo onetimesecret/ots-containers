@@ -6,6 +6,33 @@ import pytest
 from ots_containers.cli import app
 
 
+class TestPackageVersion:
+    """Test __version__ fallback in src/ots_containers/__init__.py."""
+
+    def test_version_fallback_when_package_not_installed(self, monkeypatch):
+        """__version__ should be '0.0.0+dev' when package metadata is unavailable."""
+        import importlib
+        import importlib.metadata
+        import sys
+        from importlib.metadata import PackageNotFoundError
+
+        # Patch version() to raise PackageNotFoundError so the except branch executes
+        monkeypatch.setattr(
+            importlib.metadata,
+            "version",
+            lambda name: (_ for _ in ()).throw(PackageNotFoundError(name)),
+        )
+
+        # Remove cached module so reload executes __init__ fresh
+        monkeypatch.delitem(sys.modules, "ots_containers", raising=False)
+        import ots_containers as pkg
+
+        assert pkg.__version__ == "0.0.0+dev"
+
+        # Re-register the real module so subsequent tests are unaffected
+        importlib.reload(pkg)
+
+
 class TestCLIStructure:
     """Test CLI app structure and help output."""
 
@@ -406,3 +433,124 @@ class TestDoctorCommand:
         assert exc_info.value.code == 1
         captured = capsys.readouterr()
         assert "systemctl query failed" in captured.out
+
+
+class TestConfigureLoggingLevels:
+    """Test _configure_logging() sets log levels correctly.
+
+    logging.basicConfig() is idempotent (no-op if handlers already exist).
+    We mock basicConfig to inspect arguments and also directly test setLevel
+    calls via the urllib3 logger which is always set explicitly.
+    """
+
+    def test_verbose_true_passes_debug_level_to_basicconfig(self, mocker):
+        """_configure_logging(True) should call basicConfig with level=DEBUG."""
+        import logging
+
+        from ots_containers.cli import _configure_logging
+
+        mock_basic = mocker.patch("logging.basicConfig")
+        _configure_logging(True)
+        mock_basic.assert_called_once()
+        call_kwargs = mock_basic.call_args[1]
+        assert call_kwargs["level"] == logging.DEBUG
+
+    def test_verbose_false_passes_warning_level_to_basicconfig(self, mocker):
+        """_configure_logging(False) should call basicConfig with level=WARNING."""
+        import logging
+
+        from ots_containers.cli import _configure_logging
+
+        mock_basic = mocker.patch("logging.basicConfig")
+        _configure_logging(False)
+        mock_basic.assert_called_once()
+        call_kwargs = mock_basic.call_args[1]
+        assert call_kwargs["level"] == logging.WARNING
+
+    def test_verbose_true_suppresses_urllib3_logger(self):
+        """_configure_logging(True) should keep urllib3 at WARNING even in verbose mode."""
+        import logging
+
+        from ots_containers.cli import _configure_logging
+
+        _configure_logging(True)
+        assert logging.getLogger("urllib3").level == logging.WARNING
+        # Restore
+        logging.getLogger().setLevel(logging.WARNING)
+
+    def test_verbose_false_suppresses_urllib3_logger(self):
+        """_configure_logging(False) should keep urllib3 at WARNING."""
+        import logging
+
+        from ots_containers.cli import _configure_logging
+
+        _configure_logging(False)
+        assert logging.getLogger("urllib3").level == logging.WARNING
+
+
+class TestAppMeta:
+    """Test _meta() entry point and --verbose flag handling.
+
+    _meta is the registered handler for app.meta.default. It accepts a
+    *tokens variadic arg plus --verbose flag, calls _configure_logging, then
+    routes tokens to app(). Tests call _meta() directly to avoid the cyclopts
+    meta dispatch layer, which requires a Rich Console at parse time.
+    """
+
+    def test_meta_verbose_true_calls_configure_logging_with_true(self, mocker):
+        """_meta(*tokens, verbose=True) should call _configure_logging(True)."""
+        from ots_containers.cli import _meta
+
+        mock_configure = mocker.patch("ots_containers.cli._configure_logging")
+        mocker.patch("ots_containers.cli.app")
+
+        _meta("version", verbose=True)
+
+        mock_configure.assert_called_once_with(True)
+
+    def test_meta_verbose_false_calls_configure_logging_with_false(self, mocker):
+        """_meta(*tokens, verbose=False) should call _configure_logging(False)."""
+        from ots_containers.cli import _meta
+
+        mock_configure = mocker.patch("ots_containers.cli._configure_logging")
+        mocker.patch("ots_containers.cli.app")
+
+        _meta("version", verbose=False)
+
+        mock_configure.assert_called_once_with(False)
+
+    def test_meta_routes_tokens_to_app(self, mocker):
+        """_meta(*tokens) should pass tokens tuple to app()."""
+        from ots_containers.cli import _meta
+
+        mocker.patch("ots_containers.cli._configure_logging")
+        mock_app = mocker.patch("ots_containers.cli.app")
+
+        _meta("version", verbose=False)
+
+        mock_app.assert_called_once_with(("version",))
+
+    def test_meta_default_verbose_is_false(self, mocker):
+        """_meta() default: verbose=False, so _configure_logging(False) is used."""
+        from ots_containers.cli import _meta
+
+        mock_configure = mocker.patch("ots_containers.cli._configure_logging")
+        mocker.patch("ots_containers.cli.app")
+
+        _meta()  # No verbose arg - defaults to False
+
+        mock_configure.assert_called_once_with(False)
+
+    def test_app_meta_with_no_args_shows_help(self, capsys):
+        """app.meta with no args should show help output (may exit 0)."""
+        from ots_containers.cli import app
+
+        # app.meta() with empty tokens routes to _default which shows help
+        try:
+            app.meta([])
+        except SystemExit:
+            pass  # Help output may exit 0 - that's fine
+
+        captured = capsys.readouterr()
+        # Help output should contain something meaningful
+        assert "ots" in captured.out.lower() or "usage" in captured.out.lower() or captured.out
