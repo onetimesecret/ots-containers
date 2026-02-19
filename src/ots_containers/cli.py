@@ -134,9 +134,9 @@ def doctor():
     Examples:
         ots doctor
     """
+    import os
     import shutil
     import subprocess
-    from pathlib import Path
 
     from .config import Config
     from .environment_file import EnvFile, secret_exists
@@ -163,17 +163,7 @@ def doctor():
     )
 
     # 4. /var/lib/onetimesecret/ directory exists and is writable
-    var_dir_ok = cfg.var_dir.exists() and (
-        # root can always write
-        Path("/proc/self").exists()  # Linux only check
-        or cfg.var_dir.stat().st_mode & 0o200
-    )
-    try:
-        import os
-
-        var_dir_ok = cfg.var_dir.exists() and os.access(cfg.var_dir, os.W_OK)
-    except Exception:
-        var_dir_ok = cfg.var_dir.exists()
+    var_dir_ok = cfg.var_dir.exists() and os.access(cfg.var_dir, os.W_OK)
     _check(
         "/var/lib/onetimesecret/ writable",
         var_dir_ok,
