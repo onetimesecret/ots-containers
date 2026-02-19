@@ -1943,3 +1943,82 @@ class TestRedeployHooks:
 
         assert exc_info.value.code == 1
         mock_recreate.assert_not_called()
+
+
+class TestEnableDisableRequireSystemctl:
+    """Test that enable() and disable() guard against missing systemctl.
+
+    The autouse mock_systemctl_available fixture normally makes shutil.which
+    return a valid path. These tests override it to return None to simulate
+    a system without systemd (e.g. macOS), verifying that require_systemctl()
+    causes both commands to exit with code 1 before touching subprocess.run.
+    """
+
+    def test_enable_exits_when_systemctl_missing(self, mocker, capsys):
+        """enable() must exit with code 1 when systemctl is not found."""
+        # Override the autouse fixture: report systemctl as absent
+        mocker.patch("shutil.which", return_value=None)
+
+        with pytest.raises(SystemExit) as exc_info:
+            instance.enable(identifiers=("7043",), web=True)
+
+        assert exc_info.value.code == 1
+
+    def test_disable_exits_when_systemctl_missing(self, mocker, capsys):
+        """disable() must exit with code 1 when systemctl is not found."""
+        mocker.patch("shutil.which", return_value=None)
+
+        with pytest.raises(SystemExit) as exc_info:
+            instance.disable(identifiers=("7043",), web=True, yes=True)
+
+        assert exc_info.value.code == 1
+
+    def test_enable_uses_sudo_systemctl(self, mocker, capsys):
+        """enable() should call subprocess.run with ['sudo', 'systemctl', 'enable', unit]."""
+        mocker.patch(
+            "ots_containers.commands.instance._helpers.systemd.discover_web_instances",
+            return_value=[7043],
+        )
+        mocker.patch(
+            "ots_containers.commands.instance._helpers.systemd.discover_worker_instances",
+            return_value=[],
+        )
+        mocker.patch(
+            "ots_containers.commands.instance._helpers.systemd.discover_scheduler_instances",
+            return_value=[],
+        )
+        mock_run = mocker.patch("ots_containers.commands.instance.app.subprocess.run")
+
+        instance.enable(identifiers=("7043",), web=True)
+
+        mock_run.assert_called_once()
+        call_args = mock_run.call_args[0][0]
+        assert call_args[0] == "sudo"
+        assert call_args[1] == "systemctl"
+        assert call_args[2] == "enable"
+        assert "onetime-web@7043" in call_args
+
+    def test_disable_uses_sudo_systemctl(self, mocker, capsys):
+        """disable() should call subprocess.run with ['sudo', 'systemctl', 'disable', unit]."""
+        mocker.patch(
+            "ots_containers.commands.instance._helpers.systemd.discover_web_instances",
+            return_value=[7043],
+        )
+        mocker.patch(
+            "ots_containers.commands.instance._helpers.systemd.discover_worker_instances",
+            return_value=[],
+        )
+        mocker.patch(
+            "ots_containers.commands.instance._helpers.systemd.discover_scheduler_instances",
+            return_value=[],
+        )
+        mock_run = mocker.patch("ots_containers.commands.instance.app.subprocess.run")
+
+        instance.disable(identifiers=("7043",), web=True, yes=True)
+
+        mock_run.assert_called_once()
+        call_args = mock_run.call_args[0][0]
+        assert call_args[0] == "sudo"
+        assert call_args[1] == "systemctl"
+        assert call_args[2] == "disable"
+        assert "onetime-web@7043" in call_args

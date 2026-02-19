@@ -589,3 +589,176 @@ class TestInitDefaults:
         init("valkey", "6379")
 
         mock_systemctl.assert_not_called()
+
+
+class TestServiceErrorPaths:
+    """Tests for error paths that should raise SystemExit(1).
+
+    Each command wraps the systemctl call in a try/except and raises
+    SystemExit(1) on CalledProcessError so the caller gets a non-zero exit.
+    """
+
+    import subprocess as _subprocess
+
+    @patch("ots_containers.commands.service.app.check_default_service_conflict")
+    @patch("ots_containers.commands.service.app.systemctl")
+    @patch("ots_containers.commands.service.app.create_secrets_file")
+    @patch("ots_containers.commands.service.app.ensure_data_dir")
+    @patch("ots_containers.commands.service.app.update_config_value")
+    @patch("ots_containers.commands.service.app.copy_default_config")
+    def test_init_copy_default_config_file_not_found_exits(
+        self,
+        mock_copy,
+        mock_update,
+        mock_data,
+        mock_secrets,
+        mock_systemctl,
+        mock_check_conflict,
+        capsys,
+        tmp_path,
+    ):
+        """init() exits with code 1 when copy_default_config raises FileNotFoundError."""
+        import pytest
+
+        mock_copy.side_effect = FileNotFoundError("package default config not found")
+        mock_data.return_value = tmp_path / "data"
+        mock_secrets.return_value = None
+
+        with pytest.raises(SystemExit) as exc_info:
+            init("valkey", "6379", start=False, enable=False)
+
+        assert exc_info.value.code == 1
+        captured = capsys.readouterr()
+        assert "ERROR" in captured.out
+
+    @patch("ots_containers.commands.service.app.check_default_service_conflict")
+    @patch("ots_containers.commands.service.app.systemctl")
+    @patch("ots_containers.commands.service.app.create_secrets_file")
+    @patch("ots_containers.commands.service.app.ensure_data_dir")
+    @patch("ots_containers.commands.service.app.update_config_value")
+    @patch("ots_containers.commands.service.app.copy_default_config")
+    def test_init_start_called_process_error_exits(
+        self,
+        mock_copy,
+        mock_update,
+        mock_data,
+        mock_secrets,
+        mock_systemctl,
+        mock_check_conflict,
+        capsys,
+        tmp_path,
+    ):
+        """init() exits with code 1 when systemctl start raises CalledProcessError."""
+        import subprocess
+
+        import pytest
+
+        mock_copy.return_value = tmp_path / "test.conf"
+        mock_data.return_value = tmp_path / "data"
+        mock_secrets.return_value = None
+
+        # First call (enable, if any) succeeds; start call raises
+        def systemctl_side_effect(action, unit, **kwargs):
+            if action == "start":
+                raise subprocess.CalledProcessError(1, "systemctl", stderr="start failed")
+            return MagicMock()
+
+        mock_systemctl.side_effect = systemctl_side_effect
+
+        with pytest.raises(SystemExit) as exc_info:
+            init("valkey", "6379", start=True, enable=False)
+
+        assert exc_info.value.code == 1
+
+    @patch("ots_containers.commands.service.app.systemctl")
+    def test_enable_called_process_error_exits(self, mock_systemctl, capsys):
+        """enable() exits with code 1 when systemctl enable raises CalledProcessError."""
+        import subprocess
+
+        import pytest
+
+        mock_systemctl.side_effect = subprocess.CalledProcessError(
+            1, "systemctl", stderr="enable failed"
+        )
+
+        with pytest.raises(SystemExit) as exc_info:
+            enable("valkey", "6379")
+
+        assert exc_info.value.code == 1
+        captured = capsys.readouterr()
+        assert "ERROR" in captured.out
+
+    @patch("ots_containers.commands.service.app.systemctl")
+    def test_disable_called_process_error_exits(self, mock_systemctl, capsys):
+        """disable() exits with code 1 when systemctl disable raises CalledProcessError."""
+        import subprocess
+
+        import pytest
+
+        def systemctl_side_effect(action, unit, **kwargs):
+            if action == "disable":
+                raise subprocess.CalledProcessError(1, "systemctl", stderr="disable failed")
+            return MagicMock()
+
+        mock_systemctl.side_effect = systemctl_side_effect
+
+        with pytest.raises(SystemExit) as exc_info:
+            disable("valkey", "6379", yes=True)
+
+        assert exc_info.value.code == 1
+        captured = capsys.readouterr()
+        assert "ERROR" in captured.out
+
+    @patch("ots_containers.commands.service.app.systemctl")
+    def test_start_called_process_error_exits(self, mock_systemctl, capsys):
+        """start() exits with code 1 when systemctl start raises CalledProcessError."""
+        import subprocess
+
+        import pytest
+
+        mock_systemctl.side_effect = subprocess.CalledProcessError(
+            1, "systemctl", stderr="start failed"
+        )
+
+        with pytest.raises(SystemExit) as exc_info:
+            start("valkey", "6379")
+
+        assert exc_info.value.code == 1
+        captured = capsys.readouterr()
+        assert "ERROR" in captured.out
+
+    @patch("ots_containers.commands.service.app.systemctl")
+    def test_stop_called_process_error_exits(self, mock_systemctl, capsys):
+        """stop() exits with code 1 when systemctl stop raises CalledProcessError."""
+        import subprocess
+
+        import pytest
+
+        mock_systemctl.side_effect = subprocess.CalledProcessError(
+            1, "systemctl", stderr="stop failed"
+        )
+
+        with pytest.raises(SystemExit) as exc_info:
+            stop("valkey", "6379")
+
+        assert exc_info.value.code == 1
+        captured = capsys.readouterr()
+        assert "ERROR" in captured.out
+
+    @patch("ots_containers.commands.service.app.systemctl")
+    def test_restart_called_process_error_exits(self, mock_systemctl, capsys):
+        """restart() exits with code 1 when systemctl restart raises CalledProcessError."""
+        import subprocess
+
+        import pytest
+
+        mock_systemctl.side_effect = subprocess.CalledProcessError(
+            1, "systemctl", stderr="restart failed"
+        )
+
+        with pytest.raises(SystemExit) as exc_info:
+            restart("valkey", "6379")
+
+        assert exc_info.value.code == 1
+        captured = capsys.readouterr()
+        assert "ERROR" in captured.out
