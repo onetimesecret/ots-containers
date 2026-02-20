@@ -1,12 +1,34 @@
 # src/ots_containers/systemd.py
 
+from __future__ import annotations
+
 import logging
 import re
 import shutil
 import subprocess
 import sys
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from ots_shared.ssh.executor import Executor
 
 logger = logging.getLogger(__name__)
+
+
+def _get_executor(executor: Executor | None = None) -> Executor:
+    """Return the given executor or a default LocalExecutor."""
+    if executor is not None:
+        return executor
+    from ots_shared.ssh import LocalExecutor
+
+    return LocalExecutor()
+
+
+def _is_local(executor: Executor) -> bool:
+    """Check if the executor runs commands locally."""
+    from ots_shared.ssh import LocalExecutor
+
+    return isinstance(executor, LocalExecutor)
 
 
 class SystemdNotAvailableError(Exception):
@@ -25,27 +47,38 @@ class SystemctlError(Exception):
         super().__init__(f"{unit} failed to {action}")
 
 
-def _fetch_journal(unit: str, lines: int = 20) -> str:
+def _fetch_journal(
+    unit: str,
+    lines: int = 20,
+    *,
+    executor: Executor | None = None,
+) -> str:
     """Fetch recent journal entries for a unit. Best-effort, never raises."""
+    ex = _get_executor(executor)
     try:
-        result = subprocess.run(
-            ["sudo", "journalctl", "--no-pager", "-n", str(lines), "-u", unit],
-            capture_output=True,
-            text=True,
+        result = ex.run(
+            ["journalctl", "--no-pager", "-n", str(lines), "-u", unit],
+            sudo=True,
             timeout=10,
         )
         return result.stdout.strip()
-    except (subprocess.SubprocessError, OSError):
+    except Exception:
         return "(could not retrieve journal)"
 
 
-def _run_systemctl(action: str, unit: str) -> None:
+def _run_systemctl(
+    action: str,
+    unit: str,
+    *,
+    executor: Executor | None = None,
+) -> None:
     """Run a systemctl command with diagnostic output on failure."""
-    cmd = ["sudo", "systemctl", action, unit]
-    logger.debug("  $ %s", " ".join(cmd))
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=90)
-    if result.returncode != 0:
-        journal = _fetch_journal(unit)
+    ex = _get_executor(executor)
+    cmd = ["systemctl", action, unit]
+    logger.debug("  $ sudo -- %s", " ".join(cmd))
+    result = ex.run(cmd, sudo=True, timeout=90)
+    if not result.ok:
+        journal = _fetch_journal(unit, executor=executor)
         raise SystemctlError(unit, action, journal)
 
 
@@ -53,6 +86,7 @@ def require_systemctl() -> None:
     """Check that systemctl is available, exit with helpful message if not.
 
     Call this at the start of any function that requires systemd.
+    Only meaningful for local execution — remote hosts are known Linux servers.
     """
     if not shutil.which("systemctl"):
         print(
@@ -108,7 +142,12 @@ def unit_name(instance_type: str, identifier: str) -> str:
     return f"onetime-{instance_type}@{identifier}"
 
 
-def _discover_instances(unit_type: str, running_only: bool = False) -> list[str]:
+def _discover_instances(
+    unit_type: str,
+    running_only: bool = False,
+    *,
+    executor: Executor | None = None,
+) -> list[str]:
     """Find onetime-{unit_type}@* units and return their instance identifiers.
 
     This is the shared implementation for all discover_*_instances functions.
@@ -119,12 +158,15 @@ def _discover_instances(unit_type: str, running_only: bool = False) -> list[str]
         unit_type: The unit type segment, e.g. "web", "worker", "scheduler".
         running_only: If True, only return units that are active and running.
                       If False (default), return all loaded units regardless of state.
+        executor: Executor for command dispatch. None uses LocalExecutor.
 
     Returns:
         Sorted list of instance identifier strings.
     """
-    require_systemctl()
-    result = subprocess.run(
+    ex = _get_executor(executor)
+    if _is_local(ex):
+        require_systemctl()
+    result = ex.run(
         [
             "systemctl",
             "list-units",
@@ -133,8 +175,6 @@ def _discover_instances(unit_type: str, running_only: bool = False) -> list[str]
             "--no-legend",
             "--all",
         ],
-        capture_output=True,
-        text=True,
         timeout=10,
     )
     instances = []
@@ -158,20 +198,29 @@ def _discover_instances(unit_type: str, running_only: bool = False) -> list[str]
     return sorted(instances)
 
 
-def discover_web_instances(running_only: bool = False) -> list[int]:
+def discover_web_instances(
+    running_only: bool = False,
+    *,
+    executor: Executor | None = None,
+) -> list[int]:
     """Find onetime-web@* units and return their ports.
 
     Args:
         running_only: If True, only return units that are active and running.
                       If False (default), return all loaded units regardless of state.
+        executor: Executor for command dispatch. None uses LocalExecutor.
     """
-    ids = _discover_instances("web", running_only=running_only)
+    ids = _discover_instances("web", running_only=running_only, executor=executor)
     # Web instances use numeric port identifiers; non-numeric entries are silently skipped.
     ports = [int(i) for i in ids if i.isdigit()]
     return sorted(ports)
 
 
-def discover_worker_instances(running_only: bool = False) -> list[str]:
+def discover_worker_instances(
+    running_only: bool = False,
+    *,
+    executor: Executor | None = None,
+) -> list[str]:
     """Find onetime-worker@* units and return their instance IDs.
 
     Worker instance IDs can be numeric (1, 2, 3) or named (billing, emails).
@@ -179,11 +228,16 @@ def discover_worker_instances(running_only: bool = False) -> list[str]:
     Args:
         running_only: If True, only return units that are active and running.
                       If False (default), return all loaded units regardless of state.
+        executor: Executor for command dispatch. None uses LocalExecutor.
     """
-    return _discover_instances("worker", running_only=running_only)
+    return _discover_instances("worker", running_only=running_only, executor=executor)
 
 
-def discover_scheduler_instances(running_only: bool = False) -> list[str]:
+def discover_scheduler_instances(
+    running_only: bool = False,
+    *,
+    executor: Executor | None = None,
+) -> list[str]:
     """Find onetime-scheduler@* units and return their instance IDs.
 
     Scheduler instance IDs can be numeric (1, 2) or named (main, cron).
@@ -191,52 +245,67 @@ def discover_scheduler_instances(running_only: bool = False) -> list[str]:
     Args:
         running_only: If True, only return units that are active and running.
                       If False (default), return all loaded units regardless of state.
+        executor: Executor for command dispatch. None uses LocalExecutor.
     """
-    return _discover_instances("scheduler", running_only=running_only)
+    return _discover_instances("scheduler", running_only=running_only, executor=executor)
 
 
-def daemon_reload() -> None:
-    require_systemctl()
-    cmd = ["sudo", "systemctl", "daemon-reload"]
-    logger.debug("  $ %s", " ".join(cmd))
-    subprocess.run(cmd, check=True, timeout=30)  # no unit context, let CalledProcessError propagate
+def daemon_reload(*, executor: Executor | None = None) -> None:
+    ex = _get_executor(executor)
+    if _is_local(ex):
+        require_systemctl()
+    cmd = ["systemctl", "daemon-reload"]
+    logger.debug("  $ sudo -- %s", " ".join(cmd))
+    result = ex.run(cmd, sudo=True, timeout=30)
+    if not result.ok:
+        raise subprocess.CalledProcessError(result.returncode, " ".join(cmd))
 
 
-def start(unit: str) -> None:
-    require_systemctl()
-    _run_systemctl("start", unit)
+def start(unit: str, *, executor: Executor | None = None) -> None:
+    ex = _get_executor(executor)
+    if _is_local(ex):
+        require_systemctl()
+    _run_systemctl("start", unit, executor=executor)
 
 
-def stop(unit: str) -> None:
-    require_systemctl()
-    _run_systemctl("stop", unit)
+def stop(unit: str, *, executor: Executor | None = None) -> None:
+    ex = _get_executor(executor)
+    if _is_local(ex):
+        require_systemctl()
+    _run_systemctl("stop", unit, executor=executor)
 
 
-def reset_failed(unit: str) -> None:
+def reset_failed(unit: str, *, executor: Executor | None = None) -> None:
     """Clear failed state for a unit so it doesn't appear in discovery."""
-    require_systemctl()
-    cmd = ["sudo", "systemctl", "reset-failed", unit]
-    logger.debug("  $ %s", " ".join(cmd))
+    ex = _get_executor(executor)
+    if _is_local(ex):
+        require_systemctl()
+    cmd = ["systemctl", "reset-failed", unit]
+    logger.debug("  $ sudo -- %s", " ".join(cmd))
     # Suppress stderr - it's fine if the unit wasn't in failed state
-    subprocess.run(cmd, stderr=subprocess.DEVNULL, timeout=10)
+    ex.run(cmd, sudo=True, timeout=10)
 
 
-def restart(unit: str) -> None:
-    require_systemctl()
-    _run_systemctl("restart", unit)
+def restart(unit: str, *, executor: Executor | None = None) -> None:
+    ex = _get_executor(executor)
+    if _is_local(ex):
+        require_systemctl()
+    _run_systemctl("restart", unit, executor=executor)
 
 
-def disable(unit: str) -> None:
+def disable(unit: str, *, executor: Executor | None = None) -> None:
     """Disable a unit so it does not auto-start on reboot.
 
     Non-fatal if the unit is not currently enabled — systemctl disable is
     idempotent and exits 0 even when the unit was never enabled.
     """
-    require_systemctl()
-    cmd = ["sudo", "systemctl", "disable", unit]
-    logger.debug("  $ %s", " ".join(cmd))
+    ex = _get_executor(executor)
+    if _is_local(ex):
+        require_systemctl()
+    cmd = ["systemctl", "disable", unit]
+    logger.debug("  $ sudo -- %s", " ".join(cmd))
     # Suppress stderr — 'not enabled' is not an error worth surfacing
-    subprocess.run(cmd, stderr=subprocess.DEVNULL, timeout=10)
+    ex.run(cmd, sudo=True, timeout=10)
 
 
 def unit_to_container_name(unit: str) -> str:
@@ -259,7 +328,7 @@ def unit_to_container_name(unit: str) -> str:
     return f"systemd-{name}"
 
 
-def recreate(unit: str) -> None:
+def recreate(unit: str, *, executor: Executor | None = None) -> None:
     """Stop, remove, and start a Quadlet service to force container recreation.
 
     Use this instead of restart() when the Quadlet .container file has
@@ -270,56 +339,66 @@ def recreate(unit: str) -> None:
     preserves stopped containers. Without removal, start just restarts
     the existing container with its old configuration.
     """
-    require_systemctl()
+    ex = _get_executor(executor)
+    if _is_local(ex):
+        require_systemctl()
     # Stop the systemd unit
-    _run_systemctl("stop", unit)
+    _run_systemctl("stop", unit, executor=executor)
 
-    # Remove the container (Quadlet uses systemd-{name} format with @ -> _)
+    # Remove the container (Quadlet uses systemd-{name} format with @ -> --)
     container_name = unit_to_container_name(unit)
-    rm_cmd = ["sudo", "podman", "rm", "--ignore", container_name]
-    logger.debug("  $ %s", " ".join(rm_cmd))
-    subprocess.run(rm_cmd, check=True, timeout=30)
+    rm_cmd = ["podman", "rm", "--ignore", container_name]
+    logger.debug("  $ sudo -- %s", " ".join(rm_cmd))
+    ex.run(rm_cmd, sudo=True, timeout=30, check=True)
 
     # Start creates a fresh container from the updated quadlet
-    _run_systemctl("start", unit)
+    _run_systemctl("start", unit, executor=executor)
 
 
-def status(unit: str, lines: int = 25) -> None:
-    require_systemctl()
-    cmd = ["sudo", "systemctl", "--no-pager", f"-n{lines}", "status", unit]
-    logger.debug("  $ %s", " ".join(cmd))
-    subprocess.run(
-        cmd,
-        check=False,  # status returns non-zero if not running
-        timeout=30,
-    )
+def status(
+    unit: str,
+    lines: int = 25,
+    *,
+    executor: Executor | None = None,
+) -> None:
+    ex = _get_executor(executor)
+    if _is_local(ex):
+        require_systemctl()
+    cmd = ["systemctl", "--no-pager", f"-n{lines}", "status", unit]
+    logger.debug("  $ sudo -- %s", " ".join(cmd))
+    result = ex.run(cmd, sudo=True, timeout=30)
+    # Print output directly (status is for human consumption)
+    if result.stdout:
+        print(result.stdout, end="")
+    if result.stderr:
+        print(result.stderr, end="", file=sys.stderr)
 
 
-def unit_exists(unit: str) -> bool:
+def unit_exists(unit: str, *, executor: Executor | None = None) -> bool:
     """Check if a systemd unit exists (loaded or not)."""
-    require_systemctl()
-    result = subprocess.run(
+    ex = _get_executor(executor)
+    if _is_local(ex):
+        require_systemctl()
+    result = ex.run(
         ["systemctl", "list-unit-files", unit, "--plain", "--no-legend"],
-        capture_output=True,
-        text=True,
         timeout=10,
     )
     return bool(result.stdout.strip())
 
 
-def container_exists(unit: str) -> bool:
+def container_exists(unit: str, *, executor: Executor | None = None) -> bool:
     """Check if the Quadlet container for a unit exists (running or stopped).
 
     This is more reliable than unit_exists for template instances like
     onetime@7044, since list-unit-files only shows the template, not instances.
     """
+    ex = _get_executor(executor)
     container_name = unit_to_container_name(unit)
-    result = subprocess.run(
+    result = ex.run(
         ["podman", "container", "exists", container_name],
-        capture_output=True,
         timeout=10,
     )
-    return result.returncode == 0
+    return result.ok
 
 
 class HealthCheckTimeoutError(Exception):
@@ -339,6 +418,8 @@ def wait_for_healthy(
     timeout: int = 60,
     poll_interval: float = 2.0,
     consecutive_failures_threshold: int = 3,
+    *,
+    executor: Executor | None = None,
 ) -> None:
     """Poll systemctl until the unit is active or timeout is reached.
 
@@ -351,26 +432,27 @@ def wait_for_healthy(
             (default: 3).  A single "failed" reading can be transient — the unit
             may be in the process of restarting — so we tolerate a few before
             giving up.
+        executor: Executor for command dispatch. None uses LocalExecutor.
 
     Raises:
         HealthCheckTimeoutError: If the unit is not active within ``timeout`` seconds.
     """
     import time
 
-    require_systemctl()
+    ex = _get_executor(executor)
+    if _is_local(ex):
+        require_systemctl()
     deadline = time.monotonic() + timeout
     last_state = "unknown"
     consecutive_failures = 0
 
     while time.monotonic() < deadline:
-        result = subprocess.run(
+        result = ex.run(
             ["systemctl", "is-active", unit],
-            capture_output=True,
-            text=True,
             timeout=10,
         )
         last_state = result.stdout.strip()
-        if result.returncode == 0 and last_state == "active":
+        if result.ok and last_state == "active":
             logger.debug("%s is active", unit)
             return
         if last_state == "failed":

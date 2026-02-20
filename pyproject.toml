@@ -31,7 +31,7 @@ classifiers = [
     "Programming Language :: Python :: 3.13",
     "Topic :: System :: Systems Administration",
 ]
-dependencies = ["cyclopts>=3.9", "podman>=5.0", "pyyaml>=6.0"]
+dependencies = ["cyclopts>=3.9", "ots-shared[ssh]>=0.1.0", "podman>=5.0", "pyyaml>=6.0"]
 
 [project.optional-dependencies]
 dev = ["pre-commit>=3.0", "pyright>=1.1.390", "ruff>=0.9"]
@@ -56,6 +56,7 @@ packages = ["src/ots_containers"]
 pythonVersion = "3.11"
 typeCheckingMode = "basic"
 include = ["src"]
+extraPaths = ["../../ots_shared/src"]
 
 [tool.coverage.run]
 source = ["ots_containers"]

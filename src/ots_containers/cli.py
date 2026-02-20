@@ -76,9 +76,20 @@ def _meta(
             help="Enable debug logging",
         ),
     ] = False,
+    host: Annotated[
+        str | None,
+        cyclopts.Parameter(
+            name=["--host", "-H"],
+            help="Target host for remote execution (overrides OTS_HOST and .otsinfra.env)",
+        ),
+    ] = None,
 ):
     """Global options processed before any subcommand."""
+    from . import context
+
     _configure_logging(verbose)
+    if host is not None:
+        context.host_var.set(host)
     app(tokens)
 
 

@@ -175,6 +175,22 @@ class Config:
         """Validate configuration. Config files are optional (container has defaults)."""
         pass
 
+    def get_executor(self, host: str | None = None):
+        """Return an Executor for the given host, or LocalExecutor if None.
+
+        Uses the host resolution chain: explicit host > OTS_HOST env >
+        .otsinfra.env > None (local). When a host is resolved, connects
+        via SSH and returns an SSHExecutor.
+        """
+        from ots_shared.ssh import LocalExecutor, SSHExecutor, resolve_host, ssh_connect
+
+        resolved = resolve_host(host_flag=host)
+        if resolved is None:
+            return LocalExecutor()
+
+        client = ssh_connect(resolved)
+        return SSHExecutor(client)
+
     def resolve_image_tag(self) -> tuple[str, str]:
         """Resolve image and tag, checking database aliases if tag is an alias.
 

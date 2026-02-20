@@ -158,12 +158,18 @@ class TestDaemonReload:
         """Should call sudo systemctl daemon-reload."""
         from ots_containers import systemd
 
-        mock_run = mocker.patch("subprocess.run")
+        mock_run = mocker.patch(
+            "subprocess.run",
+            return_value=subprocess.CompletedProcess([], 0, stdout="", stderr=""),
+        )
 
         systemd.daemon_reload()
 
         mock_run.assert_called_once_with(
-            ["sudo", "systemctl", "daemon-reload"], check=True, timeout=30
+            ["sudo", "--", "systemctl", "daemon-reload"],
+            capture_output=True,
+            text=True,
+            timeout=30,
         )
 
     def test_daemon_reload_raises_on_failure(self, mocker):
@@ -172,7 +178,7 @@ class TestDaemonReload:
 
         mocker.patch(
             "subprocess.run",
-            side_effect=subprocess.CalledProcessError(1, "cmd"),
+            return_value=subprocess.CompletedProcess([], 1, stdout="", stderr="fail"),
         )
 
         with pytest.raises(subprocess.CalledProcessError):
@@ -188,13 +194,13 @@ class TestStart:
 
         mock_run = mocker.patch(
             "subprocess.run",
-            return_value=subprocess.CompletedProcess([], 0),
+            return_value=subprocess.CompletedProcess([], 0, stdout="", stderr=""),
         )
 
         systemd.start("onetime-web@7043")
 
         mock_run.assert_called_once_with(
-            ["sudo", "systemctl", "start", "onetime-web@7043"],
+            ["sudo", "--", "systemctl", "start", "onetime-web@7043"],
             capture_output=True,
             text=True,
             timeout=90,
@@ -222,13 +228,13 @@ class TestStop:
 
         mock_run = mocker.patch(
             "subprocess.run",
-            return_value=subprocess.CompletedProcess([], 0),
+            return_value=subprocess.CompletedProcess([], 0, stdout="", stderr=""),
         )
 
         systemd.stop("onetime-web@7043")
 
         mock_run.assert_called_once_with(
-            ["sudo", "systemctl", "stop", "onetime-web@7043"],
+            ["sudo", "--", "systemctl", "stop", "onetime-web@7043"],
             capture_output=True,
             text=True,
             timeout=90,
@@ -256,13 +262,13 @@ class TestRestart:
 
         mock_run = mocker.patch(
             "subprocess.run",
-            return_value=subprocess.CompletedProcess([], 0),
+            return_value=subprocess.CompletedProcess([], 0, stdout="", stderr=""),
         )
 
         systemd.restart("onetime-web@7043")
 
         mock_run.assert_called_once_with(
-            ["sudo", "systemctl", "restart", "onetime-web@7043"],
+            ["sudo", "--", "systemctl", "restart", "onetime-web@7043"],
             capture_output=True,
             text=True,
             timeout=90,
@@ -288,20 +294,25 @@ class TestStatus:
         """Should call sudo systemctl status with unit name."""
         from ots_containers import systemd
 
-        mock_run = mocker.patch("subprocess.run")
+        mock_run = mocker.patch(
+            "subprocess.run",
+            return_value=subprocess.CompletedProcess([], 0, stdout="", stderr=""),
+        )
 
         systemd.status("onetime-web@7043")
 
         mock_run.assert_called_once_with(
             [
                 "sudo",
+                "--",
                 "systemctl",
                 "--no-pager",
                 "-n25",
                 "status",
                 "onetime-web@7043",
             ],
-            check=False,
+            capture_output=True,
+            text=True,
             timeout=30,
         )
 
@@ -309,20 +320,25 @@ class TestStatus:
         """Should use custom line count when specified."""
         from ots_containers import systemd
 
-        mock_run = mocker.patch("subprocess.run")
+        mock_run = mocker.patch(
+            "subprocess.run",
+            return_value=subprocess.CompletedProcess([], 0, stdout="", stderr=""),
+        )
 
         systemd.status("onetime-web@7043", lines=50)
 
         mock_run.assert_called_once_with(
             [
                 "sudo",
+                "--",
                 "systemctl",
                 "--no-pager",
                 "-n50",
                 "status",
                 "onetime-web@7043",
             ],
-            check=False,
+            capture_output=True,
+            text=True,
             timeout=30,
         )
 
@@ -330,17 +346,10 @@ class TestStatus:
         """Should not raise when unit is not running (non-zero exit)."""
         from ots_containers import systemd
 
-        # status returns non-zero when unit is not active
-        mocker.patch(
+        mock_run = mocker.patch(
             "subprocess.run",
-            side_effect=subprocess.CalledProcessError(3, "cmd"),
+            return_value=subprocess.CompletedProcess([], 3, stdout="inactive", stderr=""),
         )
-
-        # Should not raise because check=False
-        # But since we're mocking with side_effect, it will raise
-        # Let's fix the mock to just return normally
-        mock_run = mocker.patch("subprocess.run")
-        mock_run.return_value.returncode = 3
 
         systemd.status("onetime-web@7043")  # Should not raise
 
@@ -392,16 +401,23 @@ class TestRecreate:
 
         mock_run = mocker.patch(
             "subprocess.run",
-            return_value=subprocess.CompletedProcess([], 0),
+            return_value=subprocess.CompletedProcess([], 0, stdout="", stderr=""),
         )
 
         systemd.recreate("onetime-web@7044")
 
         assert mock_run.call_count == 3
         calls = mock_run.call_args_list
-        assert calls[0][0][0] == ["sudo", "systemctl", "stop", "onetime-web@7044"]
-        assert calls[1][0][0] == ["sudo", "podman", "rm", "--ignore", "systemd-onetime-web--7044"]
-        assert calls[2][0][0] == ["sudo", "systemctl", "start", "onetime-web@7044"]
+        assert calls[0][0][0] == ["sudo", "--", "systemctl", "stop", "onetime-web@7044"]
+        assert calls[1][0][0] == [
+            "sudo",
+            "--",
+            "podman",
+            "rm",
+            "--ignore",
+            "systemd-onetime-web--7044",
+        ]
+        assert calls[2][0][0] == ["sudo", "--", "systemctl", "start", "onetime-web@7044"]
 
     def test_recreate_raises_on_stop_failure(self, mocker):
         """Should raise SystemctlError if stop fails."""
@@ -452,6 +468,7 @@ class TestContainerExists:
         mock_run.assert_called_once_with(
             ["podman", "container", "exists", "systemd-onetime-web--7044"],
             capture_output=True,
+            text=True,
             timeout=10,
         )
 
@@ -759,6 +776,7 @@ class TestWorkerContainerExists:
         mock_run.assert_called_once_with(
             ["podman", "container", "exists", "systemd-onetime-worker--billing"],
             capture_output=True,
+            text=True,
             timeout=10,
         )
 
@@ -775,6 +793,7 @@ class TestWorkerContainerExists:
         mock_run.assert_called_once_with(
             ["podman", "container", "exists", "systemd-onetime-worker--1"],
             capture_output=True,
+            text=True,
             timeout=10,
         )
 
