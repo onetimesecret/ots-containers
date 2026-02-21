@@ -21,6 +21,46 @@ class TestConfigTransformCommand:
         assert hasattr(instance, "config_transform")
         assert callable(instance.config_transform)
 
+    def test_config_transform_passes_host_to_get_executor(self, mocker, tmp_path):
+        """config_transform should pass host from context to get_executor."""
+        from ots_containers import context
+
+        mock_config = mocker.MagicMock()
+        mock_config.get_executor.return_value = LocalExecutor()
+        mock_config.tag = "current"
+        mock_config.config_dir = tmp_path / "etc"
+        mock_config.config_dir.mkdir()
+        (mock_config.config_dir / "config.yaml").write_text("key: value\n")
+        mocker.patch("ots_containers.commands.instance.app.Config", return_value=mock_config)
+
+        # Mock env file not existing
+        mocker.patch(
+            "ots_containers.commands.instance.app.quadlet.DEFAULT_ENV_FILE",
+            tmp_path / "nonexistent",
+        )
+
+        def mock_run_side_effect(*args, **kwargs):
+            cmd = args[0] if args else kwargs.get("args", [])
+            if "volume" in cmd:
+                return subprocess.CompletedProcess(cmd, 0)
+            if "/bin/cp" in cmd:
+                return subprocess.CompletedProcess(cmd, 0)
+            if "/bin/cat" in cmd:
+                return subprocess.CompletedProcess(cmd, 0, stdout="key: value\n", stderr="")
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+        mocker.patch("subprocess.run", side_effect=mock_run_side_effect)
+
+        # Set host context var to simulate --host flag
+        token = context.host_var.set("web1.example.com")
+        try:
+            instance.config_transform(command="echo test", quiet=True)
+        finally:
+            context.host_var.reset(token)
+
+        # Verify get_executor was called with the host argument
+        mock_config.get_executor.assert_called_once_with(host="web1.example.com")
+
     def test_config_transform_rejects_path_traversal(self, mocker, tmp_path):
         """config_transform should reject path traversal attempts."""
         # Mock Config

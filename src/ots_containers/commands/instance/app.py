@@ -1815,7 +1815,7 @@ def config_transform(
     from pathlib import Path
 
     cfg = Config()
-    ex = cfg.get_executor()
+    ex = cfg.get_executor(host=context.host_var.get(None))
     p = Podman(executor=ex)
 
     from ots_shared.ssh import LocalExecutor
