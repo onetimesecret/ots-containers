@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import contextlib
 import fcntl
+import logging
 import shlex
 import subprocess
 import sys
@@ -23,16 +24,30 @@ from .annotations import InstanceType
 if TYPE_CHECKING:
     from ots_shared.ssh.executor import Executor
 
+logger = logging.getLogger(__name__)
+
 #: Default lock file path for serialising concurrent deploy/redeploy operations.
 DEPLOY_LOCK_PATH = Path("/var/lib/onetimesecret/deploy.lock")
 
 
 @contextlib.contextmanager
-def deploy_lock(lock_path: Path = DEPLOY_LOCK_PATH):
+def deploy_lock(
+    lock_path: Path = DEPLOY_LOCK_PATH,
+    *,
+    executor: Executor | None = None,
+):
     """Exclusive advisory lock to serialise concurrent deploy/redeploy operations.
 
     Uses ``fcntl.LOCK_EX | fcntl.LOCK_NB`` so a second caller gets an
     immediate ``BlockingIOError`` rather than hanging indefinitely.
+
+    .. note:: **Local-only scope.**  This lock uses ``fcntl`` on the *local*
+       machine.  When deploying to a remote host via SSHExecutor, it only
+       prevents concurrent deploys from the *same local process/machine*.
+       Two operators on different workstations can still deploy concurrently
+       to the same remote host.  A remote-side lock would require an
+       ``exec_command("flock ...")`` wrapper, which is left for a future
+       iteration.
 
     Args:
         lock_path: Path to the lock file.  Created (including parent dirs) if
@@ -47,6 +62,16 @@ def deploy_lock(lock_path: Path = DEPLOY_LOCK_PATH):
         with deploy_lock():
             systemd.start(unit)
     """
+    # Warn when deploying remotely — the lock only serialises local callers.
+    if executor is not None:
+        from ots_shared.ssh.executor import SSHExecutor
+
+        if isinstance(executor, SSHExecutor):
+            logger.warning(
+                "Deploy lock is local-only; concurrent deploys from other "
+                "machines to the same remote host are not prevented."
+            )
+
     # Resolve the actual lock path — fall back when system path is not writable
     resolved = _resolve_lock_path(lock_path)
 

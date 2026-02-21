@@ -1,5 +1,8 @@
 # src/ots_containers/config.py
 
+from __future__ import annotations
+
+import atexit
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -24,6 +27,25 @@ CONFIG_FILES: tuple[str, ...] = (
     "logging.yaml",
     "billing.yaml",
 )
+
+
+# Session-scoped SSH connection cache: hostname -> paramiko.SSHClient.
+# Avoids creating a new connection per get_executor() call within one CLI
+# invocation.  Connections are closed automatically at interpreter exit.
+_ssh_cache: dict[str, object] = {}
+
+
+def _close_ssh_cache() -> None:
+    """Close all cached SSH connections. Registered via atexit."""
+    for hostname, client in list(_ssh_cache.items()):
+        try:
+            client.close()  # type: ignore[union-attr]
+        except Exception:
+            pass
+    _ssh_cache.clear()
+
+
+atexit.register(_close_ssh_cache)
 
 
 @dataclass
@@ -180,7 +202,9 @@ class Config:
 
         Uses the host resolution chain: explicit host > OTS_HOST env >
         .otsinfra.env > None (local). When a host is resolved, connects
-        via SSH and returns an SSHExecutor.
+        via SSH and returns an SSHExecutor.  SSH connections are cached
+        per hostname for the lifetime of the process so repeated calls
+        within one CLI invocation reuse the same transport.
         """
         from ots_shared.ssh import LocalExecutor, SSHExecutor, resolve_host, ssh_connect
 
@@ -188,8 +212,44 @@ class Config:
         if resolved is None:
             return LocalExecutor()
 
-        client = ssh_connect(resolved)
-        return SSHExecutor(client)
+        if resolved not in _ssh_cache:
+            import sys
+
+            print(f"Connecting to {resolved}...", file=sys.stderr, flush=True)
+            try:
+                _ssh_cache[resolved] = ssh_connect(resolved)
+            except ImportError:
+                raise SystemExit(
+                    "paramiko is required for SSH connections. "
+                    "Install it with: pip install ots-shared[ssh]"
+                )
+            except TimeoutError:
+                raise SystemExit(
+                    f"SSH to {resolved} failed: Connection timed out. "
+                    "Check that the host is reachable and accepting SSH connections."
+                )
+            except OSError as exc:
+                # Catch connection-refused, network-unreachable, etc.
+                # paramiko.ssh_exception.NoValidConnectionsError is an OSError subclass.
+                raise SystemExit(f"SSH to {resolved} failed: {exc}")
+            except Exception as exc:
+                # Catch paramiko.AuthenticationException, paramiko.SSHException,
+                # and any other paramiko errors without importing paramiko at
+                # module level — they all inherit from Exception.
+                exc_name = type(exc).__name__
+                if "Authentication" in exc_name:
+                    raise SystemExit(
+                        f"SSH to {resolved} failed: Authentication failed. "
+                        "Check your SSH key and that the remote user is correct."
+                    )
+                if "SSHException" in exc_name or "SSH" in exc_name:
+                    raise SystemExit(
+                        f"SSH to {resolved} failed: {exc}. "
+                        "Check your SSH configuration (~/.ssh/config) and known_hosts."
+                    )
+                raise
+            print("Connected.", file=sys.stderr, flush=True)
+        return SSHExecutor(_ssh_cache[resolved])
 
     def resolve_image_tag(self) -> tuple[str, str]:
         """Resolve image and tag, checking database aliases if tag is an alias.

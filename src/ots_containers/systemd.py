@@ -509,41 +509,65 @@ def wait_for_http_healthy(
     port: int,
     timeout: int = 60,
     poll_interval: float = 2.0,
+    *,
+    executor: Executor | None = None,
 ) -> None:
     """Poll the HTTP health endpoint until it returns 200 or timeout is reached.
 
     Useful for web instances where systemd may report active before the
     application is ready to serve requests.
 
+    When *executor* is a :class:`LocalExecutor` (or ``None``), the check uses
+    ``urllib`` directly — no external process needed.  When the executor is
+    remote (e.g. :class:`SSHExecutor`), the check runs
+    ``curl -sf http://localhost:{port}/health`` on the remote host so that
+    ``localhost`` resolves to the correct machine.
+
     Args:
         port: The port to check (e.g., 7043 for onetime-web@7043).
         timeout: Maximum seconds to wait (default: 60).
         poll_interval: Seconds between checks (default: 2.0).
+        executor: Executor for command dispatch. None uses LocalExecutor.
 
     Raises:
         HttpHealthCheckTimeoutError: If the health endpoint does not return 200
             within ``timeout`` seconds.
     """
     import time
-    import urllib.error
-    import urllib.request
 
+    ex = _get_executor(executor)
     url = f"http://localhost:{port}/health"
     deadline = time.monotonic() + timeout
     last_error = "not started"
 
-    while time.monotonic() < deadline:
-        try:
-            with urllib.request.urlopen(url, timeout=5) as response:  # noqa: S310
-                if response.status == 200:
-                    logger.debug("HTTP health check passed: %s", url)
-                    return
-                last_error = f"HTTP {response.status}"
-        except urllib.error.HTTPError as e:
-            last_error = f"HTTP {e.code}"
-        except (urllib.error.URLError, OSError) as e:
-            last_error = str(e)
-        logger.debug("HTTP health check pending (%s): %s", last_error, url)
-        time.sleep(poll_interval)
+    if _is_local(ex):
+        # Local: use urllib directly (no subprocess overhead)
+        import urllib.error
+        import urllib.request
+
+        while time.monotonic() < deadline:
+            try:
+                with urllib.request.urlopen(url, timeout=5) as response:  # noqa: S310
+                    if response.status == 200:
+                        logger.debug("HTTP health check passed: %s", url)
+                        return
+                    last_error = f"HTTP {response.status}"
+            except urllib.error.HTTPError as e:
+                last_error = f"HTTP {e.code}"
+            except (urllib.error.URLError, OSError) as e:
+                last_error = str(e)
+            logger.debug("HTTP health check pending (%s): %s", last_error, url)
+            time.sleep(poll_interval)
+    else:
+        # Remote: run curl on the target host so localhost is correct
+        curl_cmd = ["curl", "-sf", url]
+        while time.monotonic() < deadline:
+            result = ex.run(curl_cmd, timeout=10)
+            if result.ok:
+                logger.debug("HTTP health check passed (remote): %s", url)
+                return
+            last_error = f"curl exit {result.returncode}"
+            logger.debug("HTTP health check pending (%s): %s", last_error, url)
+            time.sleep(poll_interval)
 
     raise HttpHealthCheckTimeoutError(port, timeout, last_error)
