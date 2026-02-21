@@ -250,6 +250,23 @@ def discover_scheduler_instances(
     return _discover_instances("scheduler", running_only=running_only, executor=executor)
 
 
+def is_active(unit: str, *, executor: Executor | None = None) -> str:
+    """Return the active state string for a unit (e.g. 'active', 'inactive', 'failed')."""
+    ex = _get_executor(executor)
+    if _is_local(ex):
+        require_systemctl()
+    result = ex.run(["systemctl", "is-active", unit], timeout=10)
+    return result.stdout.strip()
+
+
+def enable(unit: str, *, executor: Executor | None = None) -> None:
+    """Enable a unit to auto-start on reboot."""
+    ex = _get_executor(executor)
+    if _is_local(ex):
+        require_systemctl()
+    _run_systemctl("enable", unit, executor=executor)
+
+
 def daemon_reload(*, executor: Executor | None = None) -> None:
     ex = _get_executor(executor)
     if _is_local(ex):

@@ -151,6 +151,102 @@ class TestDiscoverWebInstances:
         )
 
 
+class TestIsActive:
+    """Test is_active function."""
+
+    def test_is_active_returns_active_state(self, mocker):
+        """Should return the state string from systemctl is-active."""
+        from ots_containers import systemd
+
+        mock_result = mocker.Mock()
+        mock_result.stdout = "active\n"
+        mock_result.returncode = 0
+        mock_result.ok = True
+        mocker.patch("subprocess.run", return_value=mock_result)
+
+        state = systemd.is_active("onetime-web@7043")
+        assert state == "active"
+
+    def test_is_active_returns_inactive(self, mocker):
+        """Should return 'inactive' for stopped units."""
+        from ots_containers import systemd
+
+        mock_result = mocker.Mock()
+        mock_result.stdout = "inactive\n"
+        mock_result.returncode = 3
+        mock_result.ok = False
+        mocker.patch("subprocess.run", return_value=mock_result)
+
+        state = systemd.is_active("onetime-web@7043")
+        assert state == "inactive"
+
+    def test_is_active_returns_failed(self, mocker):
+        """Should return 'failed' for failed units."""
+        from ots_containers import systemd
+
+        mock_result = mocker.Mock()
+        mock_result.stdout = "failed\n"
+        mock_result.returncode = 3
+        mock_result.ok = False
+        mocker.patch("subprocess.run", return_value=mock_result)
+
+        state = systemd.is_active("onetime-web@7043")
+        assert state == "failed"
+
+    def test_is_active_calls_systemctl_correctly(self, mocker):
+        """Should call systemctl is-active with the unit name."""
+        from ots_containers import systemd
+
+        mock_result = mocker.Mock()
+        mock_result.stdout = "active\n"
+        mock_result.returncode = 0
+        mock_result.ok = True
+        mock_run = mocker.patch("subprocess.run", return_value=mock_result)
+
+        systemd.is_active("onetime-web@7043")
+
+        mock_run.assert_called_once_with(
+            ["systemctl", "is-active", "onetime-web@7043"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+
+
+class TestEnable:
+    """Test enable function."""
+
+    def test_enable_calls_systemctl_enable(self, mocker):
+        """Should call sudo systemctl enable with unit name."""
+        from ots_containers import systemd
+
+        mock_run = mocker.patch(
+            "subprocess.run",
+            return_value=subprocess.CompletedProcess([], 0, stdout="", stderr=""),
+        )
+
+        systemd.enable("onetime-web@7043")
+
+        mock_run.assert_called_once_with(
+            ["sudo", "--", "systemctl", "enable", "onetime-web@7043"],
+            capture_output=True,
+            text=True,
+            timeout=90,
+        )
+
+    def test_enable_raises_systemctl_error_on_failure(self, mocker):
+        """Should raise SystemctlError with journal context on failure."""
+        from ots_containers import systemd
+
+        mocker.patch(
+            "subprocess.run",
+            return_value=subprocess.CompletedProcess([], 1, stdout="", stderr=""),
+        )
+
+        with pytest.raises(SystemctlError, match="failed to enable"):
+            systemd.enable("onetime-web@7043")
+
+
 class TestDaemonReload:
     """Test daemon_reload function."""
 
