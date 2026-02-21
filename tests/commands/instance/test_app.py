@@ -20,6 +20,17 @@ def mock_systemctl_available(mocker):
     mocker.patch("shutil.which", return_value="/mock/bin/systemctl")
 
 
+@pytest.fixture(autouse=True)
+def _mock_get_executor(mocker):
+    """Mock Config.get_executor to return None (local execution).
+
+    Phase 3 added executor threading to instance commands. This fixture
+    prevents SSH resolution from running during tests and ensures executor=None
+    is passed to all systemd/db calls (transparent local execution).
+    """
+    mocker.patch.object(Config, "get_executor", return_value=None)
+
+
 class TestFormatCommand:
     """Test command formatting for copy-paste usage."""
 
@@ -528,13 +539,14 @@ class TestListInstancesCommand:
             return_value=[],
         )
         mocker.patch(
-            "ots_containers.commands.instance.app.subprocess.run",
-            return_value=mocker.Mock(stdout="active\n", stderr=""),
+            "ots_containers.commands.instance.app.systemd.is_active",
+            return_value="active",
         )
 
         # Mock Config and db
         mock_config = mocker.Mock()
         mock_config.db_path = tmp_path / "test.db"
+        mock_config.get_executor.return_value = None
         mocker.patch(
             "ots_containers.commands.instance.app.Config",
             return_value=mock_config,
@@ -580,7 +592,7 @@ class TestEnableCommand:
 
         instance.enable(identifiers=("7043",), web=True)
 
-        mock_enable.assert_called_once_with("onetime-web@7043")
+        mock_enable.assert_called_once_with("onetime-web@7043", executor=None)
 
         captured = capsys.readouterr()
         assert "Enabled" in captured.out
@@ -600,7 +612,7 @@ class TestStopCommand:
 
         instance.stop(identifiers=("7043",), web=True)
 
-        mock_stop.assert_called_once_with("onetime-web@7043")
+        mock_stop.assert_called_once_with("onetime-web@7043", executor=None)
         captured = capsys.readouterr()
         assert "Stopped onetime-web@7043" in captured.out
 
@@ -643,7 +655,7 @@ class TestRestartCommand:
 
         instance.restart(identifiers=("7043",), web=True)
 
-        mock_restart.assert_called_once_with("onetime-web@7043")
+        mock_restart.assert_called_once_with("onetime-web@7043", executor=None)
         captured = capsys.readouterr()
         assert "Restarting onetime-web@7043" in captured.out
 
@@ -686,10 +698,12 @@ class TestLogsCommand:
             "ots_containers.commands.instance._helpers.systemd.discover_scheduler_instances",
             return_value=[],
         )
-        mock_run = mocker.patch("ots_containers.commands.instance.app.subprocess.run")
+        mock_run = mocker.patch("subprocess.run")
+        mock_run.return_value = mocker.Mock(returncode=0, stdout="", stderr="")
 
         instance.logs(identifiers=())
 
+        # The executor (LocalExecutor) shells out via subprocess.run
         mock_run.assert_called_once()
         cmd = mock_run.call_args[0][0]
         assert "journalctl" in cmd
@@ -822,7 +836,7 @@ class TestSchedulerCommands:
 
         instance.stop(identifiers=("main",), scheduler=True)
 
-        mock_stop.assert_called_once_with("onetime-scheduler@main")
+        mock_stop.assert_called_once_with("onetime-scheduler@main", executor=None)
         captured = capsys.readouterr()
         assert "Stopped onetime-scheduler@main" in captured.out
 
@@ -832,7 +846,7 @@ class TestSchedulerCommands:
 
         instance.restart(identifiers=("main",), scheduler=True)
 
-        mock_restart.assert_called_once_with("onetime-scheduler@main")
+        mock_restart.assert_called_once_with("onetime-scheduler@main", executor=None)
         captured = capsys.readouterr()
         assert "Restarting onetime-scheduler@main" in captured.out
 
@@ -842,7 +856,7 @@ class TestSchedulerCommands:
 
         instance.start(identifiers=("main",), scheduler=True)
 
-        mock_start.assert_called_once_with("onetime-scheduler@main")
+        mock_start.assert_called_once_with("onetime-scheduler@main", executor=None)
         captured = capsys.readouterr()
         assert "Started onetime-scheduler@main" in captured.out
 
@@ -863,7 +877,8 @@ class TestSchedulerCommands:
 
     def test_logs_scheduler_with_flag(self, mocker):
         """logs --scheduler should call journalctl for scheduler instances."""
-        mock_run = mocker.patch("ots_containers.commands.instance.app.subprocess.run")
+        mock_run = mocker.patch("subprocess.run")
+        mock_run.return_value = mocker.Mock(returncode=0, stdout="", stderr="")
 
         instance.logs(identifiers=("main",), scheduler=True)
 
@@ -878,7 +893,7 @@ class TestSchedulerCommands:
 
         instance.enable(identifiers=("main",), scheduler=True)
 
-        mock_enable.assert_called_once_with("onetime-scheduler@main")
+        mock_enable.assert_called_once_with("onetime-scheduler@main", executor=None)
 
     def test_disable_scheduler_with_flag(self, mocker, capsys):
         """disable --scheduler should call systemd.disable for scheduler instances."""
@@ -886,7 +901,7 @@ class TestSchedulerCommands:
 
         instance.disable(identifiers=("main",), scheduler=True, yes=True)
 
-        mock_disable.assert_called_once_with("onetime-scheduler@main")
+        mock_disable.assert_called_once_with("onetime-scheduler@main", executor=None)
 
     def test_stop_discovers_scheduler_instances(self, mocker):
         """stop --scheduler with no identifiers should discover scheduler instances."""
@@ -913,7 +928,7 @@ class TestSchedulerCommands:
 
         instance.restart(identifiers=(), scheduler=True)
 
-        mock_restart.assert_called_once_with("onetime-scheduler@main")
+        mock_restart.assert_called_once_with("onetime-scheduler@main", executor=None)
 
     def test_multiple_scheduler_identifiers(self, mocker, capsys):
         """Commands should handle multiple scheduler identifiers."""
@@ -933,7 +948,7 @@ class TestSchedulerCommands:
 
         instance.stop(identifiers=("main",), instance_type=InstanceType.SCHEDULER)
 
-        mock_stop.assert_called_once_with("onetime-scheduler@main")
+        mock_stop.assert_called_once_with("onetime-scheduler@main", executor=None)
 
     def test_scheduler_named_instances(self, mocker, capsys):
         """Scheduler should accept string identifiers (not just numeric)."""
@@ -1987,7 +2002,7 @@ class TestEnableDisableRequireSystemctl:
 
         instance.enable(identifiers=("7043",), web=True)
 
-        mock_enable.assert_called_once_with("onetime-web@7043")
+        mock_enable.assert_called_once_with("onetime-web@7043", executor=None)
 
     def test_disable_uses_systemd_module(self, mocker, capsys):
         """disable() should delegate to systemd.disable()."""
@@ -2007,7 +2022,7 @@ class TestEnableDisableRequireSystemctl:
 
         instance.disable(identifiers=("7043",), web=True, yes=True)
 
-        mock_disable.assert_called_once_with("onetime-web@7043")
+        mock_disable.assert_called_once_with("onetime-web@7043", executor=None)
 
 
 class TestListInstancesJsonOutput:
@@ -2030,12 +2045,13 @@ class TestListInstancesJsonOutput:
             return_value=[],
         )
         mocker.patch(
-            "ots_containers.commands.instance.app.subprocess.run",
-            return_value=mocker.Mock(stdout="active\n", stderr=""),
+            "ots_containers.commands.instance.app.systemd.is_active",
+            return_value="active",
         )
 
         mock_config = mocker.Mock()
         mock_config.db_path = tmp_path / "test.db"
+        mock_config.get_executor.return_value = None
         mocker.patch(
             "ots_containers.commands.instance.app.Config",
             return_value=mock_config,
@@ -2072,12 +2088,13 @@ class TestListInstancesJsonOutput:
             return_value=[],
         )
         mocker.patch(
-            "ots_containers.commands.instance.app.subprocess.run",
-            return_value=mocker.Mock(stdout="active\n", stderr=""),
+            "ots_containers.commands.instance.app.systemd.is_active",
+            return_value="active",
         )
 
         mock_config = mocker.Mock()
         mock_config.db_path = tmp_path / "test.db"
+        mock_config.get_executor.return_value = None
         mocker.patch(
             "ots_containers.commands.instance.app.Config",
             return_value=mock_config,

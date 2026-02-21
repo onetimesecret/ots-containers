@@ -58,15 +58,14 @@ def _list_instances_impl(
     json_output: bool,
 ):
     """Shared implementation for listing instances."""
-    systemd.require_systemctl()
-    instances = resolve_identifiers(identifiers, instance_type, running_only=False)
+    cfg = Config()
+    ex = cfg.get_executor(host=context.host_var.get(None))
+    instances = resolve_identifiers(identifiers, instance_type, running_only=False, executor=ex)
 
     if not instances:
         print("No configured instances found")
         print("Deploy one first: ots instances deploy --help")
         return
-
-    cfg = Config()
 
     if json_output:
         import json
@@ -76,17 +75,20 @@ def _list_instances_impl(
             for id_ in ids:
                 unit = systemd.unit_name(inst_type.value, id_)
                 service = f"{unit}.service"
-                status = systemd.is_active(service)
+                active_status = systemd.is_active(service, executor=ex)
 
                 # Get deployment info
                 if inst_type == InstanceType.WEB:
-                    deployments = db.get_deployments(cfg.db_path, limit=1, port=int(id_))
+                    deployments = db.get_deployments(
+                        cfg.db_path, limit=1, port=int(id_), executor=ex
+                    )
                 else:
                     # Worker/scheduler: query by notes containing instance ID
                     deployments = db.get_deployments(
                         cfg.db_path,
                         limit=1,
                         notes_like=f"%{inst_type.value}_id={id_}%",
+                        executor=ex,
                     )
                 if deployments:
                     dep = deployments[0]
@@ -96,7 +98,7 @@ def _list_instances_impl(
                             "id": id_,
                             "service": service,
                             "container": unit,
-                            "status": status,
+                            "status": active_status,
                             "image": dep.image,
                             "tag": dep.tag,
                             "deployed": dep.timestamp,
@@ -110,7 +112,7 @@ def _list_instances_impl(
                             "id": id_,
                             "service": service,
                             "container": unit,
-                            "status": status,
+                            "status": active_status,
                             "image": None,
                             "tag": None,
                             "deployed": None,
@@ -134,17 +136,18 @@ def _list_instances_impl(
             service = f"{unit}.service"
 
             # Get systemd status
-            status = systemd.is_active(service)
+            active_status = systemd.is_active(service, executor=ex)
 
             # Get last deployment from database
             if inst_type == InstanceType.WEB:
-                deployments = db.get_deployments(cfg.db_path, limit=1, port=int(id_))
+                deployments = db.get_deployments(cfg.db_path, limit=1, port=int(id_), executor=ex)
             else:
                 # Worker/scheduler: query by notes containing instance ID
                 deployments = db.get_deployments(
                     cfg.db_path,
                     limit=1,
                     notes_like=f"%{inst_type.value}_id={id_}%",
+                    executor=ex,
                 )
             if deployments:
                 dep = deployments[0]
@@ -159,7 +162,7 @@ def _list_instances_impl(
 
             row = (
                 f"{inst_type.value:<10} {id_:<10} {service:<28} {unit:<24} "
-                f"{status:<12} {image_tag:<38} {deployed:<20} {action:<10}"
+                f"{active_status:<12} {image_tag:<38} {deployed:<20} {action:<10}"
             )
             print(row)
 
@@ -1014,8 +1017,10 @@ def undeploy(
     import datetime
     import json as json_mod
 
+    cfg = Config()
+    ex = cfg.get_executor(host=context.host_var.get(None))
     itype = resolve_instance_type(instance_type, web, worker, scheduler)
-    instances = resolve_identifiers(identifiers, itype, running_only=True)
+    instances = resolve_identifiers(identifiers, itype, running_only=True, executor=ex)
 
     if not instances:
         if json_output:
@@ -1054,18 +1059,17 @@ def undeploy(
                 print(f"[dry-run] Would undeploy {inst_type.value}: {', '.join(ids)}")
         return
 
-    cfg = Config()
     image, tag = cfg.resolve_image_tag()
     undeploy_results: list[dict] = []
 
     def do_undeploy(inst_type: InstanceType, id_: str) -> None:
         unit = systemd.unit_name(inst_type.value, id_)
         try:
-            systemd.stop(unit)
+            systemd.stop(unit, executor=ex)
             # Prevent auto-start on reboot — disable is idempotent (no-op if not enabled)
-            systemd.disable(unit)
+            systemd.disable(unit, executor=ex)
             # Clear failed state so unit doesn't appear in discovery
-            systemd.reset_failed(unit)
+            systemd.reset_failed(unit, executor=ex)
             port = int(id_) if inst_type == InstanceType.WEB else 0
             db.record_deployment(
                 cfg.db_path,
@@ -1075,6 +1079,7 @@ def undeploy(
                 port=port,
                 success=True,
                 notes=None if inst_type == InstanceType.WEB else f"{inst_type.value}_id={id_}",
+                executor=ex,
             )
             undeploy_results.append(
                 {
@@ -1100,6 +1105,7 @@ def undeploy(
                 port=port,
                 success=False,
                 notes=fail_notes,
+                executor=ex,
             )
             undeploy_results.append(
                 {
@@ -1146,8 +1152,10 @@ def start(
         ots instances start --web 7043 7044         # Start specific web
         ots instances start --scheduler main        # Start specific scheduler
     """
+    cfg = Config()
+    ex = cfg.get_executor(host=context.host_var.get(None))
     itype = resolve_instance_type(instance_type, web, worker, scheduler)
-    instances = resolve_identifiers(identifiers, itype, running_only=False)
+    instances = resolve_identifiers(identifiers, itype, running_only=False, executor=ex)
 
     if not instances:
         print("No configured instances found")
@@ -1157,7 +1165,7 @@ def start(
     for inst_type, ids in instances.items():
         for id_ in ids:
             unit = systemd.unit_name(inst_type.value, id_)
-            systemd.start(unit)
+            systemd.start(unit, executor=ex)
             print(f"Started {unit}")
 
     hint = format_journalctl_hint(instances)
@@ -1184,8 +1192,10 @@ def stop(
         ots instances stop --web 7043 7044          # Stop specific web
         ots instances stop --scheduler              # Stop scheduler instances
     """
+    cfg = Config()
+    ex = cfg.get_executor(host=context.host_var.get(None))
     itype = resolve_instance_type(instance_type, web, worker, scheduler)
-    instances = resolve_identifiers(identifiers, itype, running_only=True)
+    instances = resolve_identifiers(identifiers, itype, running_only=True, executor=ex)
 
     if not instances:
         print("No running instances found")
@@ -1195,7 +1205,7 @@ def stop(
     for inst_type, ids in instances.items():
         for id_ in ids:
             unit = systemd.unit_name(inst_type.value, id_)
-            systemd.stop(unit)
+            systemd.stop(unit, executor=ex)
             print(f"Stopped {unit}")
 
 
@@ -1221,8 +1231,10 @@ def restart(
         ots instances restart --scheduler main      # Restart specific scheduler
         ots instances restart --delay 10            # Longer wait between restarts
     """
+    cfg = Config()
+    ex = cfg.get_executor(host=context.host_var.get(None))
     itype = resolve_instance_type(instance_type, web, worker, scheduler)
-    instances = resolve_identifiers(identifiers, itype, running_only=True)
+    instances = resolve_identifiers(identifiers, itype, running_only=True, executor=ex)
 
     if not instances:
         print("No running instances found")
@@ -1231,7 +1243,7 @@ def restart(
 
     def do_restart(inst_type: InstanceType, id_: str) -> None:
         unit = systemd.unit_name(inst_type.value, id_)
-        systemd.restart(unit)
+        systemd.restart(unit, executor=ex)
 
     for_each_instance(instances, delay, do_restart, "Restarting", show_logs_hint=True)
 
@@ -1254,9 +1266,10 @@ def enable(
         ots instances enable --web 7043 7044        # Enable specific web
         ots instances enable --scheduler main       # Enable specific scheduler
     """
-    systemd.require_systemctl()
+    cfg = Config()
+    ex = cfg.get_executor(host=context.host_var.get(None))
     itype = resolve_instance_type(instance_type, web, worker, scheduler)
-    instances = resolve_identifiers(identifiers, itype, running_only=False)
+    instances = resolve_identifiers(identifiers, itype, running_only=False, executor=ex)
 
     if not instances:
         print("No configured instances found")
@@ -1267,7 +1280,7 @@ def enable(
         for id_ in ids:
             unit = systemd.unit_name(inst_type.value, id_)
             try:
-                systemd.enable(unit)
+                systemd.enable(unit, executor=ex)
                 print(f"Enabled {unit}")
             except systemd.SystemctlError as e:
                 print(f"Failed to enable {unit}: {e.journal}")
@@ -1292,9 +1305,10 @@ def disable(
         ots instances disable --web 7043 7044 -y    # Disable specific web
         ots instances disable --scheduler main -y   # Disable specific scheduler
     """
-    systemd.require_systemctl()
+    cfg = Config()
+    ex = cfg.get_executor(host=context.host_var.get(None))
     itype = resolve_instance_type(instance_type, web, worker, scheduler)
-    instances = resolve_identifiers(identifiers, itype, running_only=False)
+    instances = resolve_identifiers(identifiers, itype, running_only=False, executor=ex)
 
     if not instances:
         print("No configured instances found")
@@ -1315,7 +1329,7 @@ def disable(
         for id_ in ids:
             unit = systemd.unit_name(inst_type.value, id_)
             try:
-                systemd.disable(unit)
+                systemd.disable(unit, executor=ex)
                 print(f"Disabled {unit}")
             except systemd.SystemctlError as e:
                 print(f"Failed to disable {unit}: {e.journal}")
@@ -1341,8 +1355,10 @@ def status(
     """
     import json as json_mod
 
+    cfg = Config()
+    ex = cfg.get_executor(host=context.host_var.get(None))
     itype = resolve_instance_type(instance_type, web, worker, scheduler)
-    instances = resolve_identifiers(identifiers, itype, running_only=False)
+    instances = resolve_identifiers(identifiers, itype, running_only=False, executor=ex)
 
     if not instances:
         if json_output:
@@ -1357,7 +1373,7 @@ def status(
         for inst_type, ids in instances.items():
             for id_ in ids:
                 unit = systemd.unit_name(inst_type.value, id_)
-                active_state = systemd.is_active(unit)
+                active_state = systemd.is_active(unit, executor=ex)
                 results.append(
                     {
                         "unit": unit,
@@ -1372,7 +1388,7 @@ def status(
         for inst_type, ids in instances.items():
             for id_ in ids:
                 unit = systemd.unit_name(inst_type.value, id_)
-                systemd.status(unit)
+                systemd.status(unit, executor=ex)
                 print()
 
 
@@ -1395,8 +1411,10 @@ def logs(
         ots instances logs --scheduler main -f      # Follow scheduler logs
         ots instances logs -n 100                   # Last 100 lines
     """
+    cfg = Config()
+    ex = cfg.get_executor(host=context.host_var.get(None))
     itype = resolve_instance_type(instance_type, web, worker, scheduler)
-    instances = resolve_identifiers(identifiers, itype, running_only=False)
+    instances = resolve_identifiers(identifiers, itype, running_only=False, executor=ex)
 
     if not instances:
         print("No instances found")
@@ -1408,12 +1426,22 @@ def logs(
         for id_ in ids:
             units.append(systemd.unit_name(inst_type.value, id_))
 
-    cmd = ["sudo", "journalctl", "--no-pager", f"-n{lines}"]
+    cmd = ["journalctl", "--no-pager", f"-n{lines}"]
     if follow:
         cmd.append("-f")
     for unit in units:
         cmd.extend(["-u", unit])
-    subprocess.run(cmd)
+
+    # Route through executor for remote support (non-follow mode).
+    # Follow mode over SSH will run until timeout or connection drop.
+    from ots_containers.systemd import _get_executor
+
+    resolved_ex = _get_executor(ex)
+    result = resolved_ex.run(cmd, sudo=True, timeout=30 if not follow else 300)
+    if result.stdout:
+        print(result.stdout, end="")
+    if result.stderr:
+        print(result.stderr, end="", file=sys.stderr)
 
 
 @app.command(name="show-env")
