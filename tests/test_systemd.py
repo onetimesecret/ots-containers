@@ -1543,3 +1543,115 @@ class TestDiscoverInstancesSharedImpl:
 
         assert ids == ["1"]
         assert "7043" not in ids
+
+
+class TestRequireSystemctlRemote:
+    """Test require_systemctl() with a remote executor."""
+
+    def test_require_systemctl_remote_found(self, mocker):
+        """require_systemctl with remote executor should pass when 'which' succeeds."""
+        from unittest.mock import MagicMock
+
+        from ots_containers import systemd
+
+        mock_ex = MagicMock()
+        mock_result = MagicMock()
+        mock_result.ok = True
+        mock_ex.run.return_value = mock_result
+        # Make _is_local return False for this executor
+        mocker.patch("ots_containers.systemd._is_local", return_value=False)
+
+        # Should not raise
+        systemd.require_systemctl(executor=mock_ex)
+
+        mock_ex.run.assert_called_once_with(["which", "systemctl"], timeout=10)
+
+    def test_require_systemctl_remote_not_found(self, mocker):
+        """require_systemctl with remote executor should exit when 'which' fails."""
+        from unittest.mock import MagicMock
+
+        from ots_containers import systemd
+
+        mock_ex = MagicMock()
+        mock_result = MagicMock()
+        mock_result.ok = False
+        mock_ex.run.return_value = mock_result
+        mocker.patch("ots_containers.systemd._is_local", return_value=False)
+
+        with pytest.raises(SystemExit) as exc_info:
+            systemd.require_systemctl(executor=mock_ex)
+
+        assert exc_info.value.code == 1
+
+    def test_require_systemctl_local_fallback(self, mocker):
+        """require_systemctl without executor should use shutil.which (existing behavior)."""
+        from ots_containers import systemd
+
+        # The autouse fixture already mocks shutil.which to return a path
+        # Should not raise
+        systemd.require_systemctl()
+
+    def test_require_systemctl_local_missing(self, mocker):
+        """require_systemctl without executor exits when systemctl not on local PATH."""
+        from ots_containers import systemd
+
+        mocker.patch("shutil.which", return_value=None)
+
+        with pytest.raises(SystemExit) as exc_info:
+            systemd.require_systemctl()
+
+        assert exc_info.value.code == 1
+
+
+class TestRequirePodmanRemote:
+    """Test require_podman() with a remote executor."""
+
+    def test_require_podman_remote_found(self, mocker):
+        """require_podman with remote executor should pass when 'which' succeeds."""
+        from unittest.mock import MagicMock
+
+        from ots_containers import systemd
+
+        mock_ex = MagicMock()
+        mock_result = MagicMock()
+        mock_result.ok = True
+        mock_ex.run.return_value = mock_result
+        mocker.patch("ots_containers.systemd._is_local", return_value=False)
+
+        systemd.require_podman(executor=mock_ex)
+
+        mock_ex.run.assert_called_once_with(["which", "podman"], timeout=10)
+
+    def test_require_podman_remote_not_found(self, mocker):
+        """require_podman with remote executor should exit when 'which' fails."""
+        from unittest.mock import MagicMock
+
+        from ots_containers import systemd
+
+        mock_ex = MagicMock()
+        mock_result = MagicMock()
+        mock_result.ok = False
+        mock_ex.run.return_value = mock_result
+        mocker.patch("ots_containers.systemd._is_local", return_value=False)
+
+        with pytest.raises(SystemExit) as exc_info:
+            systemd.require_podman(executor=mock_ex)
+
+        assert exc_info.value.code == 1
+
+    def test_require_podman_local_fallback(self, mocker):
+        """require_podman without executor should use shutil.which (existing behavior)."""
+        from ots_containers import systemd
+
+        systemd.require_podman()
+
+    def test_require_podman_local_missing(self, mocker):
+        """require_podman without executor exits when podman not on local PATH."""
+        from ots_containers import systemd
+
+        mocker.patch("shutil.which", return_value=None)
+
+        with pytest.raises(SystemExit) as exc_info:
+            systemd.require_podman()
+
+        assert exc_info.value.code == 1

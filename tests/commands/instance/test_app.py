@@ -1821,7 +1821,11 @@ class TestDeployHooks:
 
         instance.deploy(identifiers=("7043",), web=True, pre_hook="./scan.sh")
 
-        mock_run_hook.assert_called_once_with("./scan.sh", "pre-hook", quiet=False)
+        mock_run_hook.assert_called_once()
+        args, kwargs = mock_run_hook.call_args
+        assert args == ("./scan.sh", "pre-hook")
+        assert kwargs["quiet"] is False
+        assert "executor" in kwargs
 
     def test_post_hook_is_called_after_successful_deploy(self, mocker, tmp_path):
         """--post-hook command must run after all instances deploy successfully."""
@@ -1835,7 +1839,11 @@ class TestDeployHooks:
 
         instance.deploy(identifiers=("7043",), web=True, post_hook="./notify.sh")
 
-        mock_run_hook.assert_called_once_with("./notify.sh", "post-hook", quiet=False)
+        mock_run_hook.assert_called_once()
+        args, kwargs = mock_run_hook.call_args
+        assert args == ("./notify.sh", "post-hook")
+        assert kwargs["quiet"] is False
+        assert "executor" in kwargs
 
     def test_pre_hook_failure_aborts_deploy(self, mocker, tmp_path):
         """When --pre-hook exits non-zero, deployment must be aborted."""
@@ -1933,7 +1941,11 @@ class TestRedeployHooks:
 
         instance.redeploy(identifiers=(), web=True, pre_hook="./scan.sh")
 
-        mock_run_hook.assert_called_once_with("./scan.sh", "pre-hook", quiet=False)
+        mock_run_hook.assert_called_once()
+        args, kwargs = mock_run_hook.call_args
+        assert args == ("./scan.sh", "pre-hook")
+        assert kwargs["quiet"] is False
+        assert "executor" in kwargs
 
     def test_post_hook_is_called_after_successful_redeploy(self, mocker, tmp_path):
         """--post-hook must run after successful redeployment."""
@@ -1952,7 +1964,11 @@ class TestRedeployHooks:
 
         instance.redeploy(identifiers=(), web=True, post_hook="./notify.sh")
 
-        mock_run_hook.assert_called_once_with("./notify.sh", "post-hook", quiet=False)
+        mock_run_hook.assert_called_once()
+        args, kwargs = mock_run_hook.call_args
+        assert args == ("./notify.sh", "post-hook")
+        assert kwargs["quiet"] is False
+        assert "executor" in kwargs
 
     def test_pre_hook_failure_aborts_redeploy(self, mocker, tmp_path):
         """When --pre-hook exits non-zero, redeployment must be aborted."""
@@ -1970,6 +1986,77 @@ class TestRedeployHooks:
 
         assert exc_info.value.code == 1
         mock_recreate.assert_not_called()
+
+
+class TestRunHookExecutor:
+    """Test run_hook() dispatches to executor when remote."""
+
+    def test_run_hook_local_uses_subprocess(self, mocker):
+        """run_hook without executor should use subprocess.run (local)."""
+        from ots_containers.commands.instance._helpers import run_hook
+
+        mock_proc = mocker.MagicMock()
+        mock_proc.returncode = 0
+        mock_subprocess = mocker.patch(
+            "ots_containers.commands.instance._helpers.subprocess.run",
+            return_value=mock_proc,
+        )
+
+        run_hook("./scan.sh", "pre-hook", quiet=True)
+
+        mock_subprocess.assert_called_once_with("./scan.sh", shell=True, text=True)
+
+    def test_run_hook_remote_uses_executor(self, mocker):
+        """run_hook with remote executor should dispatch via executor.run."""
+        from unittest.mock import MagicMock
+
+        from ots_containers.commands.instance._helpers import run_hook
+
+        mock_ex = MagicMock()
+        mock_result = MagicMock()
+        mock_result.returncode = 0
+        mock_ex.run.return_value = mock_result
+        mocker.patch("ots_containers.db._is_remote", return_value=True)
+
+        run_hook("./scan.sh", "pre-hook", quiet=True, executor=mock_ex)
+
+        mock_ex.run.assert_called_once_with(
+            ["/bin/sh", "-c", "./scan.sh"],
+            timeout=300,
+        )
+
+    def test_run_hook_remote_failure_raises_system_exit(self, mocker):
+        """run_hook with remote executor should raise SystemExit on non-zero exit."""
+        from unittest.mock import MagicMock
+
+        from ots_containers.commands.instance._helpers import run_hook
+
+        mock_ex = MagicMock()
+        mock_result = MagicMock()
+        mock_result.returncode = 1
+        mock_ex.run.return_value = mock_result
+        mocker.patch("ots_containers.db._is_remote", return_value=True)
+
+        with pytest.raises(SystemExit) as exc_info:
+            run_hook("./failing.sh", "pre-hook", quiet=True, executor=mock_ex)
+
+        assert exc_info.value.code == 1
+
+    def test_run_hook_local_failure_raises_system_exit(self, mocker):
+        """run_hook local path should raise SystemExit on non-zero exit."""
+        from ots_containers.commands.instance._helpers import run_hook
+
+        mock_proc = mocker.MagicMock()
+        mock_proc.returncode = 42
+        mocker.patch(
+            "ots_containers.commands.instance._helpers.subprocess.run",
+            return_value=mock_proc,
+        )
+
+        with pytest.raises(SystemExit) as exc_info:
+            run_hook("./failing.sh", "pre-hook", quiet=True)
+
+        assert exc_info.value.code == 1
 
 
 class TestEnableDisableRequireSystemctl:
@@ -2721,14 +2808,14 @@ class TestRemoteExecutorPropagation:
         from ots_containers.commands.instance.annotations import InstanceType
 
         mock_config, mock_executor = self._make_mock_config(mocker, tmp_path)
-        mocker.patch(
+        mock_get_tags = mocker.patch(
             "ots_containers.commands.instance.app.db.get_previous_tags",
             return_value=[
                 ("ghcr.io/ots/ots", "v2.0.0", "2025-02-01T00:00:00"),
                 ("ghcr.io/ots/ots", "v1.0.0", "2025-01-01T00:00:00"),
             ],
         )
-        mocker.patch(
+        mock_rollback = mocker.patch(
             "ots_containers.commands.instance.app.db.rollback",
             return_value=("ghcr.io/ots/ots", "v1.0.0"),
         )
@@ -2743,6 +2830,11 @@ class TestRemoteExecutorPropagation:
 
         instance.rollback(web=True, yes=True)
 
+        # db.get_previous_tags and db.rollback receive executor
+        mock_get_tags.assert_called_once()
+        assert mock_get_tags.call_args.kwargs["executor"] is mock_executor
+        mock_rollback.assert_called_once()
+        assert mock_rollback.call_args.kwargs["executor"] is mock_executor
         mock_recreate.assert_called_once()
         assert mock_recreate.call_args.kwargs["executor"] is mock_executor
         # record_deployment is called once for success

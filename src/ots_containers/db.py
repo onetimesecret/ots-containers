@@ -490,7 +490,11 @@ def set_current(
     return previous_tag
 
 
-def rollback(db_path: Path) -> tuple[str, str] | None:
+def rollback(
+    db_path: Path,
+    *,
+    executor: Executor | None = None,
+) -> tuple[str, str] | None:
     """Promote ROLLBACK to CURRENT.
 
     This queries the deployment timeline to find the previous successful
@@ -499,22 +503,21 @@ def rollback(db_path: Path) -> tuple[str, str] | None:
 
     Returns (image, tag) of the new CURRENT, or None if no rollback available.
     """
-    # Get the last two distinct successful deployments from timeline
-    with get_connection(db_path) as conn:
-        # Find distinct image/tag pairs ordered by their most recent deployment
-        # Using GROUP BY to get distinct pairs, MAX(id) for ordering (more reliable
-        # than timestamp since datetime('now') only has second precision)
-        rows = conn.execute(
-            """
-            SELECT image, tag, MAX(id) as last_id
-            FROM deployments
-            WHERE success = 1
-              AND action IN ('deploy', 'redeploy', 'set-current')
-            GROUP BY image, tag
-            ORDER BY last_id DESC
-            LIMIT 2
-            """,
-        ).fetchall()
+    sql = """
+        SELECT image, tag, MAX(id) as last_id
+        FROM deployments
+        WHERE success = 1
+          AND action IN ('deploy', 'redeploy', 'set-current')
+        GROUP BY image, tag
+        ORDER BY last_id DESC
+        LIMIT 2
+    """
+
+    if _is_remote(executor):
+        rows = _remote_query(db_path, sql, executor=executor)  # type: ignore[arg-type]
+    else:
+        with get_connection(db_path) as conn:
+            rows = [dict(r) for r in conn.execute(sql).fetchall()]
 
     if len(rows) < 2:
         return None
@@ -524,14 +527,14 @@ def rollback(db_path: Path) -> tuple[str, str] | None:
     rollback_tag = rows[1]["tag"]
 
     # Get what we're rolling back from
-    current = get_current_image(db_path)
+    current = get_current_image(db_path, executor=executor)
     current_tag = current[1] if current else "unknown"
 
     # Update aliases - CURRENT becomes ROLLBACK, then new tag becomes CURRENT
     if current:
-        set_alias(db_path, "ROLLBACK", current[0], current[1])
+        set_alias(db_path, "ROLLBACK", current[0], current[1], executor=executor)
 
-    set_alias(db_path, "CURRENT", rollback_image, rollback_tag)
+    set_alias(db_path, "CURRENT", rollback_image, rollback_tag, executor=executor)
 
     # Record the rollback action
     record_deployment(
@@ -540,29 +543,39 @@ def rollback(db_path: Path) -> tuple[str, str] | None:
         tag=rollback_tag,
         action="rollback",
         notes=f"Rolled back from {current_tag}",
+        executor=executor,
     )
 
     return (rollback_image, rollback_tag)
 
 
-def get_previous_tags(db_path: Path, limit: int = 10) -> list[tuple[str, str, str]]:
+def get_previous_tags(
+    db_path: Path,
+    limit: int = 10,
+    *,
+    executor: Executor | None = None,
+) -> list[tuple[str, str, str]]:
     """Get previous distinct (image, tag, timestamp) from deployment history.
 
     Used for displaying rollback options. Returns list of (image, tag, timestamp).
     """
+    sql = """
+        SELECT DISTINCT image, tag, MAX(timestamp) as last_used
+        FROM deployments
+        WHERE success = 1
+          AND action IN ('deploy', 'redeploy', 'set-current')
+        GROUP BY image, tag
+        ORDER BY last_used DESC
+        LIMIT ?
+    """
+    params = (limit,)
+
+    if _is_remote(executor):
+        rows = _remote_query(db_path, sql, params, executor=executor)  # type: ignore[arg-type]
+        return [(row["image"], row["tag"], row["last_used"]) for row in rows]
+
     with get_connection(db_path) as conn:
-        rows = conn.execute(
-            """
-            SELECT DISTINCT image, tag, MAX(timestamp) as last_used
-            FROM deployments
-            WHERE success = 1
-              AND action IN ('deploy', 'redeploy', 'set-current')
-            GROUP BY image, tag
-            ORDER BY last_used DESC
-            LIMIT ?
-            """,
-            (limit,),
-        ).fetchall()
+        rows = conn.execute(sql, params).fetchall()
 
     return [(row["image"], row["tag"], row["last_used"]) for row in rows]
 

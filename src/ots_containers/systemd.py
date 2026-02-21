@@ -82,12 +82,24 @@ def _run_systemctl(
         raise SystemctlError(unit, action, journal)
 
 
-def require_systemctl() -> None:
+def require_systemctl(*, executor: Executor | None = None) -> None:
     """Check that systemctl is available, exit with helpful message if not.
 
     Call this at the start of any function that requires systemd.
-    Only meaningful for local execution — remote hosts are known Linux servers.
+
+    When *executor* is remote, the check runs ``which systemctl`` on the
+    remote host.  When local (or ``None``), uses :func:`shutil.which`.
     """
+    if executor is not None and not _is_local(_get_executor(executor)):
+        result = executor.run(["which", "systemctl"], timeout=10)
+        if not result.ok:
+            print(
+                "Error: systemctl not found on remote host.",
+                file=sys.stderr,
+            )
+            raise SystemExit(1)
+        return
+
     if not shutil.which("systemctl"):
         print(
             "Error: systemctl not found. This command requires Linux with systemd.",
@@ -104,11 +116,24 @@ def require_systemctl() -> None:
         raise SystemExit(1)
 
 
-def require_podman() -> None:
+def require_podman(*, executor: Executor | None = None) -> None:
     """Check that podman is available, exit with helpful message if not.
 
     Call this at the start of any function that shells out to podman directly.
+
+    When *executor* is remote, the check runs ``which podman`` on the
+    remote host.  When local (or ``None``), uses :func:`shutil.which`.
     """
+    if executor is not None and not _is_local(_get_executor(executor)):
+        result = executor.run(["which", "podman"], timeout=10)
+        if not result.ok:
+            print(
+                "Error: podman not found on remote host.",
+                file=sys.stderr,
+            )
+            raise SystemExit(1)
+        return
+
     if not shutil.which("podman"):
         print(
             "Error: podman not found. This command requires Podman to be installed.",

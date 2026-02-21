@@ -510,7 +510,7 @@ def deploy(
 
     # Execute pre-deploy hook (aborts if it exits non-zero)
     if pre_hook and not dry_run:
-        run_hook(pre_hook, "pre-hook", quiet=quiet or json_output)
+        run_hook(pre_hook, "pre-hook", quiet=quiet or json_output, executor=ex)
 
     deploy_results: list[dict] = []
 
@@ -634,7 +634,7 @@ def deploy(
 
     # Execute post-deploy hook (runs only when all instances deployed successfully)
     if post_hook and all(r["success"] for r in deploy_results):
-        run_hook(post_hook, "post-hook", quiet=quiet or json_output)
+        run_hook(post_hook, "post-hook", quiet=quiet or json_output, executor=ex)
 
     all_ok = all(r["success"] for r in deploy_results)
     any_ok = any(r["success"] for r in deploy_results)
@@ -827,7 +827,7 @@ def redeploy(
 
     # Execute pre-redeploy hook (aborts if it exits non-zero)
     if pre_hook and not dry_run:
-        run_hook(pre_hook, "pre-hook", quiet=quiet or json_output)
+        run_hook(pre_hook, "pre-hook", quiet=quiet or json_output, executor=ex)
 
     redeploy_results: list[dict] = []
 
@@ -970,7 +970,7 @@ def redeploy(
 
     # Execute post-redeploy hook (runs only when all instances redeployed successfully)
     if post_hook and all(r["success"] for r in redeploy_results):
-        run_hook(post_hook, "post-hook", quiet=quiet or json_output)
+        run_hook(post_hook, "post-hook", quiet=quiet or json_output, executor=ex)
 
     all_ok = all(r["success"] for r in redeploy_results)
     any_ok = any(r["success"] for r in redeploy_results)
@@ -2171,7 +2171,7 @@ def rollback(
     ex = cfg.get_executor(host=context.host_var.get(None))
 
     # Determine rollback target from the deployment timeline
-    previous = db.get_previous_tags(cfg.db_path, limit=5)
+    previous = db.get_previous_tags(cfg.db_path, limit=5, executor=ex)
     if len(previous) < 2:
         msg = "No previous deployment found in history - cannot roll back"
         if json_output:
@@ -2215,7 +2215,7 @@ def rollback(
             return
 
     # Update DB aliases (CURRENT -> ROLLBACK, rollback_tag -> CURRENT)
-    rollback_result = db.rollback(cfg.db_path)
+    rollback_result = db.rollback(cfg.db_path, executor=ex)
     if rollback_result is None:
         msg = "Rollback failed - deployment timeline returned no result"
         if json_output:

@@ -1,7 +1,9 @@
 # tests/test_db.py
 """Tests for deployment timeline database."""
 
+import json
 import sqlite3
+from unittest.mock import MagicMock
 
 from ots_containers import db
 
@@ -1103,3 +1105,159 @@ class TestServiceActions:
         # 'stop' has a later timestamp and should come first
         assert actions[0].action == "stop"
         assert actions[1].action == "start"
+
+
+def _make_ssh_executor(mocker):
+    """Create a mock SSHExecutor that _is_remote() recognises as remote."""
+    mock_ex = mocker.MagicMock()
+    # Patch _is_remote to return True for this executor
+    mocker.patch("ots_containers.db._is_remote", side_effect=lambda ex: ex is mock_ex)
+    return mock_ex
+
+
+def _make_remote_result(stdout="", returncode=0):
+    """Build a mock Result for executor.run()."""
+    result = MagicMock()
+    result.ok = returncode == 0
+    result.stdout = stdout
+    result.stderr = ""
+    result.returncode = returncode
+    return result
+
+
+class TestRollbackRemote:
+    """Test db.rollback() with a remote executor."""
+
+    def test_rollback_remote_queries_via_executor(self, mocker, tmp_path):
+        """rollback() with remote executor should use _remote_query for the timeline query."""
+        mock_ex = _make_ssh_executor(mocker)
+        db_path = tmp_path / "test.db"
+
+        # The timeline query returns two distinct deployments
+        timeline_rows = json.dumps(
+            [
+                {"image": "img", "tag": "v2", "last_id": 2},
+                {"image": "img", "tag": "v1", "last_id": 1},
+            ]
+        )
+        # get_current_image -> get_alias -> _remote_query
+        current_alias = json.dumps(
+            [
+                {"alias": "CURRENT", "image": "img", "tag": "v2", "set_at": "2026-01-01"},
+            ]
+        )
+
+        # Track calls: first call is the timeline query, subsequent are from
+        # get_current_image, set_alias (x2), record_deployment
+        call_count = {"n": 0}
+        query_results = [timeline_rows, current_alias]
+
+        def mock_run(cmd, **kwargs):
+            call_count["n"] += 1
+            # SELECT queries use -json flag
+            if "-json" in cmd:
+                idx = min(call_count["n"] - 1, len(query_results) - 1)
+                return _make_remote_result(stdout=query_results[idx])
+            # Write queries (INSERT/UPDATE)
+            return _make_remote_result()
+
+        mock_ex.run.side_effect = mock_run
+
+        result = db.rollback(db_path, executor=mock_ex)
+
+        assert result == ("img", "v1")
+        # Verify executor.run was called (timeline query + alias reads + alias writes + record)
+        assert mock_ex.run.call_count >= 3
+
+    def test_rollback_remote_returns_none_when_insufficient_history(self, mocker, tmp_path):
+        """rollback() with remote executor returns None when < 2 distinct deployments."""
+        mock_ex = _make_ssh_executor(mocker)
+        db_path = tmp_path / "test.db"
+
+        # Only one deployment in timeline
+        mock_ex.run.return_value = _make_remote_result(
+            stdout=json.dumps([{"image": "img", "tag": "v1", "last_id": 1}])
+        )
+
+        result = db.rollback(db_path, executor=mock_ex)
+
+        assert result is None
+
+    def test_rollback_local_still_works(self, tmp_path):
+        """rollback() without executor should still work via local sqlite3."""
+        db_path = tmp_path / "test.db"
+
+        db.record_deployment(db_path, "img", "v1", "deploy")
+        db.set_alias(db_path, "CURRENT", "img", "v1")
+        db.record_deployment(db_path, "img", "v2", "deploy")
+        db.set_alias(db_path, "CURRENT", "img", "v2")
+
+        result = db.rollback(db_path)
+
+        assert result == ("img", "v1")
+
+
+class TestGetPreviousTagsRemote:
+    """Test db.get_previous_tags() with a remote executor."""
+
+    def test_get_previous_tags_remote_queries_via_executor(self, mocker, tmp_path):
+        """get_previous_tags() with remote executor should use _remote_query."""
+        mock_ex = _make_ssh_executor(mocker)
+        db_path = tmp_path / "test.db"
+
+        mock_ex.run.return_value = _make_remote_result(
+            stdout=json.dumps(
+                [
+                    {"image": "img", "tag": "v2", "last_used": "2026-01-02 00:00:00"},
+                    {"image": "img", "tag": "v1", "last_used": "2026-01-01 00:00:00"},
+                ]
+            )
+        )
+
+        tags = db.get_previous_tags(db_path, executor=mock_ex)
+
+        assert len(tags) == 2
+        assert tags[0] == ("img", "v2", "2026-01-02 00:00:00")
+        assert tags[1] == ("img", "v1", "2026-01-01 00:00:00")
+        # Verify the sqlite3 -json command was used
+        call_args = mock_ex.run.call_args[0][0]
+        assert "sqlite3" in call_args
+        assert "-json" in call_args
+
+    def test_get_previous_tags_remote_empty_result(self, mocker, tmp_path):
+        """get_previous_tags() with remote executor returns empty list when no rows."""
+        mock_ex = _make_ssh_executor(mocker)
+        db_path = tmp_path / "test.db"
+
+        mock_ex.run.return_value = _make_remote_result(stdout="")
+
+        tags = db.get_previous_tags(db_path, executor=mock_ex)
+
+        assert tags == []
+
+    def test_get_previous_tags_remote_respects_limit(self, mocker, tmp_path):
+        """get_previous_tags() with remote executor should pass limit in SQL."""
+        mock_ex = _make_ssh_executor(mocker)
+        db_path = tmp_path / "test.db"
+
+        mock_ex.run.return_value = _make_remote_result(stdout="[]")
+
+        db.get_previous_tags(db_path, limit=3, executor=mock_ex)
+
+        # The LIMIT clause should contain 3
+        call_args = mock_ex.run.call_args[0][0]
+        sql = call_args[-1]  # Last arg is the SQL string
+        assert "LIMIT 3" in sql
+
+    def test_get_previous_tags_local_still_works(self, tmp_path):
+        """get_previous_tags() without executor should still work via local sqlite3."""
+        db_path = tmp_path / "test.db"
+        db.record_deployment(db_path, "img", "v1", "deploy")
+        db.record_deployment(db_path, "img", "v2", "deploy")
+
+        tags = db.get_previous_tags(db_path)
+
+        assert len(tags) == 2
+        tag_values = [t[1] for t in tags]
+        assert "v1" in tag_values
+        assert "v2" in tag_values

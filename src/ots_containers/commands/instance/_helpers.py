@@ -318,30 +318,53 @@ def for_each_instance(
     return total
 
 
-def run_hook(hook_cmd: str, stage: str, quiet: bool = False) -> None:
+def run_hook(
+    hook_cmd: str,
+    stage: str,
+    quiet: bool = False,
+    *,
+    executor: Executor | None = None,
+) -> None:
     """Execute a pre- or post-deploy hook command.
 
     The command is run via the shell (``/bin/sh -c``).  If the command exits
     non-zero, ``SystemExit(1)`` is raised with a descriptive message so that
     the caller can abort the deployment.
 
+    When *executor* is a remote :class:`SSHExecutor`, the hook runs on the
+    remote host via ``/bin/sh -c``.  When local (or ``None``), it runs locally
+    via :func:`subprocess.run`.
+
     Args:
         hook_cmd: Shell command string to execute (e.g. ``"./scripts/scan.sh"``).
         stage: Label for log/error messages (e.g. ``"pre-hook"`` or ``"post-hook"``).
         quiet: Suppress progress output when True.
+        executor: Executor for command dispatch. None runs locally.
 
     Raises:
         SystemExit(1): If the hook exits non-zero.
     """
+    from ots_containers.db import _is_remote
+
     if not quiet:
         print(f"Running {stage}: {hook_cmd}")
-    result = subprocess.run(
-        hook_cmd,
-        shell=True,  # noqa: S602
-        text=True,
-    )
-    if result.returncode != 0:
-        print(f"  ERROR: {stage} failed (exit {result.returncode}): {hook_cmd}", file=sys.stderr)
+
+    if _is_remote(executor):
+        result = executor.run(  # type: ignore[union-attr]
+            ["/bin/sh", "-c", hook_cmd],
+            timeout=300,
+        )
+        returncode = result.returncode
+    else:
+        proc = subprocess.run(
+            hook_cmd,
+            shell=True,  # noqa: S602
+            text=True,
+        )
+        returncode = proc.returncode
+
+    if returncode != 0:
+        print(f"  ERROR: {stage} failed (exit {returncode}): {hook_cmd}", file=sys.stderr)
         raise SystemExit(1)
     if not quiet:
         print(f"  {stage} passed")
