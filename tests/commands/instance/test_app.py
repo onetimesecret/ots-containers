@@ -11,6 +11,7 @@ import pytest
 from ots_containers.commands import instance
 from ots_containers.commands.instance._helpers import format_command
 from ots_containers.commands.instance.annotations import InstanceType
+from ots_containers.config import Config
 
 
 @pytest.fixture(autouse=True)
@@ -1516,26 +1517,27 @@ class TestCleanupCommand:
 
     def test_cleanup_calls_podman_volume_rm(self, mocker, tmp_path):
         """cleanup should call 'podman volume rm static_assets'."""
+        mock_executor = mocker.MagicMock()
         mock_result = mocker.MagicMock()
         mock_result.returncode = 0
         mock_result.stderr = ""
-        mock_run = mocker.patch("subprocess.run", return_value=mock_result)
+        mock_executor.run.return_value = mock_result
+        mocker.patch.object(Config, "get_executor", return_value=mock_executor)
 
         instance.cleanup(yes=True)
 
-        mock_run.assert_called_once()
-        cmd = mock_run.call_args[0][0]
-        assert "podman" in cmd
-        assert "volume" in cmd
-        assert "rm" in cmd
-        assert "static_assets" in cmd
+        mock_executor.run.assert_called_once()
+        cmd = mock_executor.run.call_args[0][0]
+        assert cmd == ["podman", "volume", "rm", "static_assets"]
 
     def test_cleanup_volume_not_found_is_treated_as_success(self, mocker, tmp_path, capsys):
         """When volume doesn't exist, cleanup should report success (idempotent)."""
+        mock_executor = mocker.MagicMock()
         mock_result = mocker.MagicMock()
         mock_result.returncode = 1
         mock_result.stderr = "Error: no such volume static_assets"
-        mocker.patch("subprocess.run", return_value=mock_result)
+        mock_executor.run.return_value = mock_result
+        mocker.patch.object(Config, "get_executor", return_value=mock_executor)
 
         instance.cleanup(yes=True)
 
@@ -1544,10 +1546,12 @@ class TestCleanupCommand:
 
     def test_cleanup_failure_exits_nonzero(self, mocker, capsys):
         """Unexpected failure from podman should exit 1."""
+        mock_executor = mocker.MagicMock()
         mock_result = mocker.MagicMock()
         mock_result.returncode = 1
         mock_result.stderr = "Error: some unexpected error"
-        mocker.patch("subprocess.run", return_value=mock_result)
+        mock_executor.run.return_value = mock_result
+        mocker.patch.object(Config, "get_executor", return_value=mock_executor)
 
         with pytest.raises(SystemExit) as exc_info:
             instance.cleanup(yes=True)
@@ -1558,10 +1562,12 @@ class TestCleanupCommand:
         """cleanup --json should output valid JSON with success=True."""
         import json
 
+        mock_executor = mocker.MagicMock()
         mock_result = mocker.MagicMock()
         mock_result.returncode = 0
         mock_result.stderr = ""
-        mocker.patch("subprocess.run", return_value=mock_result)
+        mock_executor.run.return_value = mock_result
+        mocker.patch.object(Config, "get_executor", return_value=mock_executor)
 
         instance.cleanup(yes=True, json_output=True)
 
@@ -1572,7 +1578,9 @@ class TestCleanupCommand:
 
     def test_cleanup_podman_not_found_exits_nonzero(self, mocker, capsys):
         """FileNotFoundError (podman not installed) should exit 1."""
-        mocker.patch("subprocess.run", side_effect=FileNotFoundError("podman not found"))
+        mock_executor = mocker.MagicMock()
+        mock_executor.run.side_effect = FileNotFoundError("podman not found")
+        mocker.patch.object(Config, "get_executor", return_value=mock_executor)
 
         with pytest.raises(SystemExit) as exc_info:
             instance.cleanup(yes=True)
@@ -2434,7 +2442,6 @@ class TestMetricsCommand:
     def test_metrics_with_running_instance_table(self, mocker, capsys):
         """metrics should show table output for running instances."""
         import json
-        import subprocess
 
         mocker.patch(
             "ots_containers.commands.instance._helpers.systemd.discover_web_instances",
@@ -2463,15 +2470,24 @@ class TestMetricsCommand:
             ]
         )
 
-        def mock_run_side_effect(*args, **kwargs):
-            cmd = args[0] if args else kwargs.get("args", [])
-            if "is-active" in cmd:
-                return subprocess.CompletedProcess(cmd, 0, stdout="active\n", stderr="")
-            if "stats" in cmd:
-                return subprocess.CompletedProcess(cmd, 0, stdout=stats_output, stderr="")
-            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+        mock_executor = mocker.MagicMock()
+        mocker.patch.object(Config, "get_executor", return_value=mock_executor)
 
-        mocker.patch("subprocess.run", side_effect=mock_run_side_effect)
+        def mock_run_side_effect(cmd, **kwargs):
+            result = mocker.MagicMock()
+            result.stderr = ""
+            if "is-active" in cmd:
+                result.returncode = 0
+                result.stdout = "active\n"
+            elif "stats" in cmd:
+                result.returncode = 0
+                result.stdout = stats_output
+            else:
+                result.returncode = 0
+                result.stdout = ""
+            return result
+
+        mock_executor.run.side_effect = mock_run_side_effect
 
         instance.metrics(web=True)
 
@@ -2483,7 +2499,6 @@ class TestMetricsCommand:
     def test_metrics_with_running_instance_json(self, mocker, capsys):
         """metrics --json should output structured JSON with stats."""
         import json
-        import subprocess
 
         mocker.patch(
             "ots_containers.commands.instance._helpers.systemd.discover_web_instances",
@@ -2512,15 +2527,24 @@ class TestMetricsCommand:
             ]
         )
 
-        def mock_run_side_effect(*args, **kwargs):
-            cmd = args[0] if args else kwargs.get("args", [])
-            if "is-active" in cmd:
-                return subprocess.CompletedProcess(cmd, 0, stdout="active\n", stderr="")
-            if "stats" in cmd:
-                return subprocess.CompletedProcess(cmd, 0, stdout=stats_output, stderr="")
-            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+        mock_executor = mocker.MagicMock()
+        mocker.patch.object(Config, "get_executor", return_value=mock_executor)
 
-        mocker.patch("subprocess.run", side_effect=mock_run_side_effect)
+        def mock_run_side_effect(cmd, **kwargs):
+            result = mocker.MagicMock()
+            result.stderr = ""
+            if "is-active" in cmd:
+                result.returncode = 0
+                result.stdout = "active\n"
+            elif "stats" in cmd:
+                result.returncode = 0
+                result.stdout = stats_output
+            else:
+                result.returncode = 0
+                result.stdout = ""
+            return result
+
+        mock_executor.run.side_effect = mock_run_side_effect
 
         instance.metrics(json_output=True)
 
@@ -2538,7 +2562,6 @@ class TestMetricsCommand:
     def test_metrics_handles_podman_stats_failure(self, mocker, capsys):
         """metrics should show n/a when podman stats fails."""
         import json
-        import subprocess
 
         mocker.patch(
             "ots_containers.commands.instance._helpers.systemd.discover_web_instances",
@@ -2553,16 +2576,26 @@ class TestMetricsCommand:
             return_value=[],
         )
 
-        def mock_run_side_effect(*args, **kwargs):
-            cmd = args[0] if args else kwargs.get("args", [])
-            if "is-active" in cmd:
-                return subprocess.CompletedProcess(cmd, 0, stdout="inactive\n", stderr="")
-            if "stats" in cmd:
-                # Container not running, stats fails
-                return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="no such container")
-            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+        mock_executor = mocker.MagicMock()
+        mocker.patch.object(Config, "get_executor", return_value=mock_executor)
 
-        mocker.patch("subprocess.run", side_effect=mock_run_side_effect)
+        def mock_run_side_effect(cmd, **kwargs):
+            result = mocker.MagicMock()
+            if "is-active" in cmd:
+                result.returncode = 0
+                result.stdout = "inactive\n"
+                result.stderr = ""
+            elif "stats" in cmd:
+                result.returncode = 1
+                result.stdout = ""
+                result.stderr = "no such container"
+            else:
+                result.returncode = 0
+                result.stdout = ""
+                result.stderr = ""
+            return result
+
+        mock_executor.run.side_effect = mock_run_side_effect
 
         instance.metrics(json_output=True)
 

@@ -10,8 +10,9 @@ from typing import Annotated
 
 import cyclopts
 
-from ots_containers import assets, db, quadlet, systemd
+from ots_containers import assets, context, db, quadlet, systemd
 from ots_containers.config import Config
+from ots_containers.podman import Podman
 
 from ..common import (
     EXIT_FAILURE,
@@ -1903,12 +1904,12 @@ def cleanup(
             print("Aborted")
             return
 
+    cfg = Config()
+    ex = cfg.get_executor(host=context.host_var.get(None))
+    p = Podman(executor=ex)
+
     try:
-        result = subprocess.run(
-            ["podman", "volume", "rm", volume_name],
-            capture_output=True,
-            text=True,
-        )
+        result = p.volume.rm(volume_name)
         if result.returncode == 0:
             outcome = {"success": True, "volume": volume_name, "removed": True}
             if json_output:
@@ -1981,6 +1982,10 @@ def metrics(
             print("Deploy one first: ots instances deploy --help")
         return
 
+    cfg = Config()
+    ex = cfg.get_executor(host=context.host_var.get(None))
+    p = Podman(executor=ex)
+
     results = []
 
     for inst_type, ids in instances.items():
@@ -1990,32 +1995,20 @@ def metrics(
 
             # Get systemd active state
             try:
-                active_state = systemd.is_active(f"{unit}.service")
+                active_state = systemd.is_active(f"{unit}.service", executor=ex)
             except Exception:
                 active_state = "unknown"
 
             # Get podman stats (non-streaming, single snapshot)
             stats_data = None
             try:
-                stats_result = subprocess.run(
-                    [
-                        "podman",
-                        "stats",
-                        "--no-stream",
-                        "--format",
-                        "json",
-                        container,
-                    ],
-                    capture_output=True,
-                    text=True,
-                    timeout=15,
-                )
+                stats_result = p.stats(container, no_stream=True, format="json", timeout=15)
                 if stats_result.returncode == 0 and stats_result.stdout.strip():
                     raw = json_mod.loads(stats_result.stdout)
                     # podman stats --format json returns a list
                     if isinstance(raw, list) and raw:
                         stats_data = raw[0]
-            except (subprocess.SubprocessError, OSError, json_mod.JSONDecodeError):
+            except Exception:
                 stats_data = None
 
             entry: dict = {
