@@ -47,6 +47,7 @@ class TestBuildVersionDetection:
                 db_path=var_dir / "deployments.db",
                 registry=None,
                 registry_auth_file=tmp_path / "auth.json",
+                get_executor=lambda host=None: None,
             ),
         )
         mocker.patch("ots_containers.commands.image.app.db.record_deployment")
@@ -93,6 +94,7 @@ class TestBuildVersionDetection:
                 db_path=var_dir / "deployments.db",
                 registry=None,
                 registry_auth_file=tmp_path / "auth.json",
+                get_executor=lambda host=None: None,
             ),
         )
         mocker.patch("ots_containers.commands.image.app.db.record_deployment")
@@ -176,6 +178,7 @@ class TestBuildPodmanInvocation:
                 db_path=var_dir / "deployments.db",
                 registry=None,
                 registry_auth_file=tmp_path / "auth.json",
+                get_executor=lambda host=None: None,
             ),
         )
         mocker.patch("ots_containers.commands.image.app.db.record_deployment")
@@ -254,6 +257,7 @@ class TestBuildPodmanInvocation:
                 db_path=var_dir / "deployments.db",
                 registry="registry.example.com",
                 registry_auth_file=tmp_path / "auth.json",
+                get_executor=lambda host=None: None,
             ),
         )
         mocker.patch("ots_containers.commands.image.app.db.record_deployment")
@@ -292,6 +296,7 @@ class TestBuildPodmanInvocation:
                 db_path=var_dir / "deployments.db",
                 registry=None,
                 registry_auth_file=tmp_path / "auth.json",
+                get_executor=lambda host=None: None,
             ),
         )
         mocker.patch("ots_containers.commands.image.app.db.record_deployment")
@@ -333,6 +338,7 @@ class TestBuildPodmanInvocation:
                 db_path=var_dir / "deployments.db",
                 registry=None,
                 registry_auth_file=tmp_path / "auth.json",
+                get_executor=lambda host=None: None,
             ),
         )
         mocker.patch("ots_containers.commands.image.app.db.record_deployment")
@@ -382,6 +388,7 @@ class TestBuildDefaultBehavior:
                 db_path=var_dir / "deployments.db",
                 registry=None,
                 registry_auth_file=tmp_path / "auth.json",
+                get_executor=lambda host=None: None,
             ),
         )
         mocker.patch("ots_containers.commands.image.app.db.record_deployment")
@@ -418,6 +425,7 @@ class TestBuildDefaultBehavior:
                 db_path=var_dir / "deployments.db",
                 registry=None,
                 registry_auth_file=tmp_path / "auth.json",
+                get_executor=lambda host=None: None,
             ),
         )
         mocker.patch("ots_containers.commands.image.app.db.record_deployment")
@@ -460,6 +468,7 @@ class TestBuildDefaultBehavior:
                 db_path=var_dir / "deployments.db",
                 registry=None,
                 registry_auth_file=tmp_path / "auth.json",
+                get_executor=lambda host=None: None,
             ),
         )
         mocker.patch("ots_containers.commands.image.app.db.record_deployment")
@@ -499,6 +508,7 @@ class TestBuildErrorHandling:
                 db_path=var_dir / "deployments.db",
                 registry=None,
                 registry_auth_file=tmp_path / "auth.json",
+                get_executor=lambda host=None: None,
             ),
         )
         mocker.patch("ots_containers.commands.image.app.db.record_deployment")
@@ -573,6 +583,7 @@ class TestBuildVariants:
                 db_path=var_dir / "deployments.db",
                 registry=None,
                 registry_auth_file=tmp_path / "auth.json",
+                get_executor=lambda host=None: None,
             ),
         )
         mocker.patch("ots_containers.commands.image.app.db.record_deployment")
@@ -625,6 +636,7 @@ class TestBuildVariants:
                 db_path=var_dir / "deployments.db",
                 registry=None,
                 registry_auth_file=tmp_path / "auth.json",
+                get_executor=lambda host=None: None,
             ),
         )
         mocker.patch("ots_containers.commands.image.app.db.record_deployment")
@@ -693,6 +705,7 @@ class TestBuildVariants:
                 db_path=var_dir / "deployments.db",
                 registry="registry.example.com",
                 registry_auth_file=tmp_path / "auth.json",
+                get_executor=lambda host=None: None,
             ),
         )
         mocker.patch("ots_containers.commands.image.app.db.record_deployment")

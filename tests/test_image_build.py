@@ -272,6 +272,7 @@ class TestBuildCommand:
                 db_path=var_dir / "deployments.db",
                 registry=None,
                 registry_auth_file=tmp_path / "auth.json",
+                get_executor=lambda host=None: None,
             ),
         )
 
@@ -315,6 +316,7 @@ class TestBuildCommand:
                 db_path=var_dir / "deployments.db",
                 registry=None,  # No registry configured
                 registry_auth_file=tmp_path / "auth.json",
+                get_executor=lambda host=None: None,
             ),
         )
 

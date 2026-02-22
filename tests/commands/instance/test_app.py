@@ -876,18 +876,14 @@ class TestSchedulerCommands:
 
     def test_status_scheduler_with_flag(self, mocker, capsys):
         """status --scheduler should show status for scheduler instances."""
-        mock_run = mocker.patch(
-            "ots_containers.commands.instance.app.subprocess.run",
-            return_value=mocker.Mock(returncode=0, stdout="active"),
+        mock_status = mocker.patch(
+            "ots_containers.commands.instance.app.systemd.status",
         )
 
         instance.status(identifiers=("main",), scheduler=True)
 
-        # Should call systemctl status for the scheduler unit
-        mock_run.assert_called()
-        cmd = mock_run.call_args[0][0]
-        assert "systemctl" in cmd
-        assert "onetime-scheduler@main" in cmd
+        # Should call systemd.status for the scheduler unit
+        mock_status.assert_called_once_with("onetime-scheduler@main", executor=None)
 
     def test_logs_scheduler_with_flag(self, mocker):
         """logs --scheduler should call journalctl for scheduler instances."""
@@ -1811,6 +1807,7 @@ class TestDeployHooks:
         mock_config.existing_config_files = []
         mock_config.has_custom_config = False
         mock_config.resolve_image_tag.return_value = ("ghcr.io/test/image", "v1.0.0")
+        mock_config.get_executor.return_value = None
         return mock_config
 
     def test_pre_hook_is_called_before_deploy(self, mocker, tmp_path):
