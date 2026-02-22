@@ -36,6 +36,14 @@ from .packages import get_package, list_packages
 # raises CalledProcessError.  When executor is set, it raises CommandError.
 _SystemctlError = (subprocess.CalledProcessError, CommandError)
 
+
+def _error_stderr(e: Exception) -> str:
+    """Extract stderr from either CalledProcessError or CommandError."""
+    if isinstance(e, CommandError):
+        return e.result.stderr
+    return getattr(e, "stderr", "") or ""
+
+
 if TYPE_CHECKING:
     from ots_shared.ssh.executor import Executor
 
@@ -309,8 +317,8 @@ def init(
         try:
             systemctl("enable", unit, executor=ex)
             print("  Enabled")
-        except CommandError as e:
-            print(f"  WARNING: Could not enable: {e.result.stderr}")
+        except _SystemctlError as e:
+            print(f"  WARNING: Could not enable: {_error_stderr(e)}")
 
     # Step 6: Start service
     if start:
@@ -318,8 +326,8 @@ def init(
         try:
             systemctl("start", unit, executor=ex)
             print("  Started")
-        except CommandError as e:
-            print(f"  ERROR: Could not start: {e.result.stderr}")
+        except _SystemctlError as e:
+            print(f"  ERROR: Could not start: {_error_stderr(e)}")
             raise SystemExit(1)
 
     print()
@@ -344,8 +352,8 @@ def enable(package: Package, instance: Instance):
     try:
         systemctl("enable", unit, executor=ex)
         print("Enabled")
-    except CommandError as e:
-        print(f"ERROR: {e.result.stderr}")
+    except _SystemctlError as e:
+        print(f"ERROR: {_error_stderr(e)}")
         raise SystemExit(1)
 
 
@@ -379,8 +387,8 @@ def disable(
     try:
         systemctl("disable", unit, executor=ex)
         print("Disabled")
-    except CommandError as e:
-        print(f"ERROR: {e.result.stderr}")
+    except _SystemctlError as e:
+        print(f"ERROR: {_error_stderr(e)}")
         raise SystemExit(1)
 
 
@@ -429,8 +437,8 @@ def start(package: Package, instance: Instance):
     try:
         systemctl("start", unit, executor=ex)
         print("Started")
-    except CommandError as e:
-        print(f"ERROR: {e.result.stderr}")
+    except _SystemctlError as e:
+        print(f"ERROR: {_error_stderr(e)}")
         raise SystemExit(1)
 
 
@@ -449,8 +457,8 @@ def stop(package: Package, instance: Instance):
     try:
         systemctl("stop", unit, executor=ex)
         print("Stopped")
-    except CommandError as e:
-        print(f"ERROR: {e.result.stderr}")
+    except _SystemctlError as e:
+        print(f"ERROR: {_error_stderr(e)}")
         raise SystemExit(1)
 
 
@@ -469,8 +477,8 @@ def restart(package: Package, instance: Instance):
     try:
         systemctl("restart", unit, executor=ex)
         print("Restarted")
-    except CommandError as e:
-        print(f"ERROR: {e.result.stderr}")
+    except _SystemctlError as e:
+        print(f"ERROR: {_error_stderr(e)}")
         raise SystemExit(1)
 
 
