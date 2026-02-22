@@ -279,7 +279,7 @@ class TestAssetsUpdate:
         ]
 
         cfg = mocker.MagicMock(spec=Config)
-        cfg.resolved_image_with_tag = "ghcr.io/onetimesecret/onetimesecret:v0.23.3"
+        cfg.resolved_image_with_tag.return_value = "ghcr.io/onetimesecret/onetimesecret:v0.23.3"
 
         with pytest.raises(SystemExit) as exc_info:
             assets.update(cfg, create_volume=False)
@@ -306,7 +306,7 @@ class TestAssetsUpdate:
 
         cfg = mocker.MagicMock(spec=Config)
         cfg.tag = "current"
-        cfg.resolved_image_with_tag = "registry.example.com/app:current"
+        cfg.resolved_image_with_tag.return_value = "registry.example.com/app:current"
 
         with pytest.raises(SystemExit) as exc_info:
             assets.update(cfg, create_volume=False)
@@ -333,7 +333,7 @@ class TestAssetsUpdate:
 
         cfg = mocker.MagicMock(spec=Config)
         cfg.tag = "v0.23.3"
-        cfg.resolved_image_with_tag = "registry.example.com/app:v0.23.3"
+        cfg.resolved_image_with_tag.return_value = "registry.example.com/app:v0.23.3"
 
         with pytest.raises(SystemExit) as exc_info:
             assets.update(cfg, create_volume=False)
@@ -400,7 +400,7 @@ class TestAssetsUpdateRemote:
         mock_p.rm.return_value = _make_remote_result()
 
         cfg = MagicMock(spec=Config)
-        cfg.resolved_image_with_tag = "ghcr.io/ots:latest"
+        cfg.resolved_image_with_tag.return_value = "ghcr.io/ots:latest"
         cfg.tag = "latest"
 
         assets.update(cfg, executor=mock_ex)

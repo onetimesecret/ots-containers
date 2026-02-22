@@ -774,15 +774,13 @@ class TestDisableCommand:
             "ots_containers.commands.instance._helpers.systemd.discover_scheduler_instances",
             return_value=[],
         )
-        mock_run = mocker.patch("ots_containers.commands.instance.app.subprocess.run")
+        mock_disable = mocker.patch("ots_containers.commands.instance._helpers.systemd.disable")
 
         instance.disable(identifiers=("7043",), web=True, yes=True)
 
-        mock_run.assert_called_once()
-        call_args = mock_run.call_args[0][0]
-        assert "systemctl" in call_args
-        assert "disable" in call_args
-        assert "onetime-web@7043" in call_args
+        mock_disable.assert_called_once()
+        call_args = mock_disable.call_args
+        assert call_args[0][0] == "onetime-web@7043"
 
         captured = capsys.readouterr()
         assert "Disabled" in captured.out
@@ -2846,6 +2844,214 @@ class TestRemoteExecutorPropagation:
         # record_deployment is called once for success
         mock_record.assert_called_once()
         assert mock_record.call_args.kwargs["executor"] is mock_executor
+
+    def test_undeploy_passes_executor_to_systemd_and_db(self, mocker, tmp_path):
+        """undeploy passes executor to systemd and db."""
+        mock_config, mock_executor = self._make_mock_config(mocker, tmp_path)
+        mocker.patch(
+            "ots_containers.commands.instance.app.resolve_identifiers",
+            return_value={InstanceType.WEB: ["7043"]},
+        )
+        mock_stop = mocker.patch("ots_containers.commands.instance.app.systemd.stop")
+        mock_disable = mocker.patch("ots_containers.commands.instance.app.systemd.disable")
+        mock_reset = mocker.patch("ots_containers.commands.instance.app.systemd.reset_failed")
+        mock_record = mocker.patch("ots_containers.commands.instance.app.db.record_deployment")
+
+        instance.undeploy(identifiers=("7043",), web=True, yes=True)
+
+        mock_stop.assert_called_once()
+        assert mock_stop.call_args.kwargs["executor"] is mock_executor
+        mock_disable.assert_called_once()
+        assert mock_disable.call_args.kwargs["executor"] is mock_executor
+        mock_reset.assert_called_once()
+        assert mock_reset.call_args.kwargs["executor"] is mock_executor
+        mock_record.assert_called_once()
+        assert mock_record.call_args.kwargs["executor"] is mock_executor
+
+    def test_start_passes_executor_to_systemd(self, mocker, tmp_path):
+        """start should pass executor to systemd.start."""
+        mock_config, mock_executor = self._make_mock_config(mocker, tmp_path)
+        mocker.patch(
+            "ots_containers.commands.instance.app.resolve_identifiers",
+            return_value={InstanceType.WEB: ["7043"]},
+        )
+        mock_start = mocker.patch("ots_containers.commands.instance.app.systemd.start")
+
+        instance.start(identifiers=("7043",), web=True)
+
+        mock_start.assert_called_once()
+        assert mock_start.call_args.kwargs["executor"] is mock_executor
+
+    def test_stop_passes_executor_to_systemd(self, mocker, tmp_path):
+        """stop should pass executor to systemd.stop."""
+        mock_config, mock_executor = self._make_mock_config(mocker, tmp_path)
+        mocker.patch(
+            "ots_containers.commands.instance.app.resolve_identifiers",
+            return_value={InstanceType.WEB: ["7043"]},
+        )
+        mock_stop = mocker.patch("ots_containers.commands.instance.app.systemd.stop")
+
+        instance.stop(identifiers=("7043",), web=True)
+
+        mock_stop.assert_called_once()
+        assert mock_stop.call_args.kwargs["executor"] is mock_executor
+
+    def test_restart_passes_executor_to_systemd(self, mocker, tmp_path):
+        """restart should pass executor to systemd.restart."""
+        mock_config, mock_executor = self._make_mock_config(mocker, tmp_path)
+        mocker.patch(
+            "ots_containers.commands.instance.app.resolve_identifiers",
+            return_value={InstanceType.WEB: ["7043"]},
+        )
+        mock_restart = mocker.patch("ots_containers.commands.instance.app.systemd.restart")
+
+        instance.restart(identifiers=("7043",), web=True, delay=0)
+
+        mock_restart.assert_called_once()
+        assert mock_restart.call_args.kwargs["executor"] is mock_executor
+
+    def test_enable_passes_executor_to_systemd(self, mocker, tmp_path):
+        """enable should pass executor to systemd.enable."""
+        mock_config, mock_executor = self._make_mock_config(mocker, tmp_path)
+        mocker.patch(
+            "ots_containers.commands.instance.app.resolve_identifiers",
+            return_value={InstanceType.WEB: ["7043"]},
+        )
+        mock_enable = mocker.patch("ots_containers.commands.instance.app.systemd.enable")
+
+        instance.enable(identifiers=("7043",), web=True)
+
+        mock_enable.assert_called_once()
+        assert mock_enable.call_args.kwargs["executor"] is mock_executor
+
+    def test_disable_passes_executor_to_systemd(self, mocker, tmp_path):
+        """disable should pass executor to systemd.disable."""
+        mock_config, mock_executor = self._make_mock_config(mocker, tmp_path)
+        mocker.patch(
+            "ots_containers.commands.instance.app.resolve_identifiers",
+            return_value={InstanceType.WEB: ["7043"]},
+        )
+        mock_disable = mocker.patch("ots_containers.commands.instance.app.systemd.disable")
+
+        instance.disable(identifiers=("7043",), web=True, yes=True)
+
+        mock_disable.assert_called_once()
+        assert mock_disable.call_args.kwargs["executor"] is mock_executor
+
+    def test_status_passes_executor_to_systemd(self, mocker, tmp_path):
+        """status should pass executor to systemd.is_active (json mode) and systemd.status."""
+        mock_config, mock_executor = self._make_mock_config(mocker, tmp_path)
+        mocker.patch(
+            "ots_containers.commands.instance.app.resolve_identifiers",
+            return_value={InstanceType.WEB: ["7043"]},
+        )
+        mock_is_active = mocker.patch(
+            "ots_containers.commands.instance.app.systemd.is_active",
+            return_value="active",
+        )
+
+        instance.status(identifiers=("7043",), web=True, json_output=True)
+
+        mock_is_active.assert_called_once()
+        assert mock_is_active.call_args.kwargs["executor"] is mock_executor
+
+    def test_status_text_passes_executor_to_systemd(self, mocker, tmp_path):
+        """status (text mode) should pass executor to systemd.status."""
+        mock_config, mock_executor = self._make_mock_config(mocker, tmp_path)
+        mocker.patch(
+            "ots_containers.commands.instance.app.resolve_identifiers",
+            return_value={InstanceType.WEB: ["7043"]},
+        )
+        mock_status = mocker.patch("ots_containers.commands.instance.app.systemd.status")
+
+        instance.status(identifiers=("7043",), web=True, json_output=False)
+
+        mock_status.assert_called_once()
+        assert mock_status.call_args.kwargs["executor"] is mock_executor
+
+    def test_logs_passes_executor_via_run(self, mocker, tmp_path):
+        """logs should route journalctl command through the executor."""
+        mock_config, mock_executor = self._make_mock_config(mocker, tmp_path)
+        mocker.patch(
+            "ots_containers.commands.instance.app.resolve_identifiers",
+            return_value={InstanceType.WEB: ["7043"]},
+        )
+        # _get_executor is imported from ots_containers.systemd inside logs()
+        mocker.patch(
+            "ots_containers.systemd._get_executor",
+            return_value=mock_executor,
+        )
+        mock_result = mocker.MagicMock()
+        mock_result.stdout = "some log output\n"
+        mock_result.stderr = ""
+        mock_executor.run.return_value = mock_result
+
+        instance.logs(identifiers=("7043",), web=True, follow=False)
+
+        mock_executor.run.assert_called_once()
+        cmd = mock_executor.run.call_args[0][0]
+        assert "journalctl" in cmd
+
+    def test_cleanup_passes_executor_to_podman(self, mocker, tmp_path):
+        """cleanup should create Podman with the executor for volume removal."""
+        mock_config, mock_executor = self._make_mock_config(mocker, tmp_path)
+        mock_podman = mocker.MagicMock()
+        mock_volume_result = mocker.MagicMock()
+        mock_volume_result.returncode = 0
+        mock_podman.volume.rm.return_value = mock_volume_result
+        mocker.patch(
+            "ots_containers.commands.instance.app.Podman",
+            return_value=mock_podman,
+        )
+
+        instance.cleanup(yes=True)
+
+        # Verify Podman was constructed with the executor
+        from ots_containers.commands.instance.app import Podman
+
+        Podman.assert_called_once_with(executor=mock_executor)
+
+    def test_metrics_passes_executor_to_systemd(self, mocker, tmp_path):
+        """metrics should pass executor to systemd.is_active for status checks."""
+        mock_config, mock_executor = self._make_mock_config(mocker, tmp_path)
+        mocker.patch(
+            "ots_containers.commands.instance._helpers.systemd.discover_web_instances",
+            return_value=[7043],
+        )
+        mocker.patch(
+            "ots_containers.commands.instance._helpers.systemd.discover_worker_instances",
+            return_value=[],
+        )
+        mocker.patch(
+            "ots_containers.commands.instance._helpers.systemd.discover_scheduler_instances",
+            return_value=[],
+        )
+
+        def mock_run_side_effect(cmd, **kwargs):
+            result = mocker.MagicMock()
+            if "is-active" in cmd:
+                result.returncode = 0
+                result.stdout = "active\n"
+                result.stderr = ""
+            elif "stats" in cmd:
+                result.returncode = 0
+                result.stdout = (
+                    '[{"name":"systemd-onetime-web--7043",'
+                    '"cpu_percent":"0.5%","mem_usage":"100MiB"}]'
+                )
+                result.stderr = ""
+            else:
+                result.returncode = 0
+                result.stdout = ""
+                result.stderr = ""
+            return result
+
+        mock_executor.run.side_effect = mock_run_side_effect
+
+        instance.metrics(json_output=True)
+
+        # Executor should have been used for systemctl/podman calls
+        assert mock_executor.run.call_count >= 1
 
 
 class TestStreamingCommands:

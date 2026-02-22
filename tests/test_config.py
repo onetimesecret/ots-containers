@@ -280,6 +280,73 @@ class TestHasCustomConfig:
         assert cfg.has_custom_config is True
 
 
+class TestGetExistingConfigFilesRemote:
+    """Test Config.get_existing_config_files() with remote executor."""
+
+    def test_delegates_to_property_when_no_executor(self, tmp_path):
+        """Should use local Path.exists() when executor is None."""
+        from ots_containers.config import Config
+
+        config_dir = tmp_path / "etc"
+        config_dir.mkdir()
+        (config_dir / "config.yaml").touch()
+
+        cfg = Config(config_dir=config_dir)
+        result = cfg.get_existing_config_files(executor=None)
+        assert len(result) == 1
+        assert config_dir / "config.yaml" in result
+
+    def test_delegates_to_property_for_local_executor(self, tmp_path):
+        """Should use local Path.exists() when executor is LocalExecutor."""
+        from ots_shared.ssh import LocalExecutor
+
+        from ots_containers.config import Config
+
+        config_dir = tmp_path / "etc"
+        config_dir.mkdir()
+        (config_dir / "config.yaml").touch()
+        (config_dir / "auth.yaml").touch()
+
+        cfg = Config(config_dir=config_dir)
+        result = cfg.get_existing_config_files(executor=LocalExecutor())
+        assert len(result) == 2
+
+    def test_probes_remote_filesystem_for_ssh_executor(self):
+        """Should use 'test -f' via executor for each config file on remote hosts."""
+        from pathlib import Path
+        from unittest.mock import MagicMock
+
+        try:
+            import paramiko
+        except ImportError:
+            pytest.skip("paramiko not installed")
+
+        from ots_shared.ssh import SSHExecutor
+        from ots_shared.ssh.executor import Result
+
+        from ots_containers.config import Config
+
+        mock_client = MagicMock(spec=paramiko.SSHClient)
+        ex = SSHExecutor(mock_client)
+
+        # config.yaml exists, auth.yaml does not, logging.yaml does not, billing.yaml does not
+        ex.run = MagicMock(
+            side_effect=[
+                Result(command="test", returncode=0, stdout="", stderr=""),  # config.yaml
+                Result(command="test", returncode=1, stdout="", stderr=""),  # auth.yaml
+                Result(command="test", returncode=1, stdout="", stderr=""),  # logging.yaml
+                Result(command="test", returncode=1, stdout="", stderr=""),  # billing.yaml
+            ]
+        )
+
+        cfg = Config(config_dir=Path("/etc/onetimesecret"))
+        result = cfg.get_existing_config_files(executor=ex)
+
+        assert len(result) == 1
+        assert result[0] == Path("/etc/onetimesecret/config.yaml")
+        assert ex.run.call_count == 4
+
+
 class TestConfigRegistry:
     """Test Config.registry field from OTS_REGISTRY env var."""
 
@@ -365,6 +432,90 @@ class TestConfigRegistryAuthFile:
         if sys.platform == "darwin":
             expected = Path.home() / ".config" / "containers" / "auth.json"
             assert cfg.registry_auth_file == expected
+
+
+class TestGetRegistryAuthFile:
+    """Test Config.get_registry_auth_file(executor) method."""
+
+    def test_none_executor_delegates_to_property(self, monkeypatch):
+        """get_registry_auth_file(None) should return same as registry_auth_file property."""
+        monkeypatch.delenv("REGISTRY_AUTH_FILE", raising=False)
+        from ots_containers.config import Config
+
+        cfg = Config()
+        assert cfg.get_registry_auth_file(None) == cfg.registry_auth_file
+
+    def test_local_executor_delegates_to_property(self, monkeypatch):
+        """get_registry_auth_file(LocalExecutor()) should return same as registry_auth_file."""
+        monkeypatch.delenv("REGISTRY_AUTH_FILE", raising=False)
+        from ots_shared.ssh import LocalExecutor
+
+        from ots_containers.config import Config
+
+        cfg = Config()
+        ex = LocalExecutor()
+        assert cfg.get_registry_auth_file(ex) == cfg.registry_auth_file
+
+    def test_remote_executor_with_override_returns_override(self):
+        """get_registry_auth_file with _registry_auth_file override should return it."""
+        from ots_containers.config import Config
+
+        override = Path("/custom/auth.json")
+        mock_executor = MagicMock()
+        cfg = Config(_registry_auth_file=override)
+        assert cfg.get_registry_auth_file(mock_executor) == override
+
+    def test_remote_executor_with_env_var(self, monkeypatch):
+        """get_registry_auth_file should use REGISTRY_AUTH_FILE env var for remote."""
+        monkeypatch.setenv("REGISTRY_AUTH_FILE", "/env/auth.json")
+        from ots_containers.config import Config
+
+        mock_executor = MagicMock()
+        cfg = Config()
+        assert cfg.get_registry_auth_file(mock_executor) == Path("/env/auth.json")
+
+    def test_remote_executor_probes_remote_paths(self, monkeypatch):
+        """get_registry_auth_file should probe remote filesystem for known paths."""
+        monkeypatch.delenv("REGISTRY_AUTH_FILE", raising=False)
+        from ots_shared.ssh.executor import Result
+
+        from ots_containers.config import Config
+
+        mock_executor = MagicMock()
+        # First candidate (/run/containers/0/auth.json) exists
+        mock_executor.run.return_value = Result(command="test", returncode=0, stdout="", stderr="")
+        cfg = Config()
+        result = cfg.get_registry_auth_file(mock_executor)
+        assert result == Path("/run/containers/0/auth.json")
+
+    def test_remote_executor_falls_through_to_etc_path(self, monkeypatch):
+        """When first candidate doesn't exist, should try /etc/containers/auth.json."""
+        monkeypatch.delenv("REGISTRY_AUTH_FILE", raising=False)
+        from ots_shared.ssh.executor import Result
+
+        from ots_containers.config import Config
+
+        mock_executor = MagicMock()
+        mock_executor.run.side_effect = [
+            Result(command="test", returncode=1, stdout="", stderr=""),  # /run/... not found
+            Result(command="test", returncode=0, stdout="", stderr=""),  # /etc/... found
+        ]
+        cfg = Config()
+        result = cfg.get_registry_auth_file(mock_executor)
+        assert result == Path("/etc/containers/auth.json")
+
+    def test_remote_executor_defaults_when_no_paths_exist(self, monkeypatch):
+        """When no remote paths exist, should default to /etc/containers/auth.json."""
+        monkeypatch.delenv("REGISTRY_AUTH_FILE", raising=False)
+        from ots_shared.ssh.executor import Result
+
+        from ots_containers.config import Config
+
+        mock_executor = MagicMock()
+        mock_executor.run.return_value = Result(command="test", returncode=1, stdout="", stderr="")
+        cfg = Config()
+        result = cfg.get_registry_auth_file(mock_executor)
+        assert result == Path("/etc/containers/auth.json")
 
 
 class TestConfigPrivateImage:
@@ -623,6 +774,80 @@ class TestConfigResourceLimits:
 
         cfg = Config(cpu_quota="90%")
         assert cfg.cpu_quota == "90%"
+
+
+class TestSystemDbPath:
+    """Test Config.system_db_path property."""
+
+    def test_system_db_path_is_var_dir_plus_filename(self):
+        """system_db_path should always be var_dir / deployments.db."""
+        from ots_containers.config import Config
+
+        cfg = Config(var_dir=Path("/var/lib/onetimesecret"))
+        assert cfg.system_db_path == Path("/var/lib/onetimesecret/deployments.db")
+
+    def test_system_db_path_with_custom_var_dir(self, tmp_path):
+        """system_db_path should use the configured var_dir."""
+        from ots_containers.config import Config
+
+        cfg = Config(var_dir=tmp_path)
+        assert cfg.system_db_path == tmp_path / "deployments.db"
+
+
+class TestGetDbPath:
+    """Test Config.get_db_path(executor) method."""
+
+    def test_get_db_path_none_falls_through_to_db_path(self, tmp_path):
+        """get_db_path(None) should return the same as db_path property."""
+        from ots_containers.config import Config
+
+        cfg = Config(var_dir=tmp_path)
+        assert cfg.get_db_path(None) == cfg.db_path
+
+    def test_get_db_path_local_executor_falls_through_to_db_path(self, tmp_path):
+        """get_db_path(LocalExecutor()) should return the same as db_path."""
+        from ots_shared.ssh import LocalExecutor
+
+        from ots_containers.config import Config
+
+        cfg = Config(var_dir=tmp_path)
+        ex = LocalExecutor()
+        assert cfg.get_db_path(ex) == cfg.db_path
+
+    def test_get_db_path_remote_executor_returns_system_db_path(self, tmp_path):
+        """get_db_path with a non-local executor should return system_db_path."""
+        from ots_containers.config import Config
+
+        # Use a mock executor that is not a LocalExecutor
+        mock_executor = MagicMock()
+        cfg = Config(var_dir=tmp_path)
+        assert cfg.get_db_path(mock_executor) == cfg.system_db_path
+
+    def test_get_db_path_ssh_executor_returns_system_db_path(self, mocker):
+        """get_db_path(SSHExecutor) should return system_db_path."""
+        try:
+            import paramiko
+        except ImportError:
+            pytest.skip("paramiko not installed")
+
+        from ots_shared.ssh import SSHExecutor
+
+        from ots_containers.config import Config
+
+        mock_client = MagicMock(spec=paramiko.SSHClient)
+        ssh_ex = SSHExecutor(mock_client)
+        cfg = Config()
+        assert cfg.get_db_path(ssh_ex) == cfg.system_db_path
+
+    def test_get_db_path_system_vs_local_difference(self):
+        """system_db_path and db_path should differ when var_dir is not writable."""
+        from ots_containers.config import Config
+
+        cfg = Config(var_dir=Path("/nonexistent/path"))
+        # system_db_path always returns var_dir / deployments.db
+        assert cfg.system_db_path == Path("/nonexistent/path/deployments.db")
+        # db_path falls back to user space since /nonexistent/path is not writable
+        assert cfg.db_path != cfg.system_db_path
 
 
 class TestGetExecutorSSHErrors:

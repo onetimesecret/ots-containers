@@ -269,7 +269,7 @@ class TestDaemonReload:
         )
 
     def test_daemon_reload_raises_on_failure(self, mocker):
-        """Should propagate CalledProcessError on failure."""
+        """Should raise SystemctlError on failure."""
         from ots_containers import systemd
 
         mocker.patch(
@@ -277,7 +277,7 @@ class TestDaemonReload:
             return_value=subprocess.CompletedProcess([], 1, stdout="", stderr="fail"),
         )
 
-        with pytest.raises(subprocess.CalledProcessError):
+        with pytest.raises(SystemctlError):
             systemd.daemon_reload()
 
 
@@ -1193,7 +1193,7 @@ class TestQuadletWritePermissionError:
         cfg.cpu_quota = None
         cfg.valkey_service = None
         cfg.config_dir = tmp_path / "etc"
-        cfg.resolved_image_with_tag = "ghcr.io/test/image:v1.0.0"
+        cfg.resolved_image_with_tag.return_value = "ghcr.io/test/image:v1.0.0"
 
         # secrets section: use a real env file with no secrets → force bypasses check
         env_file = tmp_path / "onetimesecret"
@@ -1655,3 +1655,197 @@ class TestRequirePodmanRemote:
             systemd.require_podman()
 
         assert exc_info.value.code == 1
+
+
+class TestWaitForHealthyRemote:
+    """Test wait_for_healthy() with a remote executor."""
+
+    def test_wait_for_healthy_remote_returns_when_active(self, mocker):
+        """wait_for_healthy with remote executor should return when unit is active."""
+        from unittest.mock import MagicMock
+
+        from ots_containers import systemd
+
+        mock_ex = MagicMock()
+        mock_result = MagicMock()
+        mock_result.ok = True
+        mock_result.stdout = "active"
+        mock_ex.run.return_value = mock_result
+        mocker.patch("ots_containers.systemd._is_local", return_value=False)
+        mock_sleep = mocker.patch("time.sleep")
+
+        systemd.wait_for_healthy("onetime-web@7043", timeout=10, executor=mock_ex)
+
+        mock_sleep.assert_not_called()
+        mock_ex.run.assert_called_once_with(
+            ["systemctl", "is-active", "onetime-web@7043"],
+            timeout=10,
+        )
+
+    def test_wait_for_healthy_remote_polls_until_active(self, mocker):
+        """wait_for_healthy with remote executor should poll until unit becomes active."""
+        from unittest.mock import MagicMock
+
+        from ots_containers import systemd
+
+        mock_ex = MagicMock()
+        activating_result = MagicMock()
+        activating_result.ok = False
+        activating_result.stdout = "activating"
+        active_result = MagicMock()
+        active_result.ok = True
+        active_result.stdout = "active"
+        mock_ex.run.side_effect = [activating_result, active_result]
+        mocker.patch("ots_containers.systemd._is_local", return_value=False)
+        mock_sleep = mocker.patch("time.sleep")
+
+        systemd.wait_for_healthy("onetime-web@7043", timeout=30, executor=mock_ex)
+
+        assert mock_sleep.call_count == 1
+
+    def test_wait_for_healthy_remote_raises_timeout(self, mocker):
+        """wait_for_healthy with remote executor should raise on timeout."""
+        from unittest.mock import MagicMock
+
+        from ots_containers import systemd
+        from ots_containers.systemd import HealthCheckTimeoutError
+
+        mock_ex = MagicMock()
+        activating_result = MagicMock()
+        activating_result.ok = False
+        activating_result.stdout = "activating"
+        mock_ex.run.return_value = activating_result
+        mocker.patch("ots_containers.systemd._is_local", return_value=False)
+        mocker.patch("time.sleep")
+        mocker.patch("time.monotonic", side_effect=iter([0.0, 0.0, 5.0, 5.0, 11.0]))
+
+        with pytest.raises(HealthCheckTimeoutError) as exc_info:
+            systemd.wait_for_healthy("onetime-web@7043", timeout=10, executor=mock_ex)
+
+        assert exc_info.value.unit == "onetime-web@7043"
+        assert exc_info.value.last_state == "activating"
+
+    def test_wait_for_healthy_remote_skips_require_systemctl(self, mocker):
+        """wait_for_healthy with remote executor should NOT call require_systemctl."""
+        from unittest.mock import MagicMock
+
+        from ots_containers import systemd
+
+        mock_ex = MagicMock()
+        mock_result = MagicMock()
+        mock_result.ok = True
+        mock_result.stdout = "active"
+        mock_ex.run.return_value = mock_result
+        mocker.patch("ots_containers.systemd._is_local", return_value=False)
+        mock_require = mocker.patch("ots_containers.systemd.require_systemctl")
+
+        systemd.wait_for_healthy("onetime-web@7043", timeout=10, executor=mock_ex)
+
+        mock_require.assert_not_called()
+
+
+class TestWaitForHttpHealthyRemote:
+    """Test wait_for_http_healthy() with a remote executor (curl branch)."""
+
+    def test_returns_when_curl_succeeds(self, mocker):
+        """wait_for_http_healthy with remote executor should return when curl ok."""
+        from unittest.mock import MagicMock
+
+        from ots_containers import systemd
+
+        mock_ex = MagicMock()
+        mock_result = MagicMock()
+        mock_result.ok = True
+        mock_ex.run.return_value = mock_result
+        mocker.patch("ots_containers.systemd._is_local", return_value=False)
+        mock_sleep = mocker.patch("time.sleep")
+
+        systemd.wait_for_http_healthy(7043, timeout=10, executor=mock_ex)
+
+        mock_sleep.assert_not_called()
+        mock_ex.run.assert_called_once_with(
+            ["curl", "-sf", "http://localhost:7043/health"],
+            timeout=10,
+        )
+
+    def test_polls_until_curl_succeeds(self, mocker):
+        """wait_for_http_healthy remote should poll until curl succeeds."""
+        from unittest.mock import MagicMock
+
+        from ots_containers import systemd
+
+        mock_ex = MagicMock()
+        fail_result = MagicMock()
+        fail_result.ok = False
+        fail_result.returncode = 7
+        ok_result = MagicMock()
+        ok_result.ok = True
+        mock_ex.run.side_effect = [fail_result, ok_result]
+        mocker.patch("ots_containers.systemd._is_local", return_value=False)
+        mock_sleep = mocker.patch("time.sleep")
+
+        systemd.wait_for_http_healthy(7043, timeout=30, poll_interval=0.1, executor=mock_ex)
+
+        assert mock_sleep.call_count == 1
+
+    def test_raises_timeout_when_curl_never_succeeds(self, mocker):
+        """wait_for_http_healthy remote should raise timeout if curl always fails."""
+        from unittest.mock import MagicMock
+
+        from ots_containers import systemd
+        from ots_containers.systemd import HttpHealthCheckTimeoutError
+
+        mock_ex = MagicMock()
+        fail_result = MagicMock()
+        fail_result.ok = False
+        fail_result.returncode = 7
+        mock_ex.run.return_value = fail_result
+        mocker.patch("ots_containers.systemd._is_local", return_value=False)
+        mocker.patch("time.sleep")
+        mocker.patch("time.monotonic", side_effect=iter([0.0, 0.0, 5.0, 5.0, 11.0]))
+
+        with pytest.raises(HttpHealthCheckTimeoutError) as exc_info:
+            systemd.wait_for_http_healthy(7043, timeout=10, executor=mock_ex)
+
+        assert exc_info.value.port == 7043
+        assert exc_info.value.timeout == 10
+        assert "curl exit 7" in exc_info.value.last_error
+
+    def test_uses_curl_not_urllib_for_remote(self, mocker):
+        """wait_for_http_healthy remote should use curl, not urllib."""
+        from unittest.mock import MagicMock
+
+        from ots_containers import systemd
+
+        mock_ex = MagicMock()
+        mock_result = MagicMock()
+        mock_result.ok = True
+        mock_ex.run.return_value = mock_result
+        mocker.patch("ots_containers.systemd._is_local", return_value=False)
+        mock_urlopen = mocker.patch("urllib.request.urlopen")
+
+        systemd.wait_for_http_healthy(7043, timeout=10, executor=mock_ex)
+
+        # urllib should NOT have been called (remote uses curl)
+        mock_urlopen.assert_not_called()
+        # curl should have been called via executor
+        mock_ex.run.assert_called_once()
+        call_args = mock_ex.run.call_args[0][0]
+        assert call_args[0] == "curl"
+
+    def test_correct_curl_url_includes_port(self, mocker):
+        """wait_for_http_healthy remote should use the correct port in curl URL."""
+        from unittest.mock import MagicMock
+
+        from ots_containers import systemd
+
+        mock_ex = MagicMock()
+        mock_result = MagicMock()
+        mock_result.ok = True
+        mock_ex.run.return_value = mock_result
+        mocker.patch("ots_containers.systemd._is_local", return_value=False)
+
+        systemd.wait_for_http_healthy(8080, timeout=10, executor=mock_ex)
+
+        call_args = mock_ex.run.call_args[0][0]
+        assert "http://localhost:8080/health" in call_args

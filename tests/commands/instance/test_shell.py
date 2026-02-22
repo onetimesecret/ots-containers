@@ -19,7 +19,9 @@ def _setup_shell_mocks(mocker, tmp_path, **config_overrides):
     mock_config.tag = config_overrides.get("tag", "current")
     mock_config.config_dir = tmp_path / "etc"
     mock_config.config_dir.mkdir(exist_ok=True)
-    mock_config.existing_config_files = config_overrides.get("existing_config_files", [])
+    mock_config.get_existing_config_files.return_value = config_overrides.get(
+        "existing_config_files", []
+    )
 
     if "image" in config_overrides:
         mock_config.image = config_overrides["image"]
@@ -39,6 +41,14 @@ def _setup_shell_mocks(mocker, tmp_path, **config_overrides):
     mock_executor = mocker.MagicMock()
     mock_executor.run_interactive.return_value = 0
     mock_executor.run_stream.return_value = 0
+
+    # Mock executor.run() for "test -f" file existence checks:
+    # return ok=True if the env_file was provided (exists), False otherwise
+    env_exists = env_file.exists()
+    mock_run_result = mocker.MagicMock()
+    mock_run_result.ok = env_exists
+    mock_executor.run.return_value = mock_run_result
+
     mock_config.get_executor.return_value = mock_executor
 
     return mock_config, mock_executor

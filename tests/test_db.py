@@ -1261,3 +1261,398 @@ class TestGetPreviousTagsRemote:
         tag_values = [t[1] for t in tags]
         assert "v1" in tag_values
         assert "v2" in tag_values
+
+
+class TestRecordDeploymentRemote:
+    """Test db.record_deployment() with a remote executor."""
+
+    def test_record_deployment_remote_uses_remote_execute(self, mocker, tmp_path):
+        """record_deployment() with remote executor should call _remote_execute."""
+        mock_ex = _make_ssh_executor(mocker)
+        db_path = tmp_path / "test.db"
+
+        mock_ex.run.return_value = _make_remote_result()
+
+        result = db.record_deployment(
+            db_path, "img", "v1.0.0", "deploy", port=7043, executor=mock_ex
+        )
+
+        # Remote record_deployment returns 0 (no lastrowid from CLI)
+        assert result == 0
+        # Verify sqlite3 was called (INSERT)
+        mock_ex.run.assert_called_once()
+        call_args = mock_ex.run.call_args[0][0]
+        assert "sqlite3" in call_args
+        assert "INSERT" in call_args[-1]
+
+    def test_record_deployment_remote_includes_all_fields(self, mocker, tmp_path):
+        """record_deployment() remote should pass all fields in the SQL."""
+        mock_ex = _make_ssh_executor(mocker)
+        db_path = tmp_path / "test.db"
+
+        mock_ex.run.return_value = _make_remote_result()
+
+        db.record_deployment(
+            db_path,
+            "ghcr.io/org/app",
+            "v2.0.0",
+            "redeploy",
+            port=8080,
+            success=False,
+            notes="test note",
+            executor=mock_ex,
+        )
+
+        call_args = mock_ex.run.call_args[0][0]
+        sql = call_args[-1]
+        assert "ghcr.io/org/app" in sql
+        assert "v2.0.0" in sql
+        assert "redeploy" in sql
+        assert "8080" in sql
+        assert "test note" in sql
+
+    def test_record_deployment_local_still_works(self, tmp_path):
+        """record_deployment() without executor should still work locally."""
+        db_path = tmp_path / "test.db"
+
+        deploy_id = db.record_deployment(db_path, "img", "v1", "deploy")
+
+        assert deploy_id == 1
+        deployments = db.get_deployments(db_path)
+        assert len(deployments) == 1
+
+
+class TestGetDeploymentsRemote:
+    """Test db.get_deployments() with a remote executor."""
+
+    def test_get_deployments_remote_queries_via_executor(self, mocker, tmp_path):
+        """get_deployments() with remote executor should use _remote_query."""
+        mock_ex = _make_ssh_executor(mocker)
+        db_path = tmp_path / "test.db"
+
+        mock_ex.run.return_value = _make_remote_result(
+            stdout=json.dumps(
+                [
+                    {
+                        "id": 1,
+                        "timestamp": "2026-01-01 12:00:00",
+                        "port": 7043,
+                        "image": "img",
+                        "tag": "v1",
+                        "action": "deploy",
+                        "success": 1,
+                        "notes": None,
+                    },
+                ]
+            )
+        )
+
+        deployments = db.get_deployments(db_path, executor=mock_ex)
+
+        assert len(deployments) == 1
+        assert deployments[0].image == "img"
+        assert deployments[0].tag == "v1"
+        assert deployments[0].port == 7043
+        assert deployments[0].action == "deploy"
+        # Verify sqlite3 -json was used
+        call_args = mock_ex.run.call_args[0][0]
+        assert "sqlite3" in call_args
+        assert "-json" in call_args
+
+    def test_get_deployments_remote_empty_result(self, mocker, tmp_path):
+        """get_deployments() with remote executor returns empty list when no rows."""
+        mock_ex = _make_ssh_executor(mocker)
+        db_path = tmp_path / "test.db"
+
+        mock_ex.run.return_value = _make_remote_result(stdout="")
+
+        deployments = db.get_deployments(db_path, executor=mock_ex)
+
+        assert deployments == []
+
+    def test_get_deployments_remote_respects_limit(self, mocker, tmp_path):
+        """get_deployments() with remote executor should pass limit in SQL."""
+        mock_ex = _make_ssh_executor(mocker)
+        db_path = tmp_path / "test.db"
+
+        mock_ex.run.return_value = _make_remote_result(stdout="[]")
+
+        db.get_deployments(db_path, limit=5, executor=mock_ex)
+
+        call_args = mock_ex.run.call_args[0][0]
+        sql = call_args[-1]
+        assert "LIMIT 5" in sql
+
+    def test_get_deployments_remote_filters_by_port(self, mocker, tmp_path):
+        """get_deployments() with remote executor should filter by port in SQL."""
+        mock_ex = _make_ssh_executor(mocker)
+        db_path = tmp_path / "test.db"
+
+        mock_ex.run.return_value = _make_remote_result(stdout="[]")
+
+        db.get_deployments(db_path, port=7043, executor=mock_ex)
+
+        call_args = mock_ex.run.call_args[0][0]
+        sql = call_args[-1]
+        assert "port = 7043" in sql
+
+
+class TestSetAliasRemote:
+    """Test db.set_alias() with a remote executor."""
+
+    def test_set_alias_remote_uses_remote_execute(self, mocker, tmp_path):
+        """set_alias() with remote executor should call _remote_execute."""
+        mock_ex = _make_ssh_executor(mocker)
+        db_path = tmp_path / "test.db"
+
+        mock_ex.run.return_value = _make_remote_result()
+
+        db.set_alias(db_path, "CURRENT", "img", "v1.0.0", executor=mock_ex)
+
+        mock_ex.run.assert_called_once()
+        call_args = mock_ex.run.call_args[0][0]
+        assert "sqlite3" in call_args
+        sql = call_args[-1]
+        assert "INSERT" in sql
+        assert "CURRENT" in sql
+
+    def test_set_alias_remote_normalizes_to_uppercase(self, mocker, tmp_path):
+        """set_alias() with remote executor should uppercase the alias."""
+        mock_ex = _make_ssh_executor(mocker)
+        db_path = tmp_path / "test.db"
+
+        mock_ex.run.return_value = _make_remote_result()
+
+        db.set_alias(db_path, "current", "img", "v1", executor=mock_ex)
+
+        call_args = mock_ex.run.call_args[0][0]
+        sql = call_args[-1]
+        assert "'CURRENT'" in sql
+
+
+class TestGetAliasRemote:
+    """Test db.get_alias() with a remote executor."""
+
+    def test_get_alias_remote_returns_alias(self, mocker, tmp_path):
+        """get_alias() with remote executor should return an ImageAlias."""
+        mock_ex = _make_ssh_executor(mocker)
+        db_path = tmp_path / "test.db"
+
+        mock_ex.run.return_value = _make_remote_result(
+            stdout=json.dumps(
+                [
+                    {
+                        "alias": "CURRENT",
+                        "image": "img",
+                        "tag": "v2.0.0",
+                        "set_at": "2026-01-15 10:00:00",
+                    }
+                ]
+            )
+        )
+
+        alias = db.get_alias(db_path, "CURRENT", executor=mock_ex)
+
+        assert alias is not None
+        assert isinstance(alias, db.ImageAlias)
+        assert alias.alias == "CURRENT"
+        assert alias.image == "img"
+        assert alias.tag == "v2.0.0"
+
+    def test_get_alias_remote_returns_none_when_not_found(self, mocker, tmp_path):
+        """get_alias() with remote executor returns None when alias not set."""
+        mock_ex = _make_ssh_executor(mocker)
+        db_path = tmp_path / "test.db"
+
+        mock_ex.run.return_value = _make_remote_result(stdout="")
+
+        alias = db.get_alias(db_path, "NONEXISTENT", executor=mock_ex)
+
+        assert alias is None
+
+
+class TestGetAllAliasesRemote:
+    """Test db.get_all_aliases() with a remote executor."""
+
+    def test_get_all_aliases_remote_returns_list(self, mocker, tmp_path):
+        """get_all_aliases() with remote executor should return a list of ImageAlias."""
+        mock_ex = _make_ssh_executor(mocker)
+        db_path = tmp_path / "test.db"
+
+        mock_ex.run.return_value = _make_remote_result(
+            stdout=json.dumps(
+                [
+                    {"alias": "CURRENT", "image": "img", "tag": "v2", "set_at": "2026-01-15"},
+                    {"alias": "ROLLBACK", "image": "img", "tag": "v1", "set_at": "2026-01-14"},
+                ]
+            )
+        )
+
+        aliases = db.get_all_aliases(db_path, executor=mock_ex)
+
+        assert len(aliases) == 2
+        assert all(isinstance(a, db.ImageAlias) for a in aliases)
+
+    def test_get_all_aliases_remote_empty(self, mocker, tmp_path):
+        """get_all_aliases() with remote executor returns empty list when no aliases."""
+        mock_ex = _make_ssh_executor(mocker)
+        db_path = tmp_path / "test.db"
+
+        mock_ex.run.return_value = _make_remote_result(stdout="")
+
+        aliases = db.get_all_aliases(db_path, executor=mock_ex)
+
+        assert aliases == []
+
+
+class TestSetCurrentRemote:
+    """Test db.set_current() with a remote executor."""
+
+    def test_set_current_remote_first_time(self, mocker, tmp_path):
+        """set_current() with remote executor should set CURRENT on first call."""
+        mock_ex = _make_ssh_executor(mocker)
+        db_path = tmp_path / "test.db"
+
+        # First call: get_current_image -> get_alias -> _remote_query returns empty
+        # Then: set_alias -> _remote_execute, record_deployment -> _remote_execute
+        call_count = {"n": 0}
+
+        def mock_run(cmd, **kwargs):
+            call_count["n"] += 1
+            if "-json" in cmd:
+                # get_alias queries return empty (no previous CURRENT)
+                return _make_remote_result(stdout="")
+            # Write operations succeed
+            return _make_remote_result()
+
+        mock_ex.run.side_effect = mock_run
+
+        previous = db.set_current(db_path, "img", "v1.0.0", executor=mock_ex)
+
+        assert previous is None
+        # Should have made multiple calls: get_alias + set_alias + record_deployment
+        assert mock_ex.run.call_count >= 2
+
+    def test_set_current_remote_moves_previous_to_rollback(self, mocker, tmp_path):
+        """set_current() with remote executor should move previous CURRENT to ROLLBACK."""
+        mock_ex = _make_ssh_executor(mocker)
+        db_path = tmp_path / "test.db"
+
+        call_count = {"n": 0}
+
+        def mock_run(cmd, **kwargs):
+            call_count["n"] += 1
+            if "-json" in cmd:
+                # get_alias returns existing CURRENT
+                return _make_remote_result(
+                    stdout=json.dumps(
+                        [
+                            {
+                                "alias": "CURRENT",
+                                "image": "img",
+                                "tag": "v1.0.0",
+                                "set_at": "2026-01-01",
+                            }
+                        ]
+                    )
+                )
+            return _make_remote_result()
+
+        mock_ex.run.side_effect = mock_run
+
+        previous = db.set_current(db_path, "img", "v2.0.0", executor=mock_ex)
+
+        assert previous == "v1.0.0"
+
+
+class TestGetCurrentImageRemote:
+    """Test db.get_current_image() with a remote executor."""
+
+    def test_get_current_image_remote_returns_tuple(self, mocker, tmp_path):
+        """get_current_image() with remote executor should return (image, tag)."""
+        mock_ex = _make_ssh_executor(mocker)
+        db_path = tmp_path / "test.db"
+
+        mock_ex.run.return_value = _make_remote_result(
+            stdout=json.dumps(
+                [
+                    {
+                        "alias": "CURRENT",
+                        "image": "ghcr.io/org/app",
+                        "tag": "v3.0.0",
+                        "set_at": "2026-01-20",
+                    }
+                ]
+            )
+        )
+
+        result = db.get_current_image(db_path, executor=mock_ex)
+
+        assert result == ("ghcr.io/org/app", "v3.0.0")
+
+    def test_get_current_image_remote_returns_none_when_not_set(self, mocker, tmp_path):
+        """get_current_image() with remote executor returns None when CURRENT not set."""
+        mock_ex = _make_ssh_executor(mocker)
+        db_path = tmp_path / "test.db"
+
+        mock_ex.run.return_value = _make_remote_result(stdout="")
+
+        result = db.get_current_image(db_path, executor=mock_ex)
+
+        assert result is None
+
+
+class TestGetRollbackImageRemote:
+    """Test db.get_rollback_image() with a remote executor."""
+
+    def test_get_rollback_image_remote_returns_tuple(self, mocker, tmp_path):
+        """get_rollback_image() with remote executor should return (image, tag)."""
+        mock_ex = _make_ssh_executor(mocker)
+        db_path = tmp_path / "test.db"
+
+        mock_ex.run.return_value = _make_remote_result(
+            stdout=json.dumps(
+                [
+                    {
+                        "alias": "ROLLBACK",
+                        "image": "ghcr.io/org/app",
+                        "tag": "v2.0.0",
+                        "set_at": "2026-01-19",
+                    }
+                ]
+            )
+        )
+
+        result = db.get_rollback_image(db_path, executor=mock_ex)
+
+        assert result == ("ghcr.io/org/app", "v2.0.0")
+
+    def test_get_rollback_image_remote_returns_none_when_not_set(self, mocker, tmp_path):
+        """get_rollback_image() with remote executor returns None when ROLLBACK not set."""
+        mock_ex = _make_ssh_executor(mocker)
+        db_path = tmp_path / "test.db"
+
+        mock_ex.run.return_value = _make_remote_result(stdout="")
+
+        result = db.get_rollback_image(db_path, executor=mock_ex)
+
+        assert result is None
+
+
+class TestInitDbRemote:
+    """Test db.init_db() with a remote executor."""
+
+    def test_init_db_remote_sends_schema(self, mocker, tmp_path):
+        """init_db() with remote executor should send full SCHEMA via sqlite3."""
+        mock_ex = _make_ssh_executor(mocker)
+        db_path = tmp_path / "test.db"
+
+        mock_ex.run.return_value = _make_remote_result()
+
+        db.init_db(db_path, executor=mock_ex)
+
+        mock_ex.run.assert_called_once()
+        call_args = mock_ex.run.call_args[0][0]
+        assert "sqlite3" in call_args
+        # Should contain the schema SQL
+        assert "CREATE TABLE" in call_args[-1]

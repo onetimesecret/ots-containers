@@ -173,13 +173,23 @@ class TestPsCommand:
     """Test the ps command."""
 
     def test_ps_calls_podman_ps(self, mocker):
-        """ps command should invoke podman.ps with onetime filter."""
+        """ps command should invoke Podman(executor=ex).ps with onetime filter."""
+        from unittest.mock import MagicMock
+
         from ots_containers.cli import ps
 
-        mock_ps = mocker.patch("ots_containers.cli.podman.ps")
+        mocker.patch("ots_containers.config.Config.__init__", return_value=None)
+        mocker.patch("ots_containers.config.Config.get_executor", return_value=MagicMock())
+
+        mock_podman_cls = mocker.patch("ots_containers.podman.Podman")
+        mock_p = MagicMock()
+        mock_podman_cls.return_value = mock_p
+
         ps()
-        mock_ps.assert_called_once()
-        call_kwargs = mock_ps.call_args
+
+        mock_podman_cls.assert_called_once()
+        mock_p.ps.assert_called_once()
+        call_kwargs = mock_p.ps.call_args
         assert "onetime" in str(call_kwargs)
 
     def test_ps_help(self, capsys):
@@ -260,6 +270,8 @@ class TestDoctorCommand:
         cfg_mock = mocker.MagicMock()
         cfg_mock.config_dir = tmp_path / "onetimesecret"
         cfg_mock.config_dir.mkdir()
+        cfg_mock.config_yaml = cfg_mock.config_dir / "config.yaml"
+        cfg_mock.config_yaml.touch()
         cfg_mock.var_dir = tmp_path / "var"
         cfg_mock.var_dir.mkdir()
         cfg_mock.web_template_path = tmp_path / "onetime-web@.container"

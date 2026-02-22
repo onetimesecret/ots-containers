@@ -1347,7 +1347,7 @@ class TestWriteTemplateRemote:
         mock_reload = mocker.patch("ots_containers.quadlet.systemd.daemon_reload")
 
         cfg = MagicMock()
-        cfg.resolved_image_with_tag = "ghcr.io/ots:latest"
+        cfg.resolved_image_with_tag.return_value = "ghcr.io/ots:latest"
         cfg.config_dir = "/etc/onetimesecret"
         cfg.memory_max = None
         cfg.cpu_quota = None
@@ -1409,25 +1409,22 @@ class TestGetSecretsSectionRemote:
 class TestGetConfigVolumesSectionRemote:
     """Test get_config_volumes_section() with remote executor."""
 
-    def test_checks_config_files_via_executor(self, mocker):
+    def test_delegates_to_config_get_existing_config_files(self, mocker):
         from pathlib import Path
 
         from ots_containers.quadlet import get_config_volumes_section
 
         mock_ex = _make_ssh_executor(mocker)
-        # config.yaml exists, auth.yaml does not, others don't
-        mock_ex.run.side_effect = [
-            _make_remote_result(returncode=0),  # config.yaml
-            _make_remote_result(returncode=1),  # auth.yaml
-            _make_remote_result(returncode=1),  # logging.yaml
-            _make_remote_result(returncode=1),  # billing.yaml
-        ]
 
         cfg = MagicMock()
         cfg.config_dir = Path("/etc/onetimesecret")
+        # Simulate only config.yaml existing on remote host
+        cfg.get_existing_config_files.return_value = [
+            Path("/etc/onetimesecret/config.yaml"),
+        ]
 
         result = get_config_volumes_section(cfg, executor=mock_ex)
 
         assert "Volume=/etc/onetimesecret/config.yaml:/app/etc/config.yaml:ro" in result
         assert "auth.yaml" not in result
-        assert mock_ex.run.call_count == 4
+        cfg.get_existing_config_files.assert_called_once_with(executor=mock_ex)
