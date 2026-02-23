@@ -291,43 +291,26 @@ def run(
             help="Image tag to run (default: from TAG env or 'current' alias)",
         ),
     ] = None,
-    remote: Annotated[
-        bool,
-        cyclopts.Parameter(
-            name=["--remote", "-r"],
-            help="Pull from registry instead of using local image",
-        ),
-    ] = False,
 ):
     """Run a container directly with podman (no systemd).
 
-    By default uses local images (from 'ots image build').
     If .env exists in current directory, it will be used.
-    Use --remote to pull from registry instead.
     Use --production to include system env file, secrets, and volumes.
 
     Examples:
-        ots instance run -p 7143 --tag plop-2   # local build (default)
+        ots instance run -p 7143 --tag plop-2   # specific tag
         ots instance run -p 7143 -d             # detached
-        ots instance run -p 7143 --remote --tag v0.19.0  # from registry
         ots instance run -p 7143 --production   # full production config
     """
     cfg = Config()
     ex = cfg.get_executor(host=context.host_var.get(None))
 
-    # Resolve image/tag
-    # Default: local images (from 'ots image build')
-    # --remote: pull from registry (ghcr.io or OTS_REGISTRY)
-    if remote:
-        if tag:
-            image = cfg.image
-            resolved_tag = tag
-        else:
-            image, resolved_tag = cfg.resolve_image_tag(executor=ex)
+    # Resolve image/tag from config (IMAGE/TAG env vars or database aliases)
+    if tag:
+        image = cfg.image
+        resolved_tag = tag
     else:
-        # Local is the default
-        image = "onetimesecret"  # localhost/onetimesecret
-        resolved_tag = tag or cfg.tag
+        image, resolved_tag = cfg.resolve_image_tag(executor=ex)
     full_image = f"{image}:{resolved_tag}"
 
     # Container name
@@ -1676,13 +1659,6 @@ def shell(
             help="Image tag to use (default: from TAG env or 'current' alias)",
         ),
     ] = None,
-    remote: Annotated[
-        bool,
-        cyclopts.Parameter(
-            name=["--remote", "-r"],
-            help="Pull from registry instead of using local image",
-        ),
-    ] = False,
 ):
     """Run ephemeral shell for migrations and maintenance.
 
@@ -1713,17 +1689,12 @@ def shell(
 
     ex = _get_executor(cfg.get_executor(host=context.host_var.get(None)))
 
-    # Resolve image/tag (same pattern as run command)
-    if remote:
-        if tag:
-            image = cfg.image
-            resolved_tag = tag
-        else:
-            image, resolved_tag = cfg.resolve_image_tag(executor=ex)
+    # Resolve image/tag from config (IMAGE/TAG env vars or database aliases)
+    if tag:
+        image = cfg.image
+        resolved_tag = tag
     else:
-        # Local is the default
-        image = "onetimesecret"  # localhost/onetimesecret
-        resolved_tag = tag or cfg.tag
+        image, resolved_tag = cfg.resolve_image_tag(executor=ex)
     full_image = f"{image}:{resolved_tag}"
 
     # Build podman run command
@@ -1830,13 +1801,6 @@ def config_transform(
             help="Image tag to use (default: from TAG env or 'current' alias)",
         ),
     ] = None,
-    remote: Annotated[
-        bool,
-        cyclopts.Parameter(
-            name=["--remote", "-r"],
-            help="Pull from registry instead of using local image",
-        ),
-    ] = False,
 ):
     """Transform config files with backup/apply workflow.
 
@@ -1888,16 +1852,12 @@ def config_transform(
     elif not config_path.exists():
         raise SystemExit(f"Config file not found: {config_path}")
 
-    # Resolve image/tag (same pattern as shell command)
-    if remote:
-        if tag:
-            image = cfg.image
-            resolved_tag = tag
-        else:
-            image, resolved_tag = cfg.resolve_image_tag(executor=ex)
+    # Resolve image/tag from config (IMAGE/TAG env vars or database aliases)
+    if tag:
+        image = cfg.image
+        resolved_tag = tag
     else:
-        image = "onetimesecret"
-        resolved_tag = tag or cfg.tag
+        image, resolved_tag = cfg.resolve_image_tag(executor=ex)
     full_image = f"{image}:{resolved_tag}"
 
     # Create temporary volume with timestamp
