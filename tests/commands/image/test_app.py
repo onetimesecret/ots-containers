@@ -841,6 +841,159 @@ class TestRollbackPodmanTag:
         assert "To apply: ots instance redeploy" not in captured.out
 
 
+class TestPullPositionalReference:
+    """Test that pull accepts a full image reference as positional arg.
+
+    The reference is parsed into image and tag components. Named flags
+    (--image, --tag) take precedence over the parsed reference.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _clear_env(self, monkeypatch):
+        monkeypatch.delenv("IMAGE", raising=False)
+        monkeypatch.delenv("TAG", raising=False)
+
+    def _mock_externals(self, mocker, tmp_path):
+        mock_run = mocker.patch(
+            "ots_containers.podman.subprocess.run",
+            return_value=mocker.MagicMock(stdout="", returncode=0),
+        )
+        mocker.patch("ots_containers.commands.image.app.db.record_deployment")
+        mocker.patch("ots_containers.commands.image.app.db.set_current")
+        mocker.patch(
+            "ots_containers.commands.image.app.db.get_current_image",
+            return_value=None,
+        )
+        mocker.patch(
+            "ots_containers.config.Config.db_path",
+            new_callable=mocker.PropertyMock,
+            return_value=tmp_path / "deployments.db",
+        )
+        return mock_run
+
+    def test_pull_full_reference(self, mocker, tmp_path):
+        """Full reference like registry.io/org/image:tag should work."""
+        from ots_containers.commands.image.app import pull
+
+        mock_run = self._mock_externals(mocker, tmp_path)
+
+        pull(reference="registry.example.com/org/image:v1.0")
+
+        cmd = mock_run.call_args[0][0]
+        full_ref = " ".join(cmd)
+        assert "registry.example.com/org/image:v1.0" in full_ref
+
+    def test_pull_reference_without_tag_falls_back_to_tag_flag(self, mocker, tmp_path):
+        """Reference without colon should use --tag for the tag portion."""
+        from ots_containers.commands.image.app import pull
+
+        mock_run = self._mock_externals(mocker, tmp_path)
+
+        pull(reference="registry.example.com/org/image", tag="v2.0")
+
+        cmd = mock_run.call_args[0][0]
+        full_ref = " ".join(cmd)
+        assert "registry.example.com/org/image:v2.0" in full_ref
+
+    def test_pull_reference_without_tag_falls_back_to_env(self, mocker, monkeypatch, tmp_path):
+        """Reference without tag and no --tag flag falls back to TAG env var."""
+        from ots_containers.commands.image.app import pull
+
+        monkeypatch.setenv("TAG", "env-tag")
+        mock_run = self._mock_externals(mocker, tmp_path)
+
+        pull(reference="registry.example.com/org/image")
+
+        cmd = mock_run.call_args[0][0]
+        full_ref = " ".join(cmd)
+        assert "registry.example.com/org/image:env-tag" in full_ref
+
+    def test_pull_tag_flag_overrides_reference_tag(self, mocker, tmp_path):
+        """--tag flag should override the tag parsed from the reference."""
+        from ots_containers.commands.image.app import pull
+
+        mock_run = self._mock_externals(mocker, tmp_path)
+
+        pull(reference="registry.example.com/org/image:ref-tag", tag="override-tag")
+
+        cmd = mock_run.call_args[0][0]
+        full_ref = " ".join(cmd)
+        assert "registry.example.com/org/image:override-tag" in full_ref
+        assert "ref-tag" not in full_ref
+
+    def test_pull_image_flag_overrides_reference_image(self, mocker, tmp_path):
+        """--image flag should override the image parsed from the reference."""
+        from ots_containers.commands.image.app import pull
+
+        mock_run = self._mock_externals(mocker, tmp_path)
+
+        pull(reference="registry.example.com/org/image:v1.0", image="other.io/myapp")
+
+        cmd = mock_run.call_args[0][0]
+        full_ref = " ".join(cmd)
+        assert "other.io/myapp:v1.0" in full_ref
+        assert "registry.example.com" not in full_ref
+
+    def test_pull_both_flags_override_reference(self, mocker, tmp_path):
+        """Both --image and --tag flags should fully override the reference."""
+        from ots_containers.commands.image.app import pull
+
+        mock_run = self._mock_externals(mocker, tmp_path)
+
+        pull(
+            reference="registry.example.com/org/image:ref-tag",
+            image="override.io/app",
+            tag="override-tag",
+        )
+
+        cmd = mock_run.call_args[0][0]
+        full_ref = " ".join(cmd)
+        assert "override.io/app:override-tag" in full_ref
+
+    def test_pull_reference_with_current_flag(self, mocker, tmp_path, capsys):
+        """Full reference with --current should set the alias."""
+        from ots_containers.commands.image.app import pull
+
+        mock_run = self._mock_externals(mocker, tmp_path)
+        mock_set_current = mocker.patch(
+            "ots_containers.commands.image.app.db.set_current",
+            return_value=None,
+        )
+
+        pull(reference="registry.example.com/org/image:v1.0", set_as_current=True)
+
+        # Should have called pull + tag :current
+        assert mock_run.call_count == 2
+        mock_set_current.assert_called_once()
+
+    def test_pull_no_reference_no_tag_exits(self, mocker, monkeypatch, tmp_path, capsys):
+        """No reference, no --tag, no TAG env var should exit with error."""
+        from ots_containers.commands.image.app import pull
+
+        monkeypatch.setenv("TAG", "")
+        self._mock_externals(mocker, tmp_path)
+
+        with pytest.raises(SystemExit) as exc_info:
+            pull()
+
+        assert exc_info.value.code == 1
+        captured = capsys.readouterr()
+        assert "--tag is required" in captured.out
+
+    def test_pull_reference_with_trailing_colon(self, mocker, monkeypatch, tmp_path):
+        """Reference ending with colon should treat it as image-only (no tag)."""
+        from ots_containers.commands.image.app import pull
+
+        monkeypatch.setenv("TAG", "fallback")
+        mock_run = self._mock_externals(mocker, tmp_path)
+
+        pull(reference="registry.example.com/org/image:")
+
+        cmd = mock_run.call_args[0][0]
+        full_ref = " ".join(cmd)
+        assert "registry.example.com/org/image:fallback" in full_ref
+
+
 class TestPullCurrentPodmanTag:
     """Test that pull --current tags the image in podman."""
 

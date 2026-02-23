@@ -14,7 +14,9 @@ Maintains CURRENT and ROLLBACK aliases in SQLite database for:
   - Full audit trail
 """
 
+import json
 import logging
+import os
 import subprocess
 from pathlib import Path
 from typing import Annotated
@@ -37,6 +39,12 @@ app = cyclopts.App(
 
 @app.command
 def pull(
+    reference: Annotated[
+        str | None,
+        cyclopts.Parameter(
+            help="Full image reference (e.g. registry.io/org/image:tag)",
+        ),
+    ] = None,
     tag: Annotated[
         str | None,
         cyclopts.Parameter(
@@ -77,6 +85,8 @@ def pull(
     """Pull a container image from registry.
 
     Examples:
+        ots image pull registry.io/org/image:tag
+        ots image pull registry.io/org/image:tag --current
         ots image pull --tag v0.23.0
         ots image pull --tag latest --current
         TAG=dev ots image pull                  # Use TAG env var
@@ -88,9 +98,18 @@ def pull(
     ex = cfg.get_executor(host=context.host_var.get(None))
     p = Podman(executor=ex)
 
-    # Resolve image and tag from env vars if not provided
-    resolved_image = image or cfg.image
-    resolved_tag = tag or cfg.tag
+    # Parse positional reference into image/tag components
+    ref_image = None
+    ref_tag = None
+    if reference:
+        if ":" in reference and not reference.endswith(":"):
+            ref_image, ref_tag = reference.rsplit(":", 1)
+        else:
+            ref_image = reference.rstrip(":")
+
+    # Resolve image and tag: CLI flags > positional reference > env vars
+    resolved_image = image or ref_image or cfg.image
+    resolved_tag = tag or ref_tag or cfg.tag
     if not resolved_tag:
         print("Error: --tag is required (or set TAG env var)")
         raise SystemExit(1)
@@ -295,9 +314,7 @@ def list_remote(
         ots image list-remote --registry ghcr.io/onetimesecret
         OTS_REGISTRY=registry.example.com ots image list-remote
     """
-    import json
     import shutil
-    import subprocess
 
     cfg = Config()
 
@@ -1052,8 +1069,6 @@ def _get_git_hash(project_dir: Path, required: bool = True) -> str | None:
 
 def _read_package_version(project_dir: Path) -> str:
     """Read version from package.json in project directory."""
-    import json
-
     package_json = project_dir / "package.json"
     if not package_json.exists():
         raise SystemExit(f"package.json not found in {project_dir}")
@@ -1105,6 +1120,74 @@ def _validate_project_dir(project_dir: Path, skip_dockerfile_check: bool = False
 
     if not (project_dir / "package.json").exists():
         raise SystemExit(f"No package.json found in {project_dir}")
+
+
+def _load_oci_build_config(project_dir: Path) -> dict | None:
+    """Load .oci-build.json from project dir, or None if absent."""
+    config_path = project_dir / ".oci-build.json"
+    if not config_path.exists():
+        return None
+    with config_path.open() as f:
+        return json.load(f)
+
+
+def _build_base(
+    p: Podman,
+    project_dir: Path,
+    base_config: dict,
+    platform: str,
+    quiet: bool,
+) -> str:
+    """Build shared base image. Returns local tag for build-context injection."""
+    local_tag = f"ots-base:{os.getpid()}"
+    p.buildx.build(
+        str(project_dir),
+        file=str(project_dir / base_config["dockerfile"]),
+        platform=platform,
+        tag=local_tag,
+        check=True,
+        capture_output=quiet,
+        text=True,
+    )
+    return local_tag
+
+
+def _build_variant(
+    p: Podman,
+    project_dir: Path,
+    variant: dict,
+    build_tag: str,
+    image_name: str,
+    platform: str,
+    build_args: list[str],
+    build_contexts: dict[str, str] | None,
+    quiet: bool,
+) -> str:
+    """Build one variant. Returns the local image tag."""
+    suffix = variant.get("suffix", "")
+    local_image = f"{image_name}{suffix}:{build_tag}"
+
+    build_kwargs: dict = {
+        "platform": platform,
+        "tag": local_image,
+        "build_arg": build_args,
+        "check": True,
+        "capture_output": quiet,
+        "text": True,
+    }
+    if variant.get("dockerfile"):
+        build_kwargs["file"] = str(project_dir / variant["dockerfile"])
+    if variant.get("target"):
+        build_kwargs["target"] = variant["target"]
+    if build_contexts:
+        # Podman wrapper expands list kwargs as repeated flags:
+        # build_context=["base=container-image://img"] → --build-context base=container-image://img
+        build_kwargs["build_context"] = [
+            f"{name}=container-image://{img}" for name, img in build_contexts.items()
+        ]
+
+    p.buildx.build(str(project_dir), **build_kwargs)
+    return local_image
 
 
 @app.command
@@ -1172,15 +1255,23 @@ def build(
     Automatically determines version tag from package.json. For development
     versions (0.0.0, -rc0, -dev, -alpha, -beta), appends git hash.
 
+    When .oci-build.json is present in the project directory, builds are
+    driven by the config: the shared base image is built first, then each
+    variant receives --build-context base=container-image://... so that
+    FROM base stages resolve correctly.
+
     Examples:
-        # Standard build
+        # Standard build (no .oci-build.json)
         ots image build --project-dir ~/src/onetimesecret
 
-        # Build lite variant
+        # Build lite variant (no .oci-build.json)
         ots image build -d . -f docker/variants/lite.dockerfile --suffix -lite
 
-        # Build s6 multi-process variant
-        ots image build -d . --target final-s6 --suffix -s6
+        # Build all variants from .oci-build.json
+        ots image build -d /path/to/project --platform linux/amd64
+
+        # Build single variant from .oci-build.json by suffix
+        ots image build --suffix '' -d /path/to/project --platform linux/amd64
 
         # Build and push to registry
         ots image build -d . --push --registry registry.example.com
@@ -1193,6 +1284,234 @@ def build(
     proj_dir = Path(project_dir) if project_dir else Path.cwd()
     proj_dir = proj_dir.resolve()
 
+    # Check for .oci-build.json — drives whether we use bake-aware or legacy path
+    oci_config = _load_oci_build_config(proj_dir)
+
+    if oci_config is not None:
+        _build_with_oci_config(
+            p=p,
+            cfg=cfg,
+            ex=ex,
+            proj_dir=proj_dir,
+            oci_config=oci_config,
+            dockerfile=dockerfile,
+            target=target,
+            suffix=suffix,
+            platform=platform,
+            push=push,
+            registry=registry,
+            tag=tag,
+            quiet=quiet,
+        )
+    else:
+        _build_legacy(
+            p=p,
+            cfg=cfg,
+            ex=ex,
+            proj_dir=proj_dir,
+            dockerfile=dockerfile,
+            target=target,
+            suffix=suffix,
+            platform=platform,
+            push=push,
+            registry=registry,
+            tag=tag,
+            quiet=quiet,
+        )
+
+
+def _build_with_oci_config(
+    *,
+    p: Podman,
+    cfg,
+    ex,
+    proj_dir: Path,
+    oci_config: dict,
+    dockerfile: str | None,
+    target: str | None,
+    suffix: str | None,
+    platform: str,
+    push: bool,
+    registry: str | None,
+    tag: str | None,
+    quiet: bool,
+) -> None:
+    """Bake-aware build driven by .oci-build.json."""
+    # Validate — skip dockerfile check since dockerfiles come from config
+    _validate_project_dir(proj_dir, skip_dockerfile_check=True)
+
+    build_tag = _determine_build_tag(proj_dir, tag)
+    git_hash = _get_git_hash(proj_dir, required=False)
+    pkg_version = _read_package_version(proj_dir)
+
+    # Resolve image name from config (strip registry prefix, use basename)
+    config_image_name = oci_config.get("image_name", "onetimesecret")
+    image_name = config_image_name.split("/")[-1]
+
+    # Resolve platform: CLI flag takes priority, then config, then default
+    resolved_platform = platform
+    config_platforms = oci_config.get("platforms", [])
+    if platform == "linux/amd64,linux/arm64" and config_platforms:
+        resolved_platform = config_platforms[0]
+
+    # Build args
+    build_args = [f"VERSION={pkg_version}"]
+    if git_hash:
+        build_args.append(f"COMMIT_HASH={git_hash}")
+
+    # Build base image if config declares one
+    base_tag = None
+    base_config = oci_config.get("base")
+    if base_config:
+        if not quiet:
+            print("Building base image...")
+        try:
+            base_tag = _build_base(p, proj_dir, base_config, resolved_platform, quiet)
+            if not quiet:
+                print(f"  Base: {base_tag}")
+        except Exception as e:
+            print(f"Base build failed: {e}")
+            raise SystemExit(1)
+
+    # Determine which variants to build
+    variants = oci_config.get("variants", [])
+    has_variant_flag = suffix is not None or dockerfile is not None or target is not None
+
+    if has_variant_flag:
+        # User specified variant-specific flags — build a single variant
+        if suffix is not None:
+            matching = [v for v in variants if v.get("suffix", "") == suffix]
+            if matching:
+                variants_to_build = [matching[0]]
+            else:
+                # Custom one-off build: use CLI flags, just inject base context
+                variants_to_build = [
+                    {
+                        "suffix": suffix,
+                        "dockerfile": dockerfile,
+                        "target": target,
+                    }
+                ]
+        else:
+            # --dockerfile or --target without --suffix
+            variants_to_build = [
+                {
+                    "suffix": suffix or "",
+                    "dockerfile": dockerfile,
+                    "target": target,
+                }
+            ]
+    else:
+        # No variant flags — build all variants from config
+        variants_to_build = variants
+
+    if not variants_to_build:
+        print("Error: No variants to build (check .oci-build.json)")
+        raise SystemExit(1)
+
+    if not quiet:
+        names = [f"{image_name}{v.get('suffix', '')}:{build_tag}" for v in variants_to_build]
+        print(f"Building {len(variants_to_build)} variant(s): {', '.join(names)}")
+        print(f"  Project: {proj_dir}")
+        print(f"  Platform: {resolved_platform}")
+        print(f"  Version: {pkg_version}")
+        print(f"  Commit: {git_hash or 'N/A (no git)'}")
+
+    built_images: list[str] = []
+    try:
+        # Track completed variant images for inter-variant build contexts
+        completed: dict[str, str] = {}  # suffix -> local_image_tag
+
+        for variant in variants_to_build:
+            # Build contexts: base + inter-variant dependencies
+            build_contexts: dict[str, str] | None = None
+            if base_tag:
+                build_contexts = {"base": base_tag}
+
+            # Check if variant depends on another variant (e.g., lite depends on main)
+            depends_on = variant.get("build_context")
+            if depends_on and isinstance(depends_on, dict):
+                if build_contexts is None:
+                    build_contexts = {}
+                for ctx_name, ctx_ref in depends_on.items():
+                    # ctx_ref could be "target:main" referring to a completed variant
+                    if ctx_ref.startswith("target:"):
+                        dep_suffix = ctx_ref.removeprefix("target:")
+                        # Find the completed image for that suffix
+                        dep_key = dep_suffix if dep_suffix else ""
+                        if dep_key in completed:
+                            build_contexts[ctx_name] = completed[dep_key]
+                        else:
+                            print(
+                                f"Warning: dependency '{ctx_ref}' not yet built, skipping context"
+                            )
+
+            local_image = _build_variant(
+                p,
+                proj_dir,
+                variant,
+                build_tag,
+                image_name,
+                resolved_platform,
+                build_args,
+                build_contexts,
+                quiet,
+            )
+            built_images.append(local_image)
+            completed[variant.get("suffix", "")] = local_image
+
+            if not quiet:
+                print(f"  Built: {local_image}")
+
+            # Record the build
+            db.record_deployment(
+                cfg.db_path,
+                image=f"{image_name}{variant.get('suffix', '')}",
+                tag=build_tag,
+                action="build",
+                success=True,
+                notes=f"oci-config, target={variant.get('target')}",
+                executor=ex,
+            )
+    except Exception as e:
+        print(f"Build failed: {e}")
+        raise SystemExit(1)
+    finally:
+        # Clean up base image
+        if base_tag:
+            try:
+                p.rmi(base_tag, capture_output=True, text=True)
+            except Exception:
+                pass  # Best-effort cleanup
+
+    # Push if requested
+    if push:
+        _push_images(p, cfg, ex, built_images, build_tag, registry, quiet)
+
+    # Print summary
+    if not quiet:
+        print()
+        print("Build complete:")
+        for img in built_images:
+            print(f"  Local:  {img}")
+
+
+def _build_legacy(
+    *,
+    p: Podman,
+    cfg,
+    ex,
+    proj_dir: Path,
+    dockerfile: str | None,
+    target: str | None,
+    suffix: str | None,
+    platform: str,
+    push: bool,
+    registry: str | None,
+    tag: str | None,
+    quiet: bool,
+) -> None:
+    """Legacy build path — no .oci-build.json, direct podman buildx build."""
     # Validate project structure (skip dockerfile check if custom dockerfile specified)
     _validate_project_dir(proj_dir, skip_dockerfile_check=dockerfile is not None)
 
@@ -1272,18 +1591,38 @@ def build(
 
     # Push if requested
     if push:
-        # Resolve registry from arg or config
-        reg = registry or cfg.registry
-        if not reg:
-            print("Error: --push requires --registry or OTS_REGISTRY env var")
-            raise SystemExit(1)
+        _push_images(p, cfg, ex, [local_image], build_tag, registry, quiet)
 
-        target_image = f"{reg}/{image_name}:{build_tag}"
+    # Print summary
+    if not quiet:
+        print()
+        print("Build complete:")
+        print(f"  Local:  {local_image}")
+
+
+def _push_images(
+    p: Podman,
+    cfg,
+    ex,
+    images: list[str],
+    build_tag: str,
+    registry: str | None,
+    quiet: bool,
+) -> None:
+    """Tag and push built images to a registry."""
+    reg = registry or cfg.registry
+    if not reg:
+        print("Error: --push requires --registry or OTS_REGISTRY env var")
+        raise SystemExit(1)
+
+    for local_image in images:
+        # Extract image name (without tag) from local_image
+        image_name_part = local_image.rsplit(":", 1)[0]
+        target_image = f"{reg}/{image_name_part}:{build_tag}"
 
         if not quiet:
             print(f"Tagging {local_image} -> {target_image}")
 
-        # Tag for registry
         try:
             p.tag(
                 local_image,
@@ -1299,7 +1638,6 @@ def build(
         if not quiet:
             print(f"Pushing {target_image}...")
 
-        # Push to registry
         try:
             p.push(
                 target_image,
@@ -1314,20 +1652,11 @@ def build(
             print(f"Failed to push {target_image}: {e}")
             raise SystemExit(1)
 
-        # Record the push
         db.record_deployment(
             cfg.db_path,
-            image=f"{reg}/{image_name}",
+            image=f"{reg}/{image_name_part}",
             tag=build_tag,
             action="push",
             success=True,
             executor=ex,
         )
-
-    # Print summary
-    if not quiet:
-        print()
-        print("Build complete:")
-        print(f"  Local:  {local_image}")
-        if push:
-            print(f"  Remote: {target_image}")
