@@ -160,3 +160,209 @@ class TestSystemdRemoteViaSsh:
             systemd.require_podman(executor=executor)
         finally:
             client.close()
+
+
+class TestProxyRenderRemoteViaSsh:
+    """Test proxy render_template remote path through a real SSH transport.
+
+    The FakeSSHServer handles one command per connection. These tests verify
+    that individual SSH commands in the render pipeline round-trip correctly
+    through the transport layer. The full multi-command flow is covered by
+    unit tests in test_helpers.py.
+    """
+
+    def test_render_template_remote_missing_raises(self, fake_ssh_server):
+        """render_template should raise ProxyError when template doesn't exist remotely.
+
+        This path only issues one command (test -f) before raising, so it
+        works with the single-command FakeSSHServer.
+        """
+        from pathlib import Path
+
+        import pytest
+
+        from ots_containers.commands.proxy._helpers import ProxyError, render_template
+
+        # Script: test -f fails (file not found)
+        fake_ssh_server.add_response("test", exit_code=1)
+
+        client = fake_ssh_server.connect()
+        try:
+            executor = SSHExecutor(client)
+            with pytest.raises(ProxyError, match="Template not found"):
+                render_template(
+                    Path("/nonexistent/template"),
+                    executor=executor,
+                )
+        finally:
+            client.close()
+
+
+class TestProxyReloadRemoteViaSsh:
+    """Test proxy reload_caddy remote path through a real SSH transport."""
+
+    def test_reload_remote_success(self, fake_ssh_server):
+        """reload_caddy with SSHExecutor should succeed when systemctl reload returns 0."""
+        from ots_containers.commands.proxy._helpers import reload_caddy
+
+        fake_ssh_server.add_response("sudo -- systemctl reload caddy", stdout="")
+
+        client = fake_ssh_server.connect()
+        try:
+            executor = SSHExecutor(client)
+            # Should not raise
+            reload_caddy(executor=executor)
+        finally:
+            client.close()
+
+    def test_reload_remote_failure_raises(self, fake_ssh_server):
+        """reload_caddy should raise ProxyError when systemctl reload fails."""
+        import pytest
+
+        from ots_containers.commands.proxy._helpers import ProxyError, reload_caddy
+
+        fake_ssh_server.add_response(
+            "sudo -- systemctl reload caddy",
+            exit_code=1,
+            stderr="Unit caddy.service not found.",
+        )
+
+        client = fake_ssh_server.connect()
+        try:
+            executor = SSHExecutor(client)
+            with pytest.raises(ProxyError, match="Failed to reload caddy"):
+                reload_caddy(executor=executor)
+        finally:
+            client.close()
+
+
+class TestServiceSystemctlRemoteViaSsh:
+    """Test service _helpers.systemctl remote path through a real SSH transport."""
+
+    def test_systemctl_remote_success(self, fake_ssh_server):
+        """systemctl with SSHExecutor should capture active status."""
+        from ots_containers.commands.service._helpers import systemctl
+
+        fake_ssh_server.add_response("systemctl is-active", stdout="active\n")
+
+        client = fake_ssh_server.connect()
+        try:
+            executor = SSHExecutor(client)
+            result = systemctl(
+                "is-active", "valkey-server@6379.service", check=False, executor=executor
+            )
+            assert result.returncode == 0
+            assert result.stdout.strip() == "active"
+        finally:
+            client.close()
+
+    def test_systemctl_remote_inactive(self, fake_ssh_server):
+        """systemctl should report inactive service correctly."""
+        from ots_containers.commands.service._helpers import systemctl
+
+        fake_ssh_server.add_response("systemctl is-active", stdout="inactive\n", exit_code=3)
+
+        client = fake_ssh_server.connect()
+        try:
+            executor = SSHExecutor(client)
+            result = systemctl(
+                "is-active", "valkey-server@6379.service", check=False, executor=executor
+            )
+            assert result.returncode == 3
+            assert result.stdout.strip() == "inactive"
+        finally:
+            client.close()
+
+    def test_is_service_active_remote(self, fake_ssh_server):
+        """is_service_active with SSHExecutor should return True for active service."""
+        from ots_containers.commands.service._helpers import is_service_active
+
+        fake_ssh_server.add_response("systemctl is-active", stdout="active\n")
+
+        client = fake_ssh_server.connect()
+        try:
+            executor = SSHExecutor(client)
+            assert is_service_active("valkey-server@6379.service", executor=executor) is True
+        finally:
+            client.close()
+
+    def test_is_service_enabled_remote(self, fake_ssh_server):
+        """is_service_enabled with SSHExecutor should return True for enabled service."""
+        from ots_containers.commands.service._helpers import is_service_enabled
+
+        fake_ssh_server.add_response("systemctl is-enabled", stdout="enabled\n")
+
+        client = fake_ssh_server.connect()
+        try:
+            executor = SSHExecutor(client)
+            assert is_service_enabled("valkey-server@6379.service", executor=executor) is True
+        finally:
+            client.close()
+
+    def test_is_service_enabled_remote_disabled(self, fake_ssh_server):
+        """is_service_enabled should return False for disabled service."""
+        from ots_containers.commands.service._helpers import is_service_enabled
+
+        fake_ssh_server.add_response("systemctl is-enabled", stdout="disabled\n", exit_code=1)
+
+        client = fake_ssh_server.connect()
+        try:
+            executor = SSHExecutor(client)
+            assert is_service_enabled("valkey-server@6379.service", executor=executor) is False
+        finally:
+            client.close()
+
+
+class TestServiceFileOpsRemoteViaSsh:
+    """Test service _helpers file operations via SSH transport.
+
+    These test the remote-aware file primitives (_file_exists, _read_text, etc.)
+    through a real SSHExecutor -> FakeSSHServer path.
+    """
+
+    def test_file_exists_remote_found(self, fake_ssh_server):
+        """_file_exists should return True when test -f succeeds."""
+        from pathlib import Path
+
+        from ots_containers.commands.service._helpers import _file_exists
+
+        fake_ssh_server.add_response("test", stdout="")
+
+        client = fake_ssh_server.connect()
+        try:
+            executor = SSHExecutor(client)
+            assert _file_exists(Path("/etc/valkey/valkey.conf"), executor) is True
+        finally:
+            client.close()
+
+    def test_file_exists_remote_not_found(self, fake_ssh_server):
+        """_file_exists should return False when test -f fails."""
+        from pathlib import Path
+
+        from ots_containers.commands.service._helpers import _file_exists
+
+        fake_ssh_server.add_response("test", exit_code=1)
+
+        client = fake_ssh_server.connect()
+        try:
+            executor = SSHExecutor(client)
+            assert _file_exists(Path("/nonexistent/file"), executor) is False
+        finally:
+            client.close()
+
+    def test_read_text_remote(self, fake_ssh_server):
+        """_read_text should return cat output from remote."""
+        from pathlib import Path
+
+        from ots_containers.commands.service._helpers import _read_text
+
+        fake_ssh_server.add_response("cat", stdout="bind 127.0.0.1\nport 6379\n")
+
+        client = fake_ssh_server.connect()
+        try:
+            executor = SSHExecutor(client)
+            content = _read_text(Path("/etc/valkey/valkey.conf"), executor)
+            assert "bind 127.0.0.1" in content
+            assert "port 6379" in content
+        finally:
+            client.close()

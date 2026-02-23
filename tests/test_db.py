@@ -1942,3 +1942,156 @@ class TestGetServiceActionsRemote:
         actions = db.get_service_actions(db_path, executor=mock_ex)
 
         assert actions == []
+
+
+# ---------------------------------------------------------------------------
+# Parametrized cross-executor tests for db operations
+# ---------------------------------------------------------------------------
+
+
+def _make_remote_executor_for_db(mocker, db_path):
+    """Build a mock SSH executor wired up for db operations.
+
+    Returns (executor, spy) where spy is the mock.run method for assertions.
+    The mock patches _is_remote to return True for this executor.
+    """
+    mock_ex = MagicMock()
+    mocker.patch("ots_containers.db._is_remote", side_effect=lambda ex: ex is mock_ex)
+    mock_ex.run.return_value = _make_remote_result()
+    return mock_ex
+
+
+@pytest.fixture(
+    params=["local", "remote"],
+    ids=["local-executor", "remote-executor"],
+)
+def db_executor_pair(request, mocker, tmp_path):
+    """Parametrized fixture for db operations across executor types.
+
+    For local: executor is None (uses sqlite3 directly).
+    For remote: executor is a mock SSHExecutor with _is_remote() returning True.
+
+    Yields (db_path, executor, kind).
+    """
+    db_path = tmp_path / "test.db"
+    if request.param == "local":
+        return db_path, None, "local"
+    else:
+        mock_ex = _make_remote_executor_for_db(mocker, db_path)
+        return db_path, mock_ex, "remote"
+
+
+class TestCrossExecutorDbOperations:
+    """Verify that db operations have consistent API contracts across executor types.
+
+    Local operations use sqlite3 directly; remote operations use the sqlite3 CLI
+    via executor.run(). These tests verify the API-level contract is the same.
+    """
+
+    def test_init_db_does_not_raise(self, db_executor_pair):
+        """init_db should complete without error via both executors."""
+        db_path, executor, kind = db_executor_pair
+
+        # Should not raise
+        db.init_db(db_path, executor=executor)
+
+        if kind == "local":
+            assert db_path.exists()
+
+    def test_record_deployment_returns_int(self, db_executor_pair):
+        """record_deployment should return an int via both executors."""
+        db_path, executor, kind = db_executor_pair
+
+        result = db.record_deployment(db_path, "img", "v1", "deploy", port=7043, executor=executor)
+
+        assert isinstance(result, int)
+
+    def test_set_alias_and_get_alias_roundtrip(self, db_executor_pair):
+        """set_alias + get_alias should round-trip via both executors."""
+        db_path, executor, kind = db_executor_pair
+
+        if kind == "remote":
+            # Wire the mock to return the alias we set
+            call_count = {"n": 0}
+
+            def mock_run(cmd, **kwargs):
+                call_count["n"] += 1
+                if "-json" in cmd:
+                    return _make_remote_result(
+                        stdout=json.dumps(
+                            [
+                                {
+                                    "alias": "CURRENT",
+                                    "image": "img",
+                                    "tag": "v1",
+                                    "set_at": "2026-01-01",
+                                }
+                            ]
+                        )
+                    )
+                return _make_remote_result()
+
+            executor.run.side_effect = mock_run
+
+        db.set_alias(db_path, "CURRENT", "img", "v1", executor=executor)
+        alias = db.get_alias(db_path, "CURRENT", executor=executor)
+
+        assert alias is not None
+        assert alias.alias == "CURRENT"
+        assert alias.image == "img"
+        assert alias.tag == "v1"
+        assert isinstance(alias, db.ImageAlias)
+
+    def test_get_deployments_returns_list(self, db_executor_pair):
+        """get_deployments should return a list via both executors."""
+        db_path, executor, kind = db_executor_pair
+
+        if kind == "remote":
+            executor.run.return_value = _make_remote_result(stdout="[]")
+
+        result = db.get_deployments(db_path, executor=executor)
+
+        assert isinstance(result, list)
+
+    def test_record_service_action_returns_int(self, db_executor_pair):
+        """record_service_action should return an int via both executors."""
+        db_path, executor, kind = db_executor_pair
+
+        result = db.record_service_action(db_path, "valkey", "6379", "start", executor=executor)
+
+        assert isinstance(result, int)
+
+    def test_get_service_instances_returns_list(self, db_executor_pair):
+        """get_service_instances should return a list via both executors."""
+        db_path, executor, kind = db_executor_pair
+
+        if kind == "remote":
+            executor.run.return_value = _make_remote_result(stdout="[]")
+
+        result = db.get_service_instances(db_path, executor=executor)
+
+        assert isinstance(result, list)
+
+    def test_get_current_image_returns_none_when_empty(self, db_executor_pair):
+        """get_current_image should return None when CURRENT not set."""
+        db_path, executor, kind = db_executor_pair
+
+        if kind == "remote":
+            executor.run.return_value = _make_remote_result(stdout="")
+
+        result = db.get_current_image(db_path, executor=executor)
+
+        assert result is None
+
+    def test_rollback_returns_none_when_insufficient_history(self, db_executor_pair):
+        """rollback should return None when < 2 distinct deployments."""
+        db_path, executor, kind = db_executor_pair
+
+        if kind == "remote":
+            executor.run.return_value = _make_remote_result(
+                stdout=json.dumps([{"image": "img", "tag": "v1", "last_id": 1}])
+            )
+
+        result = db.rollback(db_path, executor=executor)
+
+        assert result is None

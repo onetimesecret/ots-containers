@@ -122,22 +122,140 @@ class TestConfigPaths:
 class TestConfigValidate:
     """Test Config.validate method."""
 
-    def test_validate_is_noop(self, tmp_path):
-        """Should not raise even when config files are missing (validate is a no-op)."""
+    def test_validate_accepts_defaults(self, monkeypatch):
+        """Should not raise with default image and @current sentinel tag."""
+        monkeypatch.delenv("IMAGE", raising=False)
+        monkeypatch.delenv("TAG", raising=False)
+        from ots_containers.config import Config
+
+        cfg = Config()
+        cfg.validate()  # Should not raise
+
+    def test_validate_accepts_valid_tag(self, monkeypatch):
+        """Should accept a well-formed OCI tag."""
+        monkeypatch.setenv("TAG", "v1.2.3-rc1")
+        monkeypatch.delenv("IMAGE", raising=False)
+        from ots_containers.config import Config
+
+        cfg = Config()
+        cfg.validate()  # Should not raise
+
+    def test_validate_accepts_sentinel_current(self, monkeypatch):
+        """Should accept the @current sentinel tag."""
+        monkeypatch.delenv("IMAGE", raising=False)
+        monkeypatch.delenv("TAG", raising=False)
+        from ots_containers.config import Config
+
+        cfg = Config()
+        assert cfg.tag == "@current"
+        cfg.validate()  # Should not raise
+
+    def test_validate_accepts_sentinel_rollback(self, monkeypatch):
+        """Should accept the @rollback sentinel tag."""
+        monkeypatch.setenv("TAG", "@rollback")
+        monkeypatch.delenv("IMAGE", raising=False)
+        from ots_containers.config import Config
+
+        cfg = Config()
+        cfg.validate()  # Should not raise
+
+    def test_validate_rejects_tag_with_shell_metacharacters(self, monkeypatch):
+        """Should reject tags containing shell metacharacters."""
+        monkeypatch.delenv("IMAGE", raising=False)
+        from ots_containers.config import Config
+
+        cfg = Config(tag="; rm -rf /")
+        with pytest.raises(ValueError, match="Invalid tag"):
+            cfg.validate()
+
+    def test_validate_rejects_tag_with_spaces(self, monkeypatch):
+        """Should reject tags containing whitespace."""
+        monkeypatch.delenv("IMAGE", raising=False)
+        from ots_containers.config import Config
+
+        cfg = Config(tag="v1 2")
+        with pytest.raises(ValueError, match="Invalid tag"):
+            cfg.validate()
+
+    def test_validate_rejects_empty_tag(self, monkeypatch):
+        """Should reject empty string as tag."""
+        monkeypatch.delenv("IMAGE", raising=False)
+        from ots_containers.config import Config
+
+        cfg = Config(tag="")
+        with pytest.raises(ValueError, match="Invalid tag"):
+            cfg.validate()
+
+    def test_validate_rejects_image_with_shell_metacharacters(self, monkeypatch):
+        """Should reject image names with shell injection attempts."""
+        monkeypatch.delenv("TAG", raising=False)
+        from ots_containers.config import Config
+
+        cfg = Config(image="$(whoami)")
+        with pytest.raises(ValueError, match="Invalid image"):
+            cfg.validate()
+
+    def test_validate_rejects_image_with_spaces(self, monkeypatch):
+        """Should reject image names containing whitespace."""
+        monkeypatch.delenv("TAG", raising=False)
+        from ots_containers.config import Config
+
+        cfg = Config(image="my image")
+        with pytest.raises(ValueError, match="Invalid image"):
+            cfg.validate()
+
+    def test_validate_rejects_empty_image(self, monkeypatch):
+        """Should reject empty string as image name."""
+        monkeypatch.delenv("TAG", raising=False)
+        from ots_containers.config import Config
+
+        cfg = Config(image="")
+        with pytest.raises(ValueError, match="Invalid image"):
+            cfg.validate()
+
+    def test_validate_accepts_ghcr_image(self, monkeypatch):
+        """Should accept standard ghcr.io image path."""
+        monkeypatch.delenv("IMAGE", raising=False)
+        monkeypatch.delenv("TAG", raising=False)
+        from ots_containers.config import Config
+
+        cfg = Config(image="ghcr.io/onetimesecret/onetimesecret")
+        cfg.validate()  # Should not raise
+
+    def test_validate_accepts_tag_with_dots_and_hyphens(self, monkeypatch):
+        """Should accept tags with dots, hyphens, and underscores."""
+        monkeypatch.delenv("IMAGE", raising=False)
+        from ots_containers.config import Config
+
+        cfg = Config(tag="v0.19.0-beta_1")
+        cfg.validate()  # Should not raise
+
+    def test_validate_config_files_optional(self, tmp_path, monkeypatch):
+        """Should not raise even when config files are missing."""
+        monkeypatch.delenv("IMAGE", raising=False)
+        monkeypatch.delenv("TAG", raising=False)
         from ots_containers.config import Config
 
         cfg = Config(config_dir=tmp_path)
         cfg.validate()  # Should not raise
 
-    def test_validate_with_all_files(self, tmp_path):
-        """Should not raise when all required files exist."""
+    def test_validate_rejects_tag_with_colon(self, monkeypatch):
+        """Should reject tags containing colons (would break image:tag format)."""
+        monkeypatch.delenv("IMAGE", raising=False)
         from ots_containers.config import Config
 
-        # Only config.yaml is required now (secrets via Podman, infra env in /etc/default)
-        (tmp_path / "config.yaml").touch()
+        cfg = Config(tag="v1:latest")
+        with pytest.raises(ValueError, match="Invalid tag"):
+            cfg.validate()
 
-        cfg = Config(config_dir=tmp_path)
-        cfg.validate()  # Should not raise
+    def test_validate_rejects_image_with_backtick(self, monkeypatch):
+        """Should reject image names with backtick command substitution."""
+        monkeypatch.delenv("TAG", raising=False)
+        from ots_containers.config import Config
+
+        cfg = Config(image="`whoami`/image")
+        with pytest.raises(ValueError, match="Invalid image"):
+            cfg.validate()
 
 
 class TestConfigFiles:
@@ -848,6 +966,107 @@ class TestGetDbPath:
         assert cfg.system_db_path == Path("/nonexistent/path/deployments.db")
         # db_path falls back to user space since /nonexistent/path is not writable
         assert cfg.db_path != cfg.system_db_path
+
+
+class TestCloseSSHCache:
+    """Test _close_ssh_cache() atexit cleanup function."""
+
+    def test_close_ssh_cache_closes_all_clients(self):
+        """Should call close() on every cached client."""
+        from ots_containers.config import _close_ssh_cache, _ssh_cache
+
+        mock_client_a = MagicMock()
+        mock_client_b = MagicMock()
+        _ssh_cache["host-a.example.com"] = mock_client_a
+        _ssh_cache["host-b.example.com"] = mock_client_b
+
+        _close_ssh_cache()
+
+        mock_client_a.close.assert_called_once()
+        mock_client_b.close.assert_called_once()
+        assert len(_ssh_cache) == 0
+
+    def test_close_ssh_cache_clears_cache(self):
+        """After running, the cache dict should be empty."""
+        from ots_containers.config import _close_ssh_cache, _ssh_cache
+
+        _ssh_cache["host-c.example.com"] = MagicMock()
+
+        _close_ssh_cache()
+
+        assert _ssh_cache == {}
+
+    def test_close_ssh_cache_ignores_close_errors(self):
+        """Should not raise if client.close() throws."""
+        from ots_containers.config import _close_ssh_cache, _ssh_cache
+
+        mock_client = MagicMock()
+        mock_client.close.side_effect = RuntimeError("already closed")
+        _ssh_cache["host-d.example.com"] = mock_client
+
+        _close_ssh_cache()  # should not raise
+
+        assert len(_ssh_cache) == 0
+
+    def test_close_ssh_cache_noop_when_empty(self):
+        """Should not raise when the cache is already empty."""
+        from ots_containers.config import _close_ssh_cache, _ssh_cache
+
+        _ssh_cache.clear()
+
+        _close_ssh_cache()  # should not raise
+
+        assert len(_ssh_cache) == 0
+
+
+class TestMetaHostFlagRouting:
+    """Test that _meta() routes --host flag through context.host_var."""
+
+    def test_meta_sets_host_var_when_host_provided(self, mocker):
+        """_meta(host='myhost') should set context.host_var."""
+        from ots_containers import context
+        from ots_containers.cli import _meta
+
+        mocker.patch("ots_containers.cli._configure_logging")
+        mocker.patch("ots_containers.cli.app")
+
+        # Save state so we can restore after the test
+        token = context.host_var.set(None)
+        try:
+            _meta("version", verbose=False, host="eu1.example.com")
+            assert context.host_var.get(None) == "eu1.example.com"
+        finally:
+            context.host_var.reset(token)
+
+    def test_meta_does_not_set_host_var_when_host_none(self, mocker):
+        """_meta(host=None) should leave context.host_var at default (None)."""
+        from ots_containers import context
+        from ots_containers.cli import _meta
+
+        mocker.patch("ots_containers.cli._configure_logging")
+        mocker.patch("ots_containers.cli.app")
+
+        # Reset to known state
+        token = context.host_var.set(None)
+        try:
+            _meta("version", verbose=False, host=None)
+            assert context.host_var.get(None) is None
+        finally:
+            context.host_var.reset(token)
+
+    def test_host_var_default_is_none(self):
+        """context.host_var should be defined with default=None."""
+        # The ContextVar was created with default=None — verify by
+        # inspecting the ContextVar itself rather than reading the current
+        # context (which may be modified by earlier tests in the same process).
+        import contextvars
+
+        from ots_containers import context
+
+        # Create a truly empty context and read the var there
+        empty_ctx = contextvars.Context()
+        result = empty_ctx.run(context.host_var.get, None)
+        assert result is None
 
 
 class TestGetExecutorSSHErrors:

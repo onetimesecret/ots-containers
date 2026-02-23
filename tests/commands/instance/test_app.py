@@ -1340,7 +1340,9 @@ class TestDeployWaitFlag:
 
         instance.deploy(identifiers=("7043",), web=True, wait=True)
 
-        mock_http_healthy.assert_called_once_with(7043, timeout=60)
+        mock_http_healthy.assert_called_once_with(
+            7043, timeout=60, executor=mock_config.get_executor()
+        )
 
     def test_deploy_without_wait_does_not_call_wait_for_http_healthy(self, mocker, tmp_path):
         """Omitting --wait should not call wait_for_http_healthy."""
@@ -1990,7 +1992,7 @@ class TestRedeployHooks:
 
 
 class TestRunHookExecutor:
-    """Test run_hook() dispatches to executor when remote."""
+    """Test run_hook() always runs locally, never forwarding to remote."""
 
     def test_run_hook_local_uses_subprocess(self, mocker):
         """run_hook without executor should use subprocess.run (local)."""
@@ -2007,41 +2009,45 @@ class TestRunHookExecutor:
 
         mock_subprocess.assert_called_once_with("./scan.sh", shell=True, text=True)
 
-    def test_run_hook_remote_uses_executor(self, mocker):
-        """run_hook with remote executor should dispatch via executor.run."""
+    def test_run_hook_with_remote_executor_still_runs_locally(self, mocker):
+        """run_hook with remote executor should still use subprocess.run locally."""
         from unittest.mock import MagicMock
 
         from ots_containers.commands.instance._helpers import run_hook
 
         mock_ex = MagicMock()
-        mock_result = MagicMock()
-        mock_result.returncode = 0
-        mock_ex.run.return_value = mock_result
-        mocker.patch("ots_containers.db._is_remote", return_value=True)
+        mock_proc = mocker.MagicMock()
+        mock_proc.returncode = 0
+        mock_subprocess = mocker.patch(
+            "ots_containers.commands.instance._helpers.subprocess.run",
+            return_value=mock_proc,
+        )
 
         run_hook("./scan.sh", "pre-hook", quiet=True, executor=mock_ex)
 
-        mock_ex.run.assert_called_once_with(
-            ["/bin/sh", "-c", "./scan.sh"],
-            timeout=300,
-        )
+        # Should use local subprocess, NOT executor.run
+        mock_subprocess.assert_called_once_with("./scan.sh", shell=True, text=True)
+        mock_ex.run.assert_not_called()
 
-    def test_run_hook_remote_failure_raises_system_exit(self, mocker):
-        """run_hook with remote executor should raise SystemExit on non-zero exit."""
+    def test_run_hook_with_remote_executor_failure_raises_system_exit(self, mocker):
+        """run_hook with remote executor still runs locally and raises on failure."""
         from unittest.mock import MagicMock
 
         from ots_containers.commands.instance._helpers import run_hook
 
         mock_ex = MagicMock()
-        mock_result = MagicMock()
-        mock_result.returncode = 1
-        mock_ex.run.return_value = mock_result
-        mocker.patch("ots_containers.db._is_remote", return_value=True)
+        mock_proc = mocker.MagicMock()
+        mock_proc.returncode = 1
+        mocker.patch(
+            "ots_containers.commands.instance._helpers.subprocess.run",
+            return_value=mock_proc,
+        )
 
         with pytest.raises(SystemExit) as exc_info:
             run_hook("./failing.sh", "pre-hook", quiet=True, executor=mock_ex)
 
         assert exc_info.value.code == 1
+        mock_ex.run.assert_not_called()
 
     def test_run_hook_local_failure_raises_system_exit(self, mocker):
         """run_hook local path should raise SystemExit on non-zero exit."""

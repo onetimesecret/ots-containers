@@ -4,6 +4,7 @@
 from unittest.mock import MagicMock, patch
 
 import pytest
+from ots_shared.ssh.executor import CommandError, Result
 
 from ots_containers.commands.service.app import (
     app,
@@ -18,6 +19,11 @@ from ots_containers.commands.service.app import (
     status,
     stop,
 )
+
+
+def _make_command_error(stderr: str = "", command: str = "systemctl") -> CommandError:
+    """Create a CommandError with the given stderr for test assertions."""
+    return CommandError(Result(command=command, returncode=1, stdout="", stderr=stderr))
 
 
 @pytest.fixture(autouse=True)
@@ -610,10 +616,8 @@ class TestServiceErrorPaths:
     """Tests for error paths that should raise SystemExit(1).
 
     Each command wraps the systemctl call in a try/except and raises
-    SystemExit(1) on CalledProcessError so the caller gets a non-zero exit.
+    SystemExit(1) on CommandError so the caller gets a non-zero exit.
     """
-
-    import subprocess as _subprocess
 
     @patch("ots_containers.commands.service.app.check_default_service_conflict")
     @patch("ots_containers.commands.service.app.systemctl")
@@ -652,7 +656,7 @@ class TestServiceErrorPaths:
     @patch("ots_containers.commands.service.app.ensure_data_dir")
     @patch("ots_containers.commands.service.app.update_config_value")
     @patch("ots_containers.commands.service.app.copy_default_config")
-    def test_init_start_called_process_error_exits(
+    def test_init_start_command_error_exits(
         self,
         mock_copy,
         mock_update,
@@ -663,9 +667,7 @@ class TestServiceErrorPaths:
         capsys,
         tmp_path,
     ):
-        """init() exits with code 1 when systemctl start raises CalledProcessError."""
-        import subprocess
-
+        """init() exits with code 1 when systemctl start raises CommandError."""
         import pytest
 
         mock_copy.return_value = tmp_path / "test.conf"
@@ -675,7 +677,7 @@ class TestServiceErrorPaths:
         # First call (enable, if any) succeeds; start call raises
         def systemctl_side_effect(action, unit, **kwargs):
             if action == "start":
-                raise subprocess.CalledProcessError(1, "systemctl", stderr="start failed")
+                raise _make_command_error(stderr="start failed")
             return MagicMock()
 
         mock_systemctl.side_effect = systemctl_side_effect
@@ -686,15 +688,11 @@ class TestServiceErrorPaths:
         assert exc_info.value.code == 1
 
     @patch("ots_containers.commands.service.app.systemctl")
-    def test_enable_called_process_error_exits(self, mock_systemctl, capsys):
-        """enable() exits with code 1 when systemctl enable raises CalledProcessError."""
-        import subprocess
-
+    def test_enable_command_error_exits(self, mock_systemctl, capsys):
+        """enable() exits with code 1 when systemctl enable raises CommandError."""
         import pytest
 
-        mock_systemctl.side_effect = subprocess.CalledProcessError(
-            1, "systemctl", stderr="enable failed"
-        )
+        mock_systemctl.side_effect = _make_command_error(stderr="enable failed")
 
         with pytest.raises(SystemExit) as exc_info:
             enable("valkey", "6379")
@@ -704,15 +702,13 @@ class TestServiceErrorPaths:
         assert "ERROR" in captured.out
 
     @patch("ots_containers.commands.service.app.systemctl")
-    def test_disable_called_process_error_exits(self, mock_systemctl, capsys):
-        """disable() exits with code 1 when systemctl disable raises CalledProcessError."""
-        import subprocess
-
+    def test_disable_command_error_exits(self, mock_systemctl, capsys):
+        """disable() exits with code 1 when systemctl disable raises CommandError."""
         import pytest
 
         def systemctl_side_effect(action, unit, **kwargs):
             if action == "disable":
-                raise subprocess.CalledProcessError(1, "systemctl", stderr="disable failed")
+                raise _make_command_error(stderr="disable failed")
             return MagicMock()
 
         mock_systemctl.side_effect = systemctl_side_effect
@@ -725,15 +721,11 @@ class TestServiceErrorPaths:
         assert "ERROR" in captured.out
 
     @patch("ots_containers.commands.service.app.systemctl")
-    def test_start_called_process_error_exits(self, mock_systemctl, capsys):
-        """start() exits with code 1 when systemctl start raises CalledProcessError."""
-        import subprocess
-
+    def test_start_command_error_exits(self, mock_systemctl, capsys):
+        """start() exits with code 1 when systemctl start raises CommandError."""
         import pytest
 
-        mock_systemctl.side_effect = subprocess.CalledProcessError(
-            1, "systemctl", stderr="start failed"
-        )
+        mock_systemctl.side_effect = _make_command_error(stderr="start failed")
 
         with pytest.raises(SystemExit) as exc_info:
             start("valkey", "6379")
@@ -743,15 +735,11 @@ class TestServiceErrorPaths:
         assert "ERROR" in captured.out
 
     @patch("ots_containers.commands.service.app.systemctl")
-    def test_stop_called_process_error_exits(self, mock_systemctl, capsys):
-        """stop() exits with code 1 when systemctl stop raises CalledProcessError."""
-        import subprocess
-
+    def test_stop_command_error_exits(self, mock_systemctl, capsys):
+        """stop() exits with code 1 when systemctl stop raises CommandError."""
         import pytest
 
-        mock_systemctl.side_effect = subprocess.CalledProcessError(
-            1, "systemctl", stderr="stop failed"
-        )
+        mock_systemctl.side_effect = _make_command_error(stderr="stop failed")
 
         with pytest.raises(SystemExit) as exc_info:
             stop("valkey", "6379")
@@ -761,15 +749,11 @@ class TestServiceErrorPaths:
         assert "ERROR" in captured.out
 
     @patch("ots_containers.commands.service.app.systemctl")
-    def test_restart_called_process_error_exits(self, mock_systemctl, capsys):
-        """restart() exits with code 1 when systemctl restart raises CalledProcessError."""
-        import subprocess
-
+    def test_restart_command_error_exits(self, mock_systemctl, capsys):
+        """restart() exits with code 1 when systemctl restart raises CommandError."""
         import pytest
 
-        mock_systemctl.side_effect = subprocess.CalledProcessError(
-            1, "systemctl", stderr="restart failed"
-        )
+        mock_systemctl.side_effect = _make_command_error(stderr="restart failed")
 
         with pytest.raises(SystemExit) as exc_info:
             restart("valkey", "6379")
@@ -1010,7 +994,7 @@ class TestInitForceFileNotFound:
 
 
 class TestInitEnableWarning:
-    """Tests for init --enable when systemctl enable raises CalledProcessError (warning)."""
+    """Tests for init --enable when systemctl enable raises CommandError (warning)."""
 
     @patch("ots_containers.commands.service.app.check_default_service_conflict")
     @patch("ots_containers.commands.service.app.systemctl")
@@ -1029,16 +1013,14 @@ class TestInitEnableWarning:
         capsys,
         tmp_path,
     ):
-        """init --enable with systemctl CalledProcessError prints WARNING but doesn't exit."""
-        import subprocess
-
+        """init --enable with systemctl CommandError prints WARNING but doesn't exit."""
         mock_copy.return_value = tmp_path / "test.conf"
         mock_data.return_value = tmp_path / "data"
         mock_secrets.return_value = None
 
         def systemctl_side_effect(action, unit, **kwargs):
             if action == "enable":
-                raise subprocess.CalledProcessError(1, "systemctl", stderr="permission denied")
+                raise _make_command_error(stderr="permission denied")
             return MagicMock()
 
         mock_systemctl.side_effect = systemctl_side_effect

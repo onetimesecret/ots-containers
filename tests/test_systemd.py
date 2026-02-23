@@ -1849,3 +1849,203 @@ class TestWaitForHttpHealthyRemote:
 
         call_args = mock_ex.run.call_args[0][0]
         assert "http://localhost:8080/health" in call_args
+
+
+# ---------------------------------------------------------------------------
+# Parametrized cross-executor tests
+# ---------------------------------------------------------------------------
+
+
+def _make_local_executor(mocker):
+    """Build a LocalExecutor with subprocess.run mocked."""
+
+    # Let _get_executor return a real LocalExecutor
+    from ots_shared.ssh import LocalExecutor
+
+    ex = LocalExecutor()
+    return ex
+
+
+def _make_remote_executor(mocker):
+    """Build a mock SSHExecutor that _is_local() recognises as remote."""
+    from unittest.mock import MagicMock
+
+    mock_ex = MagicMock()
+    # _is_local checks isinstance(ex, LocalExecutor), so MagicMock returns False
+    return mock_ex
+
+
+@pytest.fixture(
+    params=["local", "remote"],
+    ids=["local-executor", "remote-executor"],
+)
+def executor_pair(request, mocker):
+    """Parametrized fixture that yields (executor, run_mock) for both types.
+
+    For local: executor is a real LocalExecutor; run_mock patches subprocess.run.
+    For remote: executor is a MagicMock; run_mock is executor.run itself.
+
+    Both run_mocks return a successful result by default.
+    """
+    from unittest.mock import MagicMock
+
+    if request.param == "local":
+        from ots_shared.ssh import LocalExecutor
+
+        ex = LocalExecutor()
+        mock_run = mocker.patch(
+            "subprocess.run",
+            return_value=subprocess.CompletedProcess([], 0, stdout="", stderr=""),
+        )
+        return ex, mock_run, "local"
+    else:
+        mock_ex = MagicMock()
+        mock_result = MagicMock()
+        mock_result.ok = True
+        mock_result.stdout = ""
+        mock_result.stderr = ""
+        mock_result.returncode = 0
+        mock_ex.run.return_value = mock_result
+        mocker.patch("ots_containers.systemd._is_local", return_value=False)
+        return mock_ex, mock_ex.run, "remote"
+
+
+def _extract_systemctl_cmd(run_mock, kind):
+    """Extract the core systemctl command from a run mock.
+
+    For local: subprocess.run receives ["sudo", "--", "systemctl", ...], so strip the prefix.
+    For remote: executor.run receives ["systemctl", ...] directly (sudo is a kwarg).
+    """
+    cmd = run_mock.call_args[0][0]
+    if kind == "local" and cmd[:2] == ["sudo", "--"]:
+        return cmd[2:]
+    return cmd
+
+
+class TestCrossExecutorSystemdCommands:
+    """Verify that systemd operations produce consistent commands across executor types.
+
+    These parametrized tests run the same operation through both LocalExecutor and
+    a mock SSHExecutor, verifying the systemctl command payload is identical.
+
+    LocalExecutor prepends ``["sudo", "--"]`` at the subprocess.run layer,
+    while SSHExecutor passes ``sudo=True`` as a kwarg to executor.run().
+    The core systemctl command list must be the same in both cases.
+    """
+
+    def test_start_command_is_consistent(self, executor_pair):
+        """start() should produce the same systemctl command payload via both executors."""
+        from ots_containers import systemd
+
+        ex, run_mock, kind = executor_pair
+        systemd.start("onetime-web@7043", executor=ex)
+
+        assert _extract_systemctl_cmd(run_mock, kind) == [
+            "systemctl",
+            "start",
+            "onetime-web@7043",
+        ]
+
+    def test_stop_command_is_consistent(self, executor_pair):
+        """stop() should produce the same systemctl command payload via both executors."""
+        from ots_containers import systemd
+
+        ex, run_mock, kind = executor_pair
+        systemd.stop("onetime-web@7043", executor=ex)
+
+        assert _extract_systemctl_cmd(run_mock, kind) == [
+            "systemctl",
+            "stop",
+            "onetime-web@7043",
+        ]
+
+    def test_restart_command_is_consistent(self, executor_pair):
+        """restart() should produce the same systemctl command payload via both executors."""
+        from ots_containers import systemd
+
+        ex, run_mock, kind = executor_pair
+        systemd.restart("onetime-web@7043", executor=ex)
+
+        assert _extract_systemctl_cmd(run_mock, kind) == [
+            "systemctl",
+            "restart",
+            "onetime-web@7043",
+        ]
+
+    def test_daemon_reload_command_is_consistent(self, executor_pair):
+        """daemon_reload() should produce the same command payload via both executors."""
+        from ots_containers import systemd
+
+        ex, run_mock, kind = executor_pair
+        systemd.daemon_reload(executor=ex)
+
+        assert _extract_systemctl_cmd(run_mock, kind) == [
+            "systemctl",
+            "daemon-reload",
+        ]
+
+    def test_is_active_command_and_result_consistent(self, executor_pair):
+        """is_active() should produce the same command and parse output identically."""
+        from ots_containers import systemd
+
+        ex, run_mock, kind = executor_pair
+
+        if kind == "local":
+            run_mock.return_value = subprocess.CompletedProcess([], 0, stdout="active\n", stderr="")
+        else:
+            mock_result = run_mock.return_value
+            mock_result.stdout = "active\n"
+
+        state = systemd.is_active("onetime-web@7043", executor=ex)
+
+        assert state == "active"
+        # is_active does NOT use sudo, so command is the same for both
+        cmd = run_mock.call_args[0][0]
+        assert cmd == ["systemctl", "is-active", "onetime-web@7043"]
+
+    def test_enable_command_is_consistent(self, executor_pair):
+        """enable() should produce the same systemctl command payload via both executors."""
+        from ots_containers import systemd
+
+        ex, run_mock, kind = executor_pair
+        systemd.enable("onetime-web@7043", executor=ex)
+
+        assert _extract_systemctl_cmd(run_mock, kind) == [
+            "systemctl",
+            "enable",
+            "onetime-web@7043",
+        ]
+
+    def test_sudo_used_for_mutating_commands(self, executor_pair):
+        """Mutating systemctl commands should use sudo via both executor types."""
+        from ots_containers import systemd
+
+        ex, run_mock, kind = executor_pair
+        systemd.start("onetime-web@7043", executor=ex)
+
+        if kind == "local":
+            cmd = run_mock.call_args[0][0]
+            # LocalExecutor prepends sudo -- at subprocess.run layer
+            assert cmd[:2] == ["sudo", "--"]
+        else:
+            call_kwargs = run_mock.call_args[1]
+            assert call_kwargs.get("sudo") is True
+
+    def test_failure_raises_systemctl_error(self, executor_pair):
+        """Both executor types should raise SystemctlError on start failure."""
+        from ots_containers import systemd
+        from ots_containers.systemd import SystemctlError
+
+        ex, run_mock, kind = executor_pair
+
+        if kind == "local":
+            run_mock.return_value = subprocess.CompletedProcess([], 1, stdout="", stderr="")
+        else:
+            mock_result = run_mock.return_value
+            mock_result.ok = False
+            mock_result.returncode = 1
+            mock_result.stdout = ""
+            mock_result.stderr = ""
+
+        with pytest.raises(SystemctlError, match="failed to start"):
+            systemd.start("onetime-web@7043", executor=ex)

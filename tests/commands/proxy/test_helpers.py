@@ -223,6 +223,9 @@ class TestRemoteRenderTemplate:
         result = render_template(Path("/tpl"), executor=ex)
         assert result == "Hello World"
         assert ex.run.call_count == 3
+        # envsubst call (3rd) should have timeout=30
+        envsubst_call = ex.run.call_args_list[2]
+        assert envsubst_call[1]["timeout"] == 30
 
     def test_render_template_remote_missing(self, mocker):
         """Should raise ProxyError when remote template not found."""
@@ -252,12 +255,13 @@ class TestRemoteValidateCaddyConfig:
         return mock_ex
 
     def test_validate_remote_success(self, mocker):
-        """Should validate on remote host."""
+        """Should validate on remote host using mktemp for unique temp file."""
         from ots_containers.commands.proxy._helpers import validate_caddy_config
 
         ex = self._make_executor(
             mocker,
             [
+                ("mktemp ...", 0, "/tmp/ots-caddy-validate.abc123\n", ""),  # mktemp
                 ("tee /tmp/...", 0, "", ""),  # write temp file
                 ("caddy validate ...", 0, "", ""),  # validate
                 ("rm -f /tmp/...", 0, "", ""),  # cleanup
@@ -266,7 +270,14 @@ class TestRemoteValidateCaddyConfig:
 
         # Should not raise
         validate_caddy_config("localhost { }", executor=ex)
-        assert ex.run.call_count == 3
+        assert ex.run.call_count == 4
+        # Verify timeout kwargs on remote calls
+        mktemp_call = ex.run.call_args_list[0]
+        assert mktemp_call[1].get("timeout") == 10, "mktemp should have timeout=10"
+        validate_call = ex.run.call_args_list[2]
+        assert validate_call[1].get("timeout") == 30, "caddy validate should have timeout=30"
+        rm_call = ex.run.call_args_list[3]
+        assert rm_call[1].get("timeout") == 10, "rm cleanup should have timeout=10"
 
     def test_validate_remote_failure(self, mocker):
         """Should raise ProxyError on remote validation failure."""
@@ -275,6 +286,7 @@ class TestRemoteValidateCaddyConfig:
         ex = self._make_executor(
             mocker,
             [
+                ("mktemp ...", 0, "/tmp/ots-caddy-validate.xyz789\n", ""),  # mktemp
                 ("tee /tmp/...", 0, "", ""),  # write temp file
                 ("caddy validate ...", 1, "", "syntax error"),  # validate fails
                 ("rm -f /tmp/...", 0, "", ""),  # cleanup still runs
@@ -283,6 +295,26 @@ class TestRemoteValidateCaddyConfig:
 
         with pytest.raises(ProxyError, match="Caddy validation failed"):
             validate_caddy_config("invalid config", executor=ex)
+
+        # Cleanup rm should still run even on failure, with timeout=10
+        rm_call = ex.run.call_args_list[3]
+        assert rm_call[1].get("timeout") == 10, (
+            "rm cleanup should run with timeout=10 even on failure"
+        )
+
+    def test_validate_remote_mktemp_failure(self, mocker):
+        """Should raise ProxyError when mktemp fails on remote."""
+        from ots_containers.commands.proxy._helpers import ProxyError, validate_caddy_config
+
+        ex = self._make_executor(
+            mocker,
+            [
+                ("mktemp ...", 1, "", "Permission denied"),  # mktemp fails
+            ],
+        )
+
+        with pytest.raises(ProxyError, match="Failed to create temp file"):
+            validate_caddy_config("test content", executor=ex)
 
 
 class TestRemoteReloadCaddy:

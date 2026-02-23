@@ -592,11 +592,15 @@ class TestEnsurePodmanSecretRemote:
 
         assert result == "created"
         assert mock_ex.run.call_count == 2
-        # Second call is the create
+        # First call: podman secret exists (timeout=15)
+        exists_call = mock_ex.run.call_args_list[0]
+        assert exists_call[1]["timeout"] == 15, "secret exists should have timeout=15"
+        # Second call is the create (timeout=30)
         create_call = mock_ex.run.call_args_list[1]
         assert create_call[0][0] == ["podman", "secret", "create", "ots_key", "-"]
         assert create_call[1]["input"] == "secret_val"
         assert create_call[1]["check"] is True
+        assert create_call[1]["timeout"] == 30, "secret create should have timeout=30"
 
     def test_replaces_existing_secret_remotely(self, mocker):
         from ots_containers.environment_file import ensure_podman_secret
@@ -613,8 +617,14 @@ class TestEnsurePodmanSecretRemote:
 
         assert result == "replaced"
         assert mock_ex.run.call_count == 3
+        # Verify timeout kwargs on each call
+        exists_call = mock_ex.run.call_args_list[0]
+        assert exists_call[1]["timeout"] == 15, "secret exists should have timeout=15"
         rm_call = mock_ex.run.call_args_list[1]
         assert rm_call[0][0] == ["podman", "secret", "rm", "ots_key"]
+        assert rm_call[1]["timeout"] == 15, "secret rm should have timeout=15"
+        create_call = mock_ex.run.call_args_list[2]
+        assert create_call[1]["timeout"] == 30, "secret create should have timeout=30"
 
 
 class TestGetSecretsFromEnvFileRemote:
