@@ -17,7 +17,6 @@ Both config_dir and ssh_host can be resolved automatically from a
 
 from __future__ import annotations
 
-import subprocess
 import sys
 from pathlib import Path
 from typing import Annotated
@@ -76,6 +75,19 @@ def _resolve_ssh_host() -> str:
         )
         raise SystemExit(1)
     return host
+
+
+def _get_executor():
+    """Return an Executor for the resolved host.
+
+    Uses Config.get_executor() with the host from context.host_var,
+    routing through resolve_host() for .otsinfra.env support.
+    """
+    from ... import context
+    from ...config import Config
+
+    cfg = Config()
+    return cfg.get_executor(host=context.host_var.get(None))
 
 
 def _resolve_config_dir(config_dir: Path | None) -> Path:
@@ -215,6 +227,7 @@ def diff(
         ots --host ca-tor-web-01 host diff ops-jurisdictions/ca/config-v0.24/
     """
     ssh_host = _resolve_ssh_host()
+    ex = _get_executor()
     resolved_dir = _resolve_config_dir(config_dir)
 
     manifest = resolve_manifest(resolved_dir)
@@ -232,13 +245,8 @@ def diff(
     for local_path, entry in files:
         local_content = local_path.read_text()
 
-        # Fetch remote file content via ssh cat
-        result = subprocess.run(
-            ["ssh", ssh_host, "cat", str(entry.remote_path)],
-            capture_output=True,
-            text=True,
-            timeout=30,
-        )
+        # Fetch remote file content via executor
+        result = ex.run(["cat", str(entry.remote_path)], timeout=30)
 
         if result.returncode != 0:
             # File doesn't exist on remote — show as entirely new
@@ -294,6 +302,7 @@ def pull(
     """
     dry_run = not apply
     ssh_host = _resolve_ssh_host()
+    ex = _get_executor()
     resolved_dir = _resolve_config_dir(config_dir)
 
     manifest = resolve_manifest(resolved_dir)
@@ -308,13 +317,8 @@ def pull(
     for entry in manifest:
         local_path = resolved_dir / entry.local_name
 
-        # Fetch remote file
-        result = subprocess.run(
-            ["ssh", ssh_host, "cat", str(entry.remote_path)],
-            capture_output=True,
-            text=True,
-            timeout=30,
-        )
+        # Fetch remote file via executor
+        result = ex.run(["cat", str(entry.remote_path)], timeout=30)
 
         if result.returncode != 0:
             if not quiet:
@@ -362,6 +366,7 @@ def status(
         ots --host ca-tor-web-01 host status
     """
     ssh_host = _resolve_ssh_host()
+    ex = _get_executor()
     resolved_dir = _resolve_config_dir(config_dir)
 
     manifest = resolve_manifest(resolved_dir)
@@ -375,12 +380,8 @@ def status(
         local_path = resolved_dir / entry.local_name
         local_ok = local_path.exists()
 
-        # Check remote existence via ssh test -f
-        result = subprocess.run(
-            ["ssh", ssh_host, "test", "-f", str(entry.remote_path)],
-            capture_output=True,
-            timeout=10,
-        )
+        # Check remote existence via executor
+        result = ex.run(["test", "-f", str(entry.remote_path)], timeout=10)
         remote_ok = result.returncode == 0
 
         local_status = "yes" if local_ok else "no"

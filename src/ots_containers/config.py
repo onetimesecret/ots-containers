@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import atexit
 import os
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -31,6 +32,16 @@ CONFIG_FILES: tuple[str, ...] = (
     "logging.yaml",
     "billing.yaml",
 )
+
+# --- Input validation patterns ---
+# OCI tag: alphanumeric start, then alphanumeric/dot/hyphen/underscore, max 128 chars.
+# Also allows the '@current'/'@rollback' sentinel prefix.
+TAG_RE = re.compile(r"^@?[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$")
+
+# OCI image reference (without tag): registry/path components.
+# Each path component: alphanumeric, may contain dots/hyphens/underscores, separated by '/'.
+# Minimal validation to reject shell metacharacters and whitespace.
+IMAGE_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._/-]{0,254}$")
 
 
 # Session-scoped SSH connection cache: hostname -> paramiko.SSHClient.
@@ -300,8 +311,32 @@ class Config:
         return len(self.existing_config_files) > 0
 
     def validate(self) -> None:
-        """Validate configuration. Config files are optional (container has defaults)."""
-        pass
+        """Validate configuration values for safe use in OCI refs and templates.
+
+        Checks:
+        - tag matches OCI tag format (alphanumeric start, max 128 chars,
+          no shell metacharacters). Sentinel tags (@current, @rollback) allowed.
+        - image matches OCI image reference format (no shell metacharacters,
+          no whitespace).
+
+        Config files are optional (container has defaults) and are not checked here.
+
+        Raises:
+            ValueError: If tag or image contains invalid characters.
+        """
+        if not TAG_RE.match(self.tag):
+            raise ValueError(
+                f"Invalid tag: {self.tag!r}. "
+                "Tags must start with an alphanumeric character, contain only "
+                "alphanumerics, dots, hyphens, and underscores, and be at most "
+                "128 characters. Sentinel prefix '@' is allowed."
+            )
+        if not IMAGE_RE.match(self.image):
+            raise ValueError(
+                f"Invalid image: {self.image!r}. "
+                "Image names must start with an alphanumeric character and contain "
+                "only alphanumerics, dots, hyphens, underscores, and forward slashes."
+            )
 
     def get_executor(self, host: str | None = None):
         """Return an Executor for the given host, or LocalExecutor if None.

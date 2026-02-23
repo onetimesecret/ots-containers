@@ -5,7 +5,6 @@
 from __future__ import annotations
 
 import shutil
-import subprocess
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -370,30 +369,23 @@ def systemctl(
     *args: str,
     check: bool = True,
     executor: Executor | None = None,
-) -> Result | subprocess.CompletedProcess:
+) -> Result:
     """Run a systemctl command.
 
     Args:
         *args: Arguments to pass to systemctl
         check: Whether to raise on non-zero exit
-        executor: Executor for command dispatch. None uses subprocess directly
-            for backward compatibility.
+        executor: Executor for command dispatch. When None, uses a
+            LocalExecutor so the return type is always Result.
 
     Returns:
-        Result (with executor) or CompletedProcess (without)
+        Result from the executor.
     """
-    if executor is not None:
-        return executor.run(
-            ["systemctl", *args],
-            timeout=30,
-            check=check,
-        )
-    return subprocess.run(
+    ex = _get_executor(executor)
+    return ex.run(
         ["systemctl", *args],
-        capture_output=True,
-        text=True,
-        check=check,
         timeout=30,
+        check=check,
     )
 
 

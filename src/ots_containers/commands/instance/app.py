@@ -561,7 +561,7 @@ def deploy(
                         timeout_s = wait_timeout or 60
                         url = f"http://localhost:{port}/health"
                         print(f"  Waiting up to {timeout_s}s for {url} ...")
-                    systemd.wait_for_http_healthy(port, timeout=wait_timeout or 60)
+                    systemd.wait_for_http_healthy(port, timeout=wait_timeout or 60, executor=ex)
                 # Record successful deployment
                 db.record_deployment(
                     cfg.get_db_path(ex),

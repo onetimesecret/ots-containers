@@ -85,8 +85,8 @@ def render(
         from ots_shared.ssh import is_remote
 
         if is_remote(ex):
-            ex.run(["mkdir", "-p", str(out.parent)])
-            result = ex.run(["tee", str(out)], input=rendered)
+            ex.run(["mkdir", "-p", str(out.parent)], timeout=15)
+            result = ex.run(["tee", str(out)], input=rendered, timeout=15)
             if not result.ok:
                 raise ProxyError(f"Failed to write {out}: {result.stderr}")
         else:

@@ -55,7 +55,7 @@ def render_template(template_path: Path, *, executor: Executor | None = None) ->
             raise ProxyError(f"Failed to read template: {result.stderr}")
         template_content = result.stdout
         # Pipe through envsubst on the remote host
-        result = executor.run(["envsubst"], input=template_content)  # type: ignore[union-attr]
+        result = executor.run(["envsubst"], input=template_content, timeout=30)  # type: ignore[union-attr]
         if not result.ok:
             raise ProxyError(f"envsubst failed: {result.stderr}")
         return result.stdout
@@ -91,8 +91,17 @@ def validate_caddy_config(content: str, *, executor: Executor | None = None) -> 
         ProxyError: If validation fails.
     """
     if _is_remote(executor):
-        # Write content to temp file on remote host, validate, clean up
-        tmp_remote = "/tmp/.ots-caddy-validate.Caddyfile"
+        # Create unique temp file on remote host (CWE-377: avoid predictable paths)
+        mktemp_result = executor.run(  # type: ignore[union-attr]
+            ["mktemp", "/tmp/ots-caddy-validate.XXXXXXXXXX"],
+            timeout=10,
+        )
+        if not mktemp_result.ok:
+            raise ProxyError(f"Failed to create temp file on remote: {mktemp_result.stderr}")
+        tmp_remote = mktemp_result.stdout.strip()
+        if not tmp_remote:
+            raise ProxyError("mktemp returned empty path")
+
         result = executor.run(["tee", tmp_remote], input=content)  # type: ignore[union-attr]
         if not result.ok:
             raise ProxyError(f"Failed to write temp file on remote: {result.stderr}")
@@ -104,7 +113,7 @@ def validate_caddy_config(content: str, *, executor: Executor | None = None) -> 
             if not result.ok:
                 raise ProxyError(f"Caddy validation failed:\n{result.stderr}")
         finally:
-            executor.run(["rm", "-f", tmp_remote])  # type: ignore[union-attr]
+            executor.run(["rm", "-f", tmp_remote], timeout=10)  # type: ignore[union-attr]
         return
 
     # Local execution

@@ -421,16 +421,17 @@ def ensure_podman_secret(secret_name: str, value: str, *, executor: Executor | N
     require_podman(executor=executor)
 
     ex = _get_executor(executor)
-    result = ex.run(["podman", "secret", "exists", secret_name])
+    result = ex.run(["podman", "secret", "exists", secret_name], timeout=15)
     existed = result.ok
 
     if existed:
-        ex.run(["podman", "secret", "rm", secret_name], check=True)
+        ex.run(["podman", "secret", "rm", secret_name], check=True, timeout=15)
 
     ex.run(
         ["podman", "secret", "create", secret_name, "-"],
         input=value,
         check=True,
+        timeout=30,
     )
 
     return "replaced" if existed else "created"

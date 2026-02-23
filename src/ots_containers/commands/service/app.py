@@ -10,7 +10,6 @@ unit files.
 from __future__ import annotations
 
 import logging
-import subprocess
 from typing import TYPE_CHECKING, Annotated
 
 import cyclopts
@@ -32,16 +31,14 @@ from ._helpers import (
 )
 from .packages import get_package, list_packages
 
-# When executor is None, systemctl() uses subprocess.run(check=True) which
-# raises CalledProcessError.  When executor is set, it raises CommandError.
-_SystemctlError = (subprocess.CalledProcessError, CommandError)
+# systemctl() always returns Result and raises CommandError on failure
+# (it wraps all calls through an Executor, even locally).
+_SystemctlError = CommandError
 
 
-def _error_stderr(e: Exception) -> str:
-    """Extract stderr from either CalledProcessError or CommandError."""
-    if isinstance(e, CommandError):
-        return e.result.stderr
-    return getattr(e, "stderr", "") or ""
+def _error_stderr(e: CommandError) -> str:
+    """Extract stderr from a CommandError."""
+    return e.result.stderr
 
 
 if TYPE_CHECKING:
