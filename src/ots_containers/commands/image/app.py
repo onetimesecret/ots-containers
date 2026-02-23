@@ -1302,10 +1302,10 @@ def build(
         ots image build -d . --push --registry registry.example.com
     """
     cfg = Config()
-    # Builds always run locally — use Podman without executor so that
-    # subprocess.run streams output to the terminal in real-time instead
-    # of buffering through LocalExecutor's capture_output=True.
-    ex = cfg.get_executor(host=context.host_var.get(None))
+    # Builds always run locally — no executor needed.  Podman() without
+    # executor uses subprocess.run directly so build output streams to
+    # the terminal in real-time.  Skipping get_executor() also avoids
+    # an unnecessary SSH connection when .otsinfra.env is present.
     p = Podman()
 
     # Resolve project directory
@@ -1315,11 +1315,15 @@ def build(
     # Check for .oci-build.json — drives whether we use bake-aware or legacy path
     oci_config = _load_oci_build_config(proj_dir)
 
+    # Immediate context feedback
+    if not quiet:
+        oci_label = ".oci-build.json" if oci_config is not None else "default"
+        print(f"build: {proj_dir} [{oci_label}]")
+
     if oci_config is not None:
         _build_with_oci_config(
             p=p,
             cfg=cfg,
-            ex=ex,
             proj_dir=proj_dir,
             oci_config=oci_config,
             dockerfile=dockerfile,
@@ -1335,7 +1339,6 @@ def build(
         _build_legacy(
             p=p,
             cfg=cfg,
-            ex=ex,
             proj_dir=proj_dir,
             dockerfile=dockerfile,
             target=target,
@@ -1352,7 +1355,6 @@ def _build_with_oci_config(
     *,
     p: Podman,
     cfg,
-    ex,
     proj_dir: Path,
     oci_config: dict,
     dockerfile: str | None,
@@ -1499,7 +1501,6 @@ def _build_with_oci_config(
                 action="build",
                 success=True,
                 notes=f"oci-config, target={variant.get('target')}",
-                executor=ex,
             )
     except Exception as e:
         print(f"Build failed: {_format_build_error(e)}")
@@ -1514,7 +1515,7 @@ def _build_with_oci_config(
 
     # Push if requested
     if push:
-        _push_images(p, cfg, ex, built_images, build_tag, registry, quiet)
+        _push_images(p, cfg, built_images, build_tag, registry, quiet)
 
     # Print summary
     if not quiet:
@@ -1528,7 +1529,6 @@ def _build_legacy(
     *,
     p: Podman,
     cfg,
-    ex,
     proj_dir: Path,
     dockerfile: str | None,
     target: str | None,
@@ -1614,12 +1614,11 @@ def _build_legacy(
         action="build",
         success=True,
         notes=f"target={target}" if target else None,
-        executor=ex,
     )
 
     # Push if requested
     if push:
-        _push_images(p, cfg, ex, [local_image], build_tag, registry, quiet)
+        _push_images(p, cfg, [local_image], build_tag, registry, quiet)
 
     # Print summary
     if not quiet:
@@ -1631,7 +1630,6 @@ def _build_legacy(
 def _push_images(
     p: Podman,
     cfg,
-    ex,
     images: list[str],
     build_tag: str,
     registry: str | None,
@@ -1686,5 +1684,4 @@ def _push_images(
             tag=build_tag,
             action="push",
             success=True,
-            executor=ex,
         )
