@@ -28,6 +28,11 @@ class TestConfigTransformCommand:
         mock_config = mocker.MagicMock()
         mock_config.get_executor.return_value = LocalExecutor()
         mock_config.tag = "current"
+        mock_config.image = "ghcr.io/onetimesecret/onetimesecret"
+        mock_config.resolve_image_tag.return_value = (
+            "ghcr.io/onetimesecret/onetimesecret",
+            "current",
+        )
         mock_config.config_dir = tmp_path / "etc"
         mock_config.config_dir.mkdir()
         (mock_config.config_dir / "config.yaml").write_text("key: value\n")
@@ -107,6 +112,11 @@ class TestConfigTransformCommand:
         mock_config = mocker.MagicMock()
         mock_config.get_executor.return_value = LocalExecutor()
         mock_config.tag = "current"
+        mock_config.image = "ghcr.io/onetimesecret/onetimesecret"
+        mock_config.resolve_image_tag.return_value = (
+            "ghcr.io/onetimesecret/onetimesecret",
+            "current",
+        )
         mock_config.config_dir = tmp_path / "etc"
         mock_config.config_dir.mkdir()
         (mock_config.config_dir / "config.yaml").write_text("key: value\n")
@@ -142,6 +152,11 @@ class TestConfigTransformCommand:
         mock_config = mocker.MagicMock()
         mock_config.get_executor.return_value = LocalExecutor()
         mock_config.tag = "current"
+        mock_config.image = "ghcr.io/onetimesecret/onetimesecret"
+        mock_config.resolve_image_tag.return_value = (
+            "ghcr.io/onetimesecret/onetimesecret",
+            "current",
+        )
         mock_config.config_dir = tmp_path / "etc"
         mock_config.config_dir.mkdir()
         (mock_config.config_dir / "config.yaml").write_text("key: value\n")
@@ -181,6 +196,11 @@ class TestConfigTransformCommand:
         mock_config = mocker.MagicMock()
         mock_config.get_executor.return_value = LocalExecutor()
         mock_config.tag = "current"
+        mock_config.image = "ghcr.io/onetimesecret/onetimesecret"
+        mock_config.resolve_image_tag.return_value = (
+            "ghcr.io/onetimesecret/onetimesecret",
+            "current",
+        )
         mock_config.config_dir = tmp_path / "etc"
         mock_config.config_dir.mkdir()
         (mock_config.config_dir / "config.yaml").write_text("key: value\n")
@@ -225,6 +245,11 @@ class TestConfigTransformCommand:
         mock_config = mocker.MagicMock()
         mock_config.get_executor.return_value = LocalExecutor()
         mock_config.tag = "current"
+        mock_config.image = "ghcr.io/onetimesecret/onetimesecret"
+        mock_config.resolve_image_tag.return_value = (
+            "ghcr.io/onetimesecret/onetimesecret",
+            "current",
+        )
         mock_config.config_dir = tmp_path / "etc"
         mock_config.config_dir.mkdir()
         (mock_config.config_dir / "config.yaml").write_text("key: old_value\n")
@@ -267,6 +292,11 @@ class TestConfigTransformCommand:
         mock_config = mocker.MagicMock()
         mock_config.get_executor.return_value = LocalExecutor()
         mock_config.tag = "current"
+        mock_config.image = "ghcr.io/onetimesecret/onetimesecret"
+        mock_config.resolve_image_tag.return_value = (
+            "ghcr.io/onetimesecret/onetimesecret",
+            "current",
+        )
         mock_config.config_dir = tmp_path / "etc"
         mock_config.config_dir.mkdir()
         config_file = mock_config.config_dir / "config.yaml"
@@ -305,6 +335,11 @@ class TestConfigTransformCommand:
         mock_config = mocker.MagicMock()
         mock_config.get_executor.return_value = LocalExecutor()
         mock_config.tag = "current"
+        mock_config.image = "ghcr.io/onetimesecret/onetimesecret"
+        mock_config.resolve_image_tag.return_value = (
+            "ghcr.io/onetimesecret/onetimesecret",
+            "current",
+        )
         mock_config.config_dir = tmp_path / "etc"
         mock_config.config_dir.mkdir()
         config_file = mock_config.config_dir / "config.yaml"
@@ -341,6 +376,11 @@ class TestConfigTransformCommand:
         mock_config = mocker.MagicMock()
         mock_config.get_executor.return_value = LocalExecutor()
         mock_config.tag = "current"
+        mock_config.image = "ghcr.io/onetimesecret/onetimesecret"
+        mock_config.resolve_image_tag.return_value = (
+            "ghcr.io/onetimesecret/onetimesecret",
+            "current",
+        )
         mock_config.config_dir = tmp_path / "etc"
         mock_config.config_dir.mkdir()
         config_file = mock_config.config_dir / "config.yaml"
@@ -379,6 +419,11 @@ class TestConfigTransformCommand:
         mock_config = mocker.MagicMock()
         mock_config.get_executor.return_value = LocalExecutor()
         mock_config.tag = "current"
+        mock_config.image = "ghcr.io/onetimesecret/onetimesecret"
+        mock_config.resolve_image_tag.return_value = (
+            "ghcr.io/onetimesecret/onetimesecret",
+            "current",
+        )
         mock_config.config_dir = tmp_path / "etc"
         mock_config.config_dir.mkdir()
         (mock_config.config_dir / "config.yaml").write_text("key: value\n")
@@ -416,6 +461,11 @@ class TestConfigTransformCommand:
         mock_config = mocker.MagicMock()
         mock_config.get_executor.return_value = LocalExecutor()
         mock_config.tag = "current"
+        mock_config.image = "ghcr.io/onetimesecret/onetimesecret"
+        mock_config.resolve_image_tag.return_value = (
+            "ghcr.io/onetimesecret/onetimesecret",
+            "current",
+        )
         mock_config.config_dir = tmp_path / "etc"
         mock_config.config_dir.mkdir()
         (mock_config.config_dir / "config.yaml").write_text("key: value\n")
@@ -455,6 +505,11 @@ class TestConfigTransformCommand:
         mock_config = mocker.MagicMock()
         mock_config.get_executor.return_value = LocalExecutor()
         mock_config.tag = "current"
+        mock_config.image = "ghcr.io/onetimesecret/onetimesecret"
+        mock_config.resolve_image_tag.return_value = (
+            "ghcr.io/onetimesecret/onetimesecret",
+            "current",
+        )
         mock_config.config_dir = tmp_path / "etc"
         mock_config.config_dir.mkdir()
         (mock_config.config_dir / "auth.yaml").write_text("auth: config\n")
@@ -495,6 +550,11 @@ class TestConfigTransformCommand:
         mock_config = mocker.MagicMock()
         mock_config.get_executor.return_value = LocalExecutor()
         mock_config.tag = "current"
+        mock_config.image = "ghcr.io/onetimesecret/onetimesecret"
+        mock_config.resolve_image_tag.return_value = (
+            "ghcr.io/onetimesecret/onetimesecret",
+            "current",
+        )
         mock_config.config_dir = tmp_path / "etc"
         mock_config.config_dir.mkdir()
         (mock_config.config_dir / "config.yaml").write_text("key: value\n")
@@ -547,6 +607,11 @@ class TestConfigTransformCommand:
         mock_config = mocker.MagicMock()
         mock_config.get_executor.return_value = LocalExecutor()
         mock_config.tag = "current"
+        mock_config.image = "ghcr.io/onetimesecret/onetimesecret"
+        mock_config.resolve_image_tag.return_value = (
+            "ghcr.io/onetimesecret/onetimesecret",
+            "current",
+        )
         mock_config.config_dir = tmp_path / "etc"
         mock_config.config_dir.mkdir()
         config_file = mock_config.config_dir / "config.yaml"
@@ -630,6 +695,11 @@ class TestConfigTransformRemote:
         mock_ex = self._make_remote_executor(mocker)
         mock_config.get_executor.return_value = mock_ex
         mock_config.tag = "current"
+        mock_config.image = "ghcr.io/onetimesecret/onetimesecret"
+        mock_config.resolve_image_tag.return_value = (
+            "ghcr.io/onetimesecret/onetimesecret",
+            "current",
+        )
         mock_config.config_dir = tmp_path / "etc"
         mock_config.config_dir.mkdir()
         mocker.patch("ots_containers.commands.instance.app.Config", return_value=mock_config)
@@ -658,6 +728,7 @@ class TestConfigTransformRemote:
         mock_config.get_executor.return_value = mock_ex
         mock_config.tag = "current"
         mock_config.image = "ghcr.io/test/img"
+        mock_config.resolve_image_tag.return_value = ("ghcr.io/test/img", "current")
         mock_config.config_dir = tmp_path / "etc"
         mock_config.config_dir.mkdir()
         mocker.patch("ots_containers.commands.instance.app.Config", return_value=mock_config)
@@ -723,6 +794,7 @@ class TestConfigTransformRemote:
         mock_config.get_executor.return_value = mock_ex
         mock_config.tag = "current"
         mock_config.image = "ghcr.io/test/img"
+        mock_config.resolve_image_tag.return_value = ("ghcr.io/test/img", "current")
         mock_config.config_dir = tmp_path / "etc"
         mock_config.config_dir.mkdir()
         mocker.patch("ots_containers.commands.instance.app.Config", return_value=mock_config)

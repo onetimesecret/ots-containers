@@ -1256,6 +1256,68 @@ class TestGetResourceLimitsSection:
         result = quadlet.get_resource_limits_section(cfg)
         assert result == ""
 
+    def test_rejects_newline_memory_max(self):
+        """Should reject MEMORY_MAX with newline injection (defense-in-depth)."""
+        from unittest.mock import MagicMock
+
+        from ots_containers import quadlet
+
+        # Use MagicMock to bypass Config.__post_init__ validation and test
+        # the defense-in-depth layer in get_resource_limits_section() directly.
+        cfg = MagicMock()
+        cfg.memory_max = "1G\nExecStart=/bin/sh"
+        cfg.cpu_quota = None
+        with pytest.raises(ValueError, match="Invalid MEMORY_MAX"):
+            quadlet.get_resource_limits_section(cfg)
+
+    def test_rejects_newline_cpu_quota(self):
+        """Should reject CPU_QUOTA with newline injection (defense-in-depth)."""
+        from unittest.mock import MagicMock
+
+        from ots_containers import quadlet
+
+        cfg = MagicMock()
+        cfg.memory_max = None
+        cfg.cpu_quota = "80%\nExecStart=/bin/sh"
+        with pytest.raises(ValueError, match="Invalid CPU_QUOTA"):
+            quadlet.get_resource_limits_section(cfg)
+
+    def test_rejects_shell_metacharacters_memory_max(self):
+        """Should reject MEMORY_MAX with shell metacharacters (defense-in-depth)."""
+        from unittest.mock import MagicMock
+
+        from ots_containers import quadlet
+
+        cfg = MagicMock()
+        cfg.memory_max = "1G; rm -rf /"
+        cfg.cpu_quota = None
+        with pytest.raises(ValueError, match="Invalid MEMORY_MAX"):
+            quadlet.get_resource_limits_section(cfg)
+
+    def test_rejects_shell_metacharacters_cpu_quota(self):
+        """Should reject CPU_QUOTA with shell metacharacters (defense-in-depth)."""
+        from unittest.mock import MagicMock
+
+        from ots_containers import quadlet
+
+        cfg = MagicMock()
+        cfg.memory_max = None
+        cfg.cpu_quota = "$(whoami)%"
+        with pytest.raises(ValueError, match="Invalid CPU_QUOTA"):
+            quadlet.get_resource_limits_section(cfg)
+
+    def test_rejects_command_substitution_memory_max(self):
+        """Should reject MEMORY_MAX with command substitution (defense-in-depth)."""
+        from unittest.mock import MagicMock
+
+        from ots_containers import quadlet
+
+        cfg = MagicMock()
+        cfg.memory_max = "$(whoami)"
+        cfg.cpu_quota = None
+        with pytest.raises(ValueError, match="Invalid MEMORY_MAX"):
+            quadlet.get_resource_limits_section(cfg)
+
     def test_write_web_template_includes_resource_limits(self, mocker, tmp_path, monkeypatch):
         """Written web quadlet should include MemoryMax= when memory_max is configured."""
         mocker.patch("ots_containers.quadlet.systemd.daemon_reload")

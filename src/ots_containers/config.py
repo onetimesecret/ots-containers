@@ -31,17 +31,38 @@ CONFIG_FILES: tuple[str, ...] = (
     "auth.yaml",
     "logging.yaml",
     "billing.yaml",
+    "Caddyfile.template",
+    "puma.rb",
 )
 
 # --- Input validation patterns ---
 # OCI tag: alphanumeric start, then alphanumeric/dot/hyphen/underscore, max 128 chars.
-# Also allows the '@current'/'@rollback' sentinel prefix.
-TAG_RE = re.compile(r"^@?[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$")
+# Also allows the '@current'/'@rollback' sentinel prefix and digest references
+# like '@sha256:abc123...' (algorithm:hex format).
+TAG_RE = re.compile(r"^(?:@[a-zA-Z0-9]+:[a-fA-F0-9]+|@?[a-zA-Z0-9][a-zA-Z0-9._-]{0,127})$")
 
 # OCI image reference (without tag): registry/path components.
 # Each path component: alphanumeric, may contain dots/hyphens/underscores, separated by '/'.
+# Colons allowed for registry port numbers (e.g. registry:5000/org/image).
 # Minimal validation to reject shell metacharacters and whitespace.
-IMAGE_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._/-]{0,254}$")
+# The negative lookahead rejects '..' path traversal sequences anywhere in the reference.
+IMAGE_RE = re.compile(r"^(?!.*\.\.)[a-zA-Z0-9][a-zA-Z0-9._/:-]{0,254}$")
+
+# Systemd resource limit: MemoryMax accepts e.g. "512M", "1G", "2G", "infinity",
+# or bare byte counts.  CPUQuota accepts percentages like "80%", "150%".
+# This pattern is intentionally strict to prevent newline/directive injection.
+MEMORY_MAX_RE = re.compile(r"^(?:infinity|\d+[KMGT]?)$", re.IGNORECASE)
+CPU_QUOTA_RE = re.compile(r"^\d{1,5}%$")
+
+# Systemd unit name: alphanumeric, hyphens, dots, underscores, and '@' for template instances.
+# Intentionally strict to prevent newline/directive injection into quadlet [Unit] section.
+# Examples: "valkey-server@6379.service", "redis.service"
+SYSTEMD_UNIT_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._@:-]{0,255}$")
+
+# OCI registry URL: hostname with optional port and path components.
+# Examples: "registry.example.com", "registry:5000", "registry.example.com/org"
+# Rejects shell metacharacters, whitespace, and newlines.
+REGISTRY_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._/:-]{0,254}$")
 
 
 # Session-scoped SSH connection cache: hostname -> paramiko.SSHClient.
@@ -61,6 +82,57 @@ def _close_ssh_cache() -> None:
 
 
 atexit.register(_close_ssh_cache)
+
+
+def parse_image_reference(ref: str) -> tuple[str, str | None]:
+    """Parse an OCI image reference into (image, tag_or_none).
+
+    Uses the last-colon-after-last-slash rule to handle registry ports
+    correctly.  Digest references (``@sha256:...``) are recognised and
+    returned with the ``@`` prefix so callers can distinguish them from
+    plain tags.
+
+    Examples::
+
+        parse_image_reference("registry:5000/org/image:tag")
+        # -> ("registry:5000/org/image", "tag")
+
+        parse_image_reference("registry:5000/image")
+        # -> ("registry:5000/image", None)
+
+        parse_image_reference("image:tag")
+        # -> ("image", "tag")
+
+        parse_image_reference("image@sha256:abc123")
+        # -> ("image", "@sha256:abc123")
+
+    Args:
+        ref: An OCI image reference string.
+
+    Returns:
+        A ``(image, tag_or_none)`` tuple.  *tag_or_none* is ``None``
+        when the reference contains no tag or digest.
+    """
+    if not ref:
+        raise ValueError("Image reference must not be empty")
+
+    # Digest reference: split on the first '@'
+    at_pos = ref.find("@")
+    if at_pos != -1:
+        image_part = ref[:at_pos]
+        digest_part = ref[at_pos:]  # includes the '@'
+        return (image_part, digest_part)
+
+    # Last-colon-after-last-slash rule
+    last_slash = ref.rfind("/")
+    colon_pos = ref.rfind(":")
+
+    if colon_pos != -1 and colon_pos > last_slash:
+        # Colon is after the last slash (or there is no slash) -> it's a tag separator
+        return (ref[:colon_pos], ref[colon_pos + 1 :])
+
+    # No tag portion found
+    return (ref, None)
 
 
 @dataclass
@@ -87,8 +159,8 @@ class Config:
 
     config_dir: Path = Path("/etc/onetimesecret")
     var_dir: Path = Path("/var/lib/onetimesecret")
-    image: str = field(default_factory=lambda: os.environ.get("IMAGE", DEFAULT_IMAGE))
-    tag: str = field(default_factory=lambda: os.environ.get("TAG", DEFAULT_TAG))
+    image: str = field(default_factory=lambda: os.environ.get("IMAGE") or DEFAULT_IMAGE)
+    tag: str = field(default_factory=lambda: os.environ.get("TAG") or DEFAULT_TAG)
     web_template_path: Path = Path("/etc/containers/systemd/onetime-web@.container")
     worker_template_path: Path = Path("/etc/containers/systemd/onetime-worker@.container")
     scheduler_template_path: Path = Path("/etc/containers/systemd/onetime-scheduler@.container")
@@ -115,6 +187,10 @@ class Config:
     # Proxy (Caddy) configuration - uses HOST environment, not container .env
     proxy_template: Path = Path("/etc/onetimesecret/Caddyfile.template")
     proxy_config: Path = Path("/etc/caddy/Caddyfile")
+
+    def __post_init__(self):
+        """Validate fields on construction (and dataclasses.replace)."""
+        self.validate()
 
     @property
     def image_with_tag(self) -> str:
@@ -318,11 +394,16 @@ class Config:
           no shell metacharacters). Sentinel tags (@current, @rollback) allowed.
         - image matches OCI image reference format (no shell metacharacters,
           no whitespace).
+        - memory_max matches systemd MemoryMax format (e.g. 512M, 1G, infinity).
+        - cpu_quota matches systemd CPUQuota format (e.g. 80%, 150%).
+        - valkey_service matches systemd unit name format (no newlines or injection).
+        - registry matches hostname:port/path pattern (no shell metacharacters).
 
         Config files are optional (container has defaults) and are not checked here.
 
         Raises:
-            ValueError: If tag or image contains invalid characters.
+            ValueError: If tag, image, resource limits, service names, or registry
+                contain invalid characters.
         """
         if not TAG_RE.match(self.tag):
             raise ValueError(
@@ -336,6 +417,28 @@ class Config:
                 f"Invalid image: {self.image!r}. "
                 "Image names must start with an alphanumeric character and contain "
                 "only alphanumerics, dots, hyphens, underscores, and forward slashes."
+            )
+        if self.memory_max and not MEMORY_MAX_RE.match(self.memory_max):
+            raise ValueError(
+                f"Invalid MEMORY_MAX: {self.memory_max!r}. "
+                "Must be a systemd memory value: a number with optional K/M/G/T "
+                "suffix, or 'infinity'."
+            )
+        if self.cpu_quota and not CPU_QUOTA_RE.match(self.cpu_quota):
+            raise ValueError(
+                f"Invalid CPU_QUOTA: {self.cpu_quota!r}. Must be a percentage like '80%' or '150%'."
+            )
+        if self.valkey_service and not SYSTEMD_UNIT_RE.match(self.valkey_service):
+            raise ValueError(
+                f"Invalid OTS_VALKEY_SERVICE: {self.valkey_service!r}. "
+                "Must be a valid systemd unit name (alphanumeric, hyphens, dots, "
+                "underscores, and '@' for template instances)."
+            )
+        if self.registry and not REGISTRY_RE.match(self.registry):
+            raise ValueError(
+                f"Invalid OTS_REGISTRY: {self.registry!r}. "
+                "Must be a valid registry URL (hostname with optional port and path, "
+                "no shell metacharacters or whitespace)."
             )
 
     def get_executor(self, host: str | None = None):

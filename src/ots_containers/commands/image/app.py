@@ -24,7 +24,7 @@ from typing import Annotated
 import cyclopts
 
 from ots_containers import context, db
-from ots_containers.config import Config
+from ots_containers.config import Config, parse_image_reference
 from ots_containers.podman import Podman
 
 from ..common import JsonOutput, Lines, Quiet, Yes
@@ -99,13 +99,7 @@ def pull(
     p = Podman(executor=ex)
 
     # Parse positional reference into image/tag components
-    ref_image = None
-    ref_tag = None
-    if reference:
-        if ":" in reference and not reference.endswith(":"):
-            ref_image, ref_tag = reference.rsplit(":", 1)
-        else:
-            ref_image = reference.rstrip(":")
+    ref_image, ref_tag = parse_image_reference(reference) if reference else (None, None)
 
     # Resolve image and tag: CLI flags > positional reference > env vars
     resolved_image = image or ref_image or cfg.image
@@ -251,11 +245,14 @@ def ls(
         )
         # Filter if not all_tags
         if not all_tags:
+            # Use the basename of the configured image for filtering so
+            # that both registry-prefixed and local images are matched.
+            image_basename = cfg.image.rsplit("/", 1)[-1]
             images = json_module.loads(result.stdout)
             images = [
                 img
                 for img in images
-                if any("onetimesecret" in name for name in img.get("Names", []))
+                if any(image_basename in name for name in img.get("Names", []))
             ]
             print(json_module.dumps(images, indent=2))
         else:
@@ -269,8 +266,11 @@ def ls(
             text=True,
         )
     else:
+        # Use the basename of the configured image for the filter so
+        # that both registry-prefixed and local images are matched.
+        image_basename = cfg.image.rsplit("/", 1)[-1]
         result = p.images(
-            filter="reference=*onetimesecret*",
+            filter=f"reference=*{image_basename}*",
             format="table {{.Repository}}:{{.Tag}}\t{{.ID}}\t{{.Size}}\t{{.Created}}",
             capture_output=True,
             text=True,
@@ -1375,8 +1375,10 @@ def _build_with_oci_config(
     git_hash = _get_git_hash(proj_dir, required=False)
     pkg_version = _read_package_version(proj_dir)
 
-    # Resolve image name from config (strip registry prefix, use basename)
-    config_image_name = oci_config.get("image_name", "onetimesecret")
+    # Resolve image name from config (strip registry prefix, use basename).
+    # Falls back to cfg.image basename when .oci-build.json omits image_name.
+    default_image_name = cfg.image.rsplit("/", 1)[-1]
+    config_image_name = oci_config.get("image_name", default_image_name)
     image_name = config_image_name.split("/")[-1]
 
     # Resolve platform: CLI flag takes priority, then config, then default
@@ -1559,8 +1561,9 @@ def _build_legacy(
     git_hash = _get_git_hash(proj_dir, required=False)
     pkg_version = _read_package_version(proj_dir)
 
-    # Image name with optional suffix
-    image_name = f"onetimesecret{suffix or ''}"
+    # Image name with optional suffix (use basename of configured image)
+    image_basename = cfg.image.rsplit("/", 1)[-1]
+    image_name = f"{image_basename}{suffix or ''}"
     local_image = f"{image_name}:{build_tag}"
 
     if not quiet:

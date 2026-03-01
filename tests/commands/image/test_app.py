@@ -279,6 +279,41 @@ class TestLsCommand:
         captured = capsys.readouterr()
         assert "Local images:" in captured.out
 
+    def test_ls_json_filters_by_custom_image_basename(self, mocker, monkeypatch, capsys):
+        """ls --json with custom IMAGE should filter by image basename, not hardcoded name."""
+        import json
+
+        from ots_containers.commands.image.app import ls
+
+        monkeypatch.setenv("IMAGE", "custom.registry.io/myapp")
+
+        # Provide JSON with myapp entries and other entries
+        podman_output = json.dumps(
+            [
+                {"Names": ["custom.registry.io/myapp:v1.0"], "Id": "aaa"},
+                {"Names": ["myapp:v1.0"], "Id": "bbb"},
+                {"Names": ["other-image:latest"], "Id": "ccc"},
+                {"Names": ["docker.io/library/nginx:latest"], "Id": "ddd"},
+            ]
+        )
+        mocker.patch(
+            "ots_containers.podman.subprocess.run",
+            return_value=mocker.MagicMock(stdout=podman_output),
+        )
+
+        ls(all_tags=False, json_output=True)
+
+        captured = capsys.readouterr()
+        result = json.loads(captured.out)
+        # Should include both entries with "myapp" in Names
+        assert len(result) == 2
+        ids = [img["Id"] for img in result]
+        assert "aaa" in ids  # custom.registry.io/myapp:v1.0
+        assert "bbb" in ids  # myapp:v1.0
+        # Should NOT include other-image or nginx
+        assert "ccc" not in ids
+        assert "ddd" not in ids
+
 
 class TestPullEnvVarResolution:
     """Test that pull correctly resolves IMAGE and TAG from env vars.
@@ -966,8 +1001,9 @@ class TestPullPositionalReference:
         assert mock_run.call_count == 2
         mock_set_current.assert_called_once()
 
-    def test_pull_no_reference_no_tag_exits(self, mocker, monkeypatch, tmp_path, capsys):
-        """No reference, no --tag, no TAG env var should exit with error."""
+    def test_pull_no_reference_no_tag_rejects_sentinel(self, mocker, monkeypatch, tmp_path, capsys):
+        """No reference, no --tag, empty TAG env var falls back to
+        @current sentinel which pull rejects."""
         from ots_containers.commands.image.app import pull
 
         monkeypatch.setenv("TAG", "")
@@ -978,7 +1014,7 @@ class TestPullPositionalReference:
 
         assert exc_info.value.code == 1
         captured = capsys.readouterr()
-        assert "--tag is required" in captured.out
+        assert "alias" in captured.out.lower()
 
     def test_pull_reference_with_trailing_colon(self, mocker, monkeypatch, tmp_path):
         """Reference ending with colon should treat it as image-only (no tag)."""
@@ -1365,10 +1401,15 @@ class TestPushEnvVarResolution:
         assert "docker.io/myorg/myapp:v3.0.0" in tag_cmd
 
     def test_push_missing_tag_exits_with_error(self, mocker, monkeypatch, tmp_path, capsys):
-        """Scenario: push with no --tag and TAG env var set to empty exits with code 1."""
+        """Scenario: push with no --tag and TAG env var unset falls back to @current sentinel.
+
+        The @current sentinel is not a valid OCI tag, so the podman tag
+        operation will fail.  Empty TAG env var is treated as unset,
+        falling back to DEFAULT_TAG (@current).
+        """
         from ots_containers.commands.image.app import push
 
-        # Setting TAG to empty string causes cfg.tag to return "" (falsy)
+        # Empty TAG falls back to @current sentinel (not a real OCI tag)
         monkeypatch.setenv("TAG", "")
         monkeypatch.setenv("OTS_REGISTRY", "registry.example.com")
         mocker.patch(
@@ -1377,12 +1418,18 @@ class TestPushEnvVarResolution:
             return_value=tmp_path / "deployments.db",
         )
 
+        # Mock subprocess.run to simulate podman tag failure with @current
+        mocker.patch(
+            "subprocess.run",
+            side_effect=Exception("failed (exit 125): podman tag"),
+        )
+
         with pytest.raises(SystemExit) as exc_info:
             push()
 
         assert exc_info.value.code == 1
         captured = capsys.readouterr()
-        assert "Tag required" in captured.out
+        assert "Failed to tag image" in captured.out
 
 
 class TestListRemoteImageResolution:

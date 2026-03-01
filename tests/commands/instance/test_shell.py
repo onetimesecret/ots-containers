@@ -15,7 +15,10 @@ def _setup_shell_mocks(mocker, tmp_path, **config_overrides):
 
     Returns (mock_config, mock_executor) so tests can inspect calls.
     """
+    from ots_containers.config import DEFAULT_IMAGE
+
     mock_config = mocker.MagicMock()
+    mock_config.image = config_overrides.get("image", DEFAULT_IMAGE)
     mock_config.tag = config_overrides.get("tag", "current")
     mock_config.config_dir = tmp_path / "etc"
     mock_config.config_dir.mkdir(exist_ok=True)
@@ -23,10 +26,11 @@ def _setup_shell_mocks(mocker, tmp_path, **config_overrides):
         "existing_config_files", []
     )
 
-    if "image" in config_overrides:
-        mock_config.image = config_overrides["image"]
-    if "resolve_image_tag" in config_overrides:
-        mock_config.resolve_image_tag.return_value = config_overrides["resolve_image_tag"]
+    # Default resolve_image_tag returns (image, tag) — can be overridden
+    default_resolve = (mock_config.image, mock_config.tag)
+    mock_config.resolve_image_tag.return_value = config_overrides.get(
+        "resolve_image_tag", default_resolve
+    )
 
     mocker.patch("ots_containers.commands.instance.app.Config", return_value=mock_config)
 
@@ -192,18 +196,24 @@ class TestShellCommand:
         assert "-it" in cmd
         assert "-c" not in cmd
 
-    def test_shell_uses_local_image_by_default(self, mocker, tmp_path):
-        """shell should use local image by default."""
-        _mock_config, mock_executor = _setup_shell_mocks(mocker, tmp_path, tag="v0.24.0")
+    def test_shell_uses_config_image_by_default(self, mocker, tmp_path):
+        """shell should use cfg.image (from IMAGE env or DEFAULT_IMAGE)."""
+        from ots_containers.config import DEFAULT_IMAGE
+
+        _mock_config, mock_executor = _setup_shell_mocks(
+            mocker,
+            tmp_path,
+            tag="v0.24.0",
+            resolve_image_tag=(DEFAULT_IMAGE, "v0.24.0"),
+        )
 
         instance.shell(quiet=True)
 
         cmd = _get_cmd_from_executor(mock_executor, interactive=True)
-        assert "onetimesecret:v0.24.0" in cmd
-        assert "ghcr.io" not in " ".join(cmd)
+        assert f"{DEFAULT_IMAGE}:v0.24.0" in cmd
 
-    def test_shell_uses_remote_image_with_flag(self, mocker, tmp_path):
-        """shell --remote should use registry image."""
+    def test_shell_uses_registry_image_via_config(self, mocker, tmp_path):
+        """shell should use registry image when IMAGE env specifies one."""
         _mock_config, mock_executor = _setup_shell_mocks(
             mocker,
             tmp_path,
@@ -212,19 +222,21 @@ class TestShellCommand:
             resolve_image_tag=("ghcr.io/onetimesecret/onetimesecret", "v0.24.0"),
         )
 
-        instance.shell(remote=True, quiet=True)
+        instance.shell(quiet=True)
 
         cmd = _get_cmd_from_executor(mock_executor, interactive=True)
         assert "ghcr.io/onetimesecret/onetimesecret:v0.24.0" in cmd
 
     def test_shell_uses_specified_tag(self, mocker, tmp_path):
         """shell --tag should override default tag."""
+        from ots_containers.config import DEFAULT_IMAGE
+
         _mock_config, mock_executor = _setup_shell_mocks(mocker, tmp_path)
 
         instance.shell(tag="test-tag-123", quiet=True)
 
         cmd = _get_cmd_from_executor(mock_executor, interactive=True)
-        assert "onetimesecret:test-tag-123" in cmd
+        assert f"{DEFAULT_IMAGE}:test-tag-123" in cmd
 
     def test_shell_exits_with_command_exit_code(self, mocker, tmp_path):
         """shell should propagate exit code from command."""
@@ -253,6 +265,84 @@ class TestShellCommand:
 
         captured = capsys.readouterr()
         assert captured.out == ""
+
+
+class TestShellImageReference:
+    """Test shell command image reference handling.
+
+    Verifies that shell correctly resolves the image reference based on
+    the precedence: --tag flag > TAG env > @current alias > DEFAULT_TAG.
+    """
+
+    def test_shell_default_resolution_path(self, mocker, tmp_path):
+        """shell without --tag should go through resolve_image_tag()."""
+        mock_config, mock_executor = _setup_shell_mocks(
+            mocker,
+            tmp_path,
+            resolve_image_tag=("ghcr.io/onetimesecret/onetimesecret", "v0.23.0"),
+        )
+
+        instance.shell(quiet=True)
+
+        cmd = _get_cmd_from_executor(mock_executor, interactive=True)
+        assert "ghcr.io/onetimesecret/onetimesecret:v0.23.0" in cmd
+        mock_config.resolve_image_tag.assert_called_once()
+
+    def test_shell_tag_flag_bypasses_resolve(self, mocker, tmp_path):
+        """shell --tag should use cfg.image + provided tag, skipping resolve_image_tag."""
+        from ots_containers.config import DEFAULT_IMAGE
+
+        mock_config, mock_executor = _setup_shell_mocks(mocker, tmp_path)
+
+        instance.shell(tag="v0.24.0", quiet=True)
+
+        cmd = _get_cmd_from_executor(mock_executor, interactive=True)
+        assert f"{DEFAULT_IMAGE}:v0.24.0" in cmd
+        # resolve_image_tag should NOT have been called when --tag is provided
+        mock_config.resolve_image_tag.assert_not_called()
+
+    def test_shell_image_env_override(self, mocker, tmp_path):
+        """shell should use IMAGE env var via config when set."""
+        _mock_config, mock_executor = _setup_shell_mocks(
+            mocker,
+            tmp_path,
+            image="registry.example.com/custom/app",
+            tag="v1.0.0",
+            resolve_image_tag=("registry.example.com/custom/app", "v1.0.0"),
+        )
+
+        instance.shell(quiet=True)
+
+        cmd = _get_cmd_from_executor(mock_executor, interactive=True)
+        assert "registry.example.com/custom/app:v1.0.0" in cmd
+
+    def test_shell_tag_flag_with_custom_image(self, mocker, tmp_path):
+        """shell --tag with IMAGE env set should use custom image + flag tag."""
+        _mock_config, mock_executor = _setup_shell_mocks(
+            mocker,
+            tmp_path,
+            image="registry.example.com/custom/app",
+        )
+
+        instance.shell(tag="test-tag", quiet=True)
+
+        cmd = _get_cmd_from_executor(mock_executor, interactive=True)
+        assert "registry.example.com/custom/app:test-tag" in cmd
+
+    def test_shell_current_alias_resolution(self, mocker, tmp_path):
+        """shell should resolve @current alias to actual tag."""
+        _mock_config, mock_executor = _setup_shell_mocks(
+            mocker,
+            tmp_path,
+            tag="@current",
+            resolve_image_tag=("ghcr.io/onetimesecret/onetimesecret", "v0.22.1"),
+        )
+
+        instance.shell(quiet=True)
+
+        cmd = _get_cmd_from_executor(mock_executor, interactive=True)
+        # Should use the resolved tag, not the literal "@current"
+        assert "ghcr.io/onetimesecret/onetimesecret:v0.22.1" in cmd
 
 
 class TestShellHelp:

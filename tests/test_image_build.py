@@ -270,6 +270,7 @@ class TestBuildCommand:
             "ots_containers.commands.image.app.Config",
             return_value=mocker.Mock(
                 db_path=var_dir / "deployments.db",
+                image="ghcr.io/onetimesecret/onetimesecret",
                 registry=None,
                 registry_auth_file=tmp_path / "auth.json",
                 get_executor=lambda host=None: None,
@@ -314,6 +315,7 @@ class TestBuildCommand:
             "ots_containers.commands.image.app.Config",
             return_value=mocker.Mock(
                 db_path=var_dir / "deployments.db",
+                image="ghcr.io/onetimesecret/onetimesecret",
                 registry=None,  # No registry configured
                 registry_auth_file=tmp_path / "auth.json",
                 get_executor=lambda host=None: None,

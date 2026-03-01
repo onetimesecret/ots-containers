@@ -2237,7 +2237,7 @@ class TestRunCommandExists:
         assert callable(instance.run)
 
     def test_run_local_image_foreground(self, mocker, tmp_path):
-        """run should use local image by default (foreground)."""
+        """run should use resolved image by default (foreground)."""
         mock_executor = mocker.MagicMock()
         mock_executor.run_stream.return_value = 0
 
@@ -2246,6 +2246,10 @@ class TestRunCommandExists:
         mock_config.image = "ghcr.io/onetimesecret/onetimesecret"
         mock_config.registry = None
         mock_config.existing_config_files = []
+        mock_config.resolve_image_tag.return_value = (
+            "ghcr.io/onetimesecret/onetimesecret",
+            "v0.23.0",
+        )
         mock_config.get_executor.return_value = mock_executor
         mocker.patch("ots_containers.commands.instance.app.Config", return_value=mock_config)
         mocker.patch(
@@ -2262,9 +2266,8 @@ class TestRunCommandExists:
         assert "--rm" in cmd
         assert "-p" in cmd
         assert "7143:7143" in cmd
-        # Local image: uses 'onetimesecret' not the registry path
         full_image = cmd[-1]
-        assert full_image.startswith("onetimesecret:")
+        assert full_image == "ghcr.io/onetimesecret/onetimesecret:v0.23.0"
 
     def test_run_with_custom_name(self, mocker, tmp_path):
         """run --name should set container name."""
@@ -2276,6 +2279,7 @@ class TestRunCommandExists:
         mock_config.image = "ghcr.io/onetimesecret/onetimesecret"
         mock_config.registry = None
         mock_config.existing_config_files = []
+        mock_config.resolve_image_tag.return_value = (mock_config.image, mock_config.tag)
         mock_config.get_executor.return_value = mock_executor
         mocker.patch("ots_containers.commands.instance.app.Config", return_value=mock_config)
         mocker.patch(
@@ -2305,6 +2309,7 @@ class TestRunCommandExists:
         mock_config.image = "ghcr.io/onetimesecret/onetimesecret"
         mock_config.registry = None
         mock_config.existing_config_files = []
+        mock_config.resolve_image_tag.return_value = (mock_config.image, mock_config.tag)
         mock_config.get_executor.return_value = mock_executor
         mocker.patch("ots_containers.commands.instance.app.Config", return_value=mock_config)
         mocker.patch(
@@ -2317,8 +2322,8 @@ class TestRunCommandExists:
         cmd = mock_executor.run.call_args.args[0]
         assert "-d" in cmd
 
-    def test_run_remote_with_tag(self, mocker, tmp_path):
-        """run --remote --tag should use registry image."""
+    def test_run_with_tag(self, mocker, tmp_path):
+        """run --tag should use specified tag in image."""
         mock_executor = mocker.MagicMock()
         mock_executor.run_stream.return_value = 0
 
@@ -2334,15 +2339,15 @@ class TestRunCommandExists:
             tmp_path / "nonexistent",
         )
 
-        instance.run(port=7143, remote=True, tag="v0.19.0", quiet=True)
+        instance.run(port=7143, tag="v0.19.0", quiet=True)
 
         cmd = mock_executor.run_stream.call_args.args[0]
         full_image = cmd[-1]
         assert "v0.19.0" in full_image
         assert "ghcr.io" in full_image
 
-    def test_run_remote_no_tag_uses_resolve(self, mocker, tmp_path):
-        """run --remote without tag should use resolve_image_tag()."""
+    def test_run_no_tag_uses_resolve(self, mocker, tmp_path):
+        """run without --tag should use resolve_image_tag()."""
         mock_executor = mocker.MagicMock()
         mock_executor.run_stream.return_value = 0
 
@@ -2362,7 +2367,7 @@ class TestRunCommandExists:
             tmp_path / "nonexistent",
         )
 
-        instance.run(port=7143, remote=True, quiet=True)
+        instance.run(port=7143, quiet=True)
 
         mock_config.resolve_image_tag.assert_called_once()
         cmd = mock_executor.run_stream.call_args.args[0]
@@ -2379,6 +2384,7 @@ class TestRunCommandExists:
         mock_config.image = "ghcr.io/onetimesecret/onetimesecret"
         mock_config.registry = None
         mock_config.existing_config_files = []
+        mock_config.resolve_image_tag.return_value = (mock_config.image, mock_config.tag)
         mock_config.get_executor.return_value = mock_executor
         mocker.patch("ots_containers.commands.instance.app.Config", return_value=mock_config)
         mocker.patch(
@@ -2401,6 +2407,7 @@ class TestRunCommandExists:
         mock_config.image = "ghcr.io/onetimesecret/onetimesecret"
         mock_config.registry = None
         mock_config.existing_config_files = []
+        mock_config.resolve_image_tag.return_value = (mock_config.image, mock_config.tag)
         mock_config.get_executor.return_value = mock_executor
         mocker.patch("ots_containers.commands.instance.app.Config", return_value=mock_config)
         mocker.patch(
@@ -2424,6 +2431,7 @@ class TestRunCommandExists:
         mock_config.image = "ghcr.io/onetimesecret/onetimesecret"
         mock_config.registry = None
         mock_config.existing_config_files = []
+        mock_config.resolve_image_tag.return_value = (mock_config.image, mock_config.tag)
         mock_config.get_executor.return_value = mock_executor
         mocker.patch("ots_containers.commands.instance.app.Config", return_value=mock_config)
         mocker.patch(

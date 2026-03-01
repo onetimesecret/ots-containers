@@ -164,54 +164,48 @@ class TestConfigValidate:
         monkeypatch.delenv("IMAGE", raising=False)
         from ots_containers.config import Config
 
-        cfg = Config(tag="; rm -rf /")
         with pytest.raises(ValueError, match="Invalid tag"):
-            cfg.validate()
+            Config(tag="; rm -rf /")
 
     def test_validate_rejects_tag_with_spaces(self, monkeypatch):
         """Should reject tags containing whitespace."""
         monkeypatch.delenv("IMAGE", raising=False)
         from ots_containers.config import Config
 
-        cfg = Config(tag="v1 2")
         with pytest.raises(ValueError, match="Invalid tag"):
-            cfg.validate()
+            Config(tag="v1 2")
 
     def test_validate_rejects_empty_tag(self, monkeypatch):
         """Should reject empty string as tag."""
         monkeypatch.delenv("IMAGE", raising=False)
         from ots_containers.config import Config
 
-        cfg = Config(tag="")
         with pytest.raises(ValueError, match="Invalid tag"):
-            cfg.validate()
+            Config(tag="")
 
     def test_validate_rejects_image_with_shell_metacharacters(self, monkeypatch):
         """Should reject image names with shell injection attempts."""
         monkeypatch.delenv("TAG", raising=False)
         from ots_containers.config import Config
 
-        cfg = Config(image="$(whoami)")
         with pytest.raises(ValueError, match="Invalid image"):
-            cfg.validate()
+            Config(image="$(whoami)")
 
     def test_validate_rejects_image_with_spaces(self, monkeypatch):
         """Should reject image names containing whitespace."""
         monkeypatch.delenv("TAG", raising=False)
         from ots_containers.config import Config
 
-        cfg = Config(image="my image")
         with pytest.raises(ValueError, match="Invalid image"):
-            cfg.validate()
+            Config(image="my image")
 
     def test_validate_rejects_empty_image(self, monkeypatch):
         """Should reject empty string as image name."""
         monkeypatch.delenv("TAG", raising=False)
         from ots_containers.config import Config
 
-        cfg = Config(image="")
         with pytest.raises(ValueError, match="Invalid image"):
-            cfg.validate()
+            Config(image="")
 
     def test_validate_accepts_ghcr_image(self, monkeypatch):
         """Should accept standard ghcr.io image path."""
@@ -244,37 +238,37 @@ class TestConfigValidate:
         monkeypatch.delenv("IMAGE", raising=False)
         from ots_containers.config import Config
 
-        cfg = Config(tag="v1:latest")
         with pytest.raises(ValueError, match="Invalid tag"):
-            cfg.validate()
+            Config(tag="v1:latest")
 
     def test_validate_rejects_image_with_backtick(self, monkeypatch):
         """Should reject image names with backtick command substitution."""
         monkeypatch.delenv("TAG", raising=False)
         from ots_containers.config import Config
 
-        cfg = Config(image="`whoami`/image")
         with pytest.raises(ValueError, match="Invalid image"):
-            cfg.validate()
+            Config(image="`whoami`/image")
 
 
 class TestConfigFiles:
     """Test CONFIG_FILES module-level constant."""
 
     def test_config_files_contains_expected_files(self):
-        """CONFIG_FILES should list the four known config files."""
+        """CONFIG_FILES should list the six known config files."""
         from ots_containers.config import CONFIG_FILES
 
         assert "config.yaml" in CONFIG_FILES
         assert "auth.yaml" in CONFIG_FILES
         assert "logging.yaml" in CONFIG_FILES
         assert "billing.yaml" in CONFIG_FILES
+        assert "Caddyfile.template" in CONFIG_FILES
+        assert "puma.rb" in CONFIG_FILES
 
     def test_config_files_length(self):
-        """CONFIG_FILES should contain exactly 4 entries."""
+        """CONFIG_FILES should contain exactly 6 entries."""
         from ots_containers.config import CONFIG_FILES
 
-        assert len(CONFIG_FILES) == 4
+        assert len(CONFIG_FILES) == 6
 
     def test_config_files_is_tuple(self):
         """CONFIG_FILES should be a tuple (immutable)."""
@@ -447,13 +441,15 @@ class TestGetExistingConfigFilesRemote:
         mock_client = MagicMock(spec=paramiko.SSHClient)
         ex = SSHExecutor(mock_client)
 
-        # config.yaml exists, auth.yaml does not, logging.yaml does not, billing.yaml does not
+        # config.yaml exists, all others do not
         ex.run = MagicMock(
             side_effect=[
                 Result(command="test", returncode=0, stdout="", stderr=""),  # config.yaml
                 Result(command="test", returncode=1, stdout="", stderr=""),  # auth.yaml
                 Result(command="test", returncode=1, stdout="", stderr=""),  # logging.yaml
                 Result(command="test", returncode=1, stdout="", stderr=""),  # billing.yaml
+                Result(command="test", returncode=1, stdout="", stderr=""),  # Caddyfile.template
+                Result(command="test", returncode=1, stdout="", stderr=""),  # puma.rb
             ]
         )
 
@@ -462,7 +458,7 @@ class TestGetExistingConfigFilesRemote:
 
         assert len(result) == 1
         assert result[0] == Path("/etc/onetimesecret/config.yaml")
-        assert ex.run.call_count == 4
+        assert ex.run.call_count == 6
 
 
 class TestConfigRegistry:
@@ -1314,3 +1310,246 @@ class TestGetExecutorResolutionChain:
         cfg.get_executor(host="explicit-host.example.com")
 
         mock_resolve.assert_called_once_with(host_flag="explicit-host.example.com")
+
+
+class TestConfigValidateResourceLimits:
+    """Test Config.validate() for memory_max and cpu_quota fields."""
+
+    def _make_config(self, monkeypatch, **overrides):
+        """Create a Config with valid defaults, applying overrides."""
+        monkeypatch.delenv("IMAGE", raising=False)
+        monkeypatch.delenv("TAG", raising=False)
+        monkeypatch.delenv("MEMORY_MAX", raising=False)
+        monkeypatch.delenv("CPU_QUOTA", raising=False)
+        monkeypatch.delenv("OTS_VALKEY_SERVICE", raising=False)
+
+        from ots_containers.config import Config
+
+        return Config(**overrides)
+
+    # --- memory_max positive tests ---
+
+    @pytest.mark.parametrize("value", ["512M", "1G", "2G", "100K", "4T", "infinity", "1024"])
+    def test_validate_accepts_valid_memory_max(self, monkeypatch, value):
+        """Valid memory_max values should pass validation."""
+        cfg = self._make_config(monkeypatch, memory_max=value)
+        cfg.validate()  # should not raise
+
+    # --- memory_max negative tests ---
+
+    def test_validate_rejects_memory_max_with_newline(self, monkeypatch):
+        """memory_max containing newline (directive injection) should fail."""
+        with pytest.raises(ValueError, match="MEMORY_MAX"):
+            self._make_config(monkeypatch, memory_max="512M\nExecStart=/evil")
+
+    def test_validate_rejects_memory_max_with_shell_chars(self, monkeypatch):
+        """memory_max with shell metacharacters should fail."""
+        with pytest.raises(ValueError, match="MEMORY_MAX"):
+            self._make_config(monkeypatch, memory_max="512M; rm -rf /")
+
+    def test_validate_rejects_memory_max_empty_string(self, monkeypatch):
+        """Empty string memory_max is falsy so skipped; non-matching string should fail."""
+        # Empty string is falsy, so validate() skips it -- that's fine.
+        self._make_config(monkeypatch, memory_max="")
+        # But a non-matching string should fail:
+        with pytest.raises(ValueError, match="MEMORY_MAX"):
+            self._make_config(monkeypatch, memory_max="not-a-size")
+
+    def test_validate_rejects_memory_max_with_spaces(self, monkeypatch):
+        """memory_max with spaces should fail."""
+        with pytest.raises(ValueError, match="MEMORY_MAX"):
+            self._make_config(monkeypatch, memory_max="512 M")
+
+    # --- cpu_quota positive tests ---
+
+    @pytest.mark.parametrize("value", ["80%", "150%", "1%", "99999%"])
+    def test_validate_accepts_valid_cpu_quota(self, monkeypatch, value):
+        """Valid cpu_quota values should pass validation."""
+        cfg = self._make_config(monkeypatch, cpu_quota=value)
+        cfg.validate()  # should not raise
+
+    # --- cpu_quota negative tests ---
+
+    def test_validate_rejects_cpu_quota_with_newline(self, monkeypatch):
+        """cpu_quota containing newline (directive injection) should fail."""
+        with pytest.raises(ValueError, match="CPU_QUOTA"):
+            self._make_config(monkeypatch, cpu_quota="80%\nExecStart=/evil")
+
+    def test_validate_rejects_cpu_quota_without_percent(self, monkeypatch):
+        """cpu_quota without % sign should fail."""
+        with pytest.raises(ValueError, match="CPU_QUOTA"):
+            self._make_config(monkeypatch, cpu_quota="80")
+
+    def test_validate_rejects_cpu_quota_with_letters(self, monkeypatch):
+        """cpu_quota with letters should fail."""
+        with pytest.raises(ValueError, match="CPU_QUOTA"):
+            self._make_config(monkeypatch, cpu_quota="eighty%")
+
+    # --- None values (skipped) ---
+
+    def test_validate_skips_none_memory_max(self, monkeypatch):
+        """memory_max=None should be valid (not set)."""
+        cfg = self._make_config(monkeypatch, memory_max=None)
+        cfg.validate()  # should not raise
+
+    def test_validate_skips_none_cpu_quota(self, monkeypatch):
+        """cpu_quota=None should be valid (not set)."""
+        cfg = self._make_config(monkeypatch, cpu_quota=None)
+        cfg.validate()  # should not raise
+
+
+class TestConfigValidateValkeyService:
+    """Test Config.validate() for valkey_service field."""
+
+    def _make_config(self, monkeypatch, **overrides):
+        """Create a Config with valid defaults, applying overrides."""
+        monkeypatch.delenv("IMAGE", raising=False)
+        monkeypatch.delenv("TAG", raising=False)
+        monkeypatch.delenv("MEMORY_MAX", raising=False)
+        monkeypatch.delenv("CPU_QUOTA", raising=False)
+        monkeypatch.delenv("OTS_VALKEY_SERVICE", raising=False)
+
+        from ots_containers.config import Config
+
+        return Config(**overrides)
+
+    @pytest.mark.parametrize(
+        "value",
+        [
+            "valkey-server@6379.service",
+            "redis.service",
+            "nginx.service",
+            "my-app@80.service",
+        ],
+    )
+    def test_validate_accepts_valid_valkey_service(self, monkeypatch, value):
+        """Valid systemd unit names should pass validation."""
+        cfg = self._make_config(monkeypatch, valkey_service=value)
+        cfg.validate()  # should not raise
+
+    def test_validate_rejects_valkey_service_with_newline(self, monkeypatch):
+        """valkey_service with newline injection should fail."""
+        with pytest.raises(ValueError, match="OTS_VALKEY_SERVICE"):
+            self._make_config(monkeypatch, valkey_service="valkey.service\nExecStart=/malicious")
+
+    def test_validate_rejects_valkey_service_with_space(self, monkeypatch):
+        """valkey_service with spaces should fail."""
+        with pytest.raises(ValueError, match="OTS_VALKEY_SERVICE"):
+            self._make_config(monkeypatch, valkey_service="valkey .service")
+
+    def test_validate_skips_none_valkey_service(self, monkeypatch):
+        """valkey_service=None should be valid (not set)."""
+        cfg = self._make_config(monkeypatch, valkey_service=None)
+        cfg.validate()  # should not raise
+
+
+class TestConfigResolveImageTagWithOverride:
+    """Test the dataclasses.replace pattern for image reference overrides.
+
+    Verifies that creating a new Config via dataclasses.replace(cfg, image=..., tag=...)
+    correctly resolves through resolve_image_tag(). This is the pattern used by commands
+    that accept a positional image reference argument.
+    """
+
+    def test_replace_with_concrete_tag_skips_alias_lookup(self, monkeypatch, mocker):
+        """A concrete tag (not @current/@rollback) should pass through without DB lookup."""
+        import dataclasses
+
+        monkeypatch.delenv("IMAGE", raising=False)
+        monkeypatch.delenv("TAG", raising=False)
+
+        from ots_containers.config import Config
+
+        cfg = Config()
+        new_cfg = dataclasses.replace(cfg, image="custom/image", tag="v1.0.0")
+
+        # Mock the db module so we can verify it's not called for concrete tags
+        mock_get_alias = mocker.patch("ots_containers.db.get_alias")
+
+        image, tag = new_cfg.resolve_image_tag()
+        assert image == "custom/image"
+        assert tag == "v1.0.0"
+        mock_get_alias.assert_not_called()
+
+    def test_replace_preserves_default_tag_alias_resolution(self, monkeypatch, mocker):
+        """Replacing only image preserves @current tag, which triggers alias lookup."""
+        import dataclasses
+
+        monkeypatch.delenv("IMAGE", raising=False)
+        monkeypatch.delenv("TAG", raising=False)
+
+        from ots_containers.config import DEFAULT_TAG, Config
+
+        cfg = Config()
+        assert cfg.tag == DEFAULT_TAG  # @current
+
+        new_cfg = dataclasses.replace(cfg, image="custom/image")
+        assert new_cfg.tag == DEFAULT_TAG
+
+        # Mock alias lookup to return a resolved value
+        mock_alias = mocker.MagicMock()
+        mock_alias.image = "custom/image"
+        mock_alias.tag = "v0.23.0"
+        mocker.patch("ots_containers.db.get_alias", return_value=mock_alias)
+
+        image, tag = new_cfg.resolve_image_tag()
+        assert image == "custom/image"
+        assert tag == "v0.23.0"
+
+    def test_replace_does_not_mutate_original(self, monkeypatch):
+        """dataclasses.replace should create a new Config without modifying the original."""
+        import dataclasses
+
+        monkeypatch.delenv("IMAGE", raising=False)
+        monkeypatch.delenv("TAG", raising=False)
+
+        from ots_containers.config import DEFAULT_IMAGE, DEFAULT_TAG, Config
+
+        cfg = Config()
+        new_cfg = dataclasses.replace(cfg, image="new/image", tag="new-tag")
+
+        assert cfg.image == DEFAULT_IMAGE
+        assert cfg.tag == DEFAULT_TAG
+        assert new_cfg.image == "new/image"
+        assert new_cfg.tag == "new-tag"
+
+    def test_replace_with_env_image_then_positional_override(self, monkeypatch, mocker):
+        """Positional ref image should override IMAGE env via replace."""
+        import dataclasses
+
+        monkeypatch.setenv("IMAGE", "env/image")
+        monkeypatch.setenv("TAG", "env-tag")
+
+        from ots_containers.config import Config
+
+        cfg = Config()
+        assert cfg.image == "env/image"
+        assert cfg.tag == "env-tag"
+
+        # Simulate positional override
+        new_cfg = dataclasses.replace(cfg, image="pos/image", tag="pos-tag")
+
+        mock_get_alias = mocker.patch("ots_containers.db.get_alias")
+        image, tag = new_cfg.resolve_image_tag()
+        assert image == "pos/image"
+        assert tag == "pos-tag"
+        mock_get_alias.assert_not_called()
+
+    def test_replace_with_alias_not_set_returns_literal_tag(self, monkeypatch, mocker):
+        """When @current alias is not set, resolve_image_tag returns the literal tag."""
+        import dataclasses
+
+        monkeypatch.delenv("IMAGE", raising=False)
+        monkeypatch.delenv("TAG", raising=False)
+
+        from ots_containers.config import Config
+
+        cfg = Config()
+        new_cfg = dataclasses.replace(cfg, image="custom/image")
+
+        # Alias lookup returns None (no alias set)
+        mocker.patch("ots_containers.db.get_alias", return_value=None)
+
+        image, tag = new_cfg.resolve_image_tag()
+        assert image == "custom/image"
+        assert tag == "@current"  # literal sentinel returned when no alias

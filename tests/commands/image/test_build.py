@@ -45,6 +45,7 @@ class TestBuildVersionDetection:
             "ots_containers.commands.image.app.Config",
             return_value=mocker.Mock(
                 db_path=var_dir / "deployments.db",
+                image="ghcr.io/onetimesecret/onetimesecret",
                 registry=None,
                 registry_auth_file=tmp_path / "auth.json",
                 get_executor=lambda host=None: None,
@@ -92,6 +93,7 @@ class TestBuildVersionDetection:
             "ots_containers.commands.image.app.Config",
             return_value=mocker.Mock(
                 db_path=var_dir / "deployments.db",
+                image="ghcr.io/onetimesecret/onetimesecret",
                 registry=None,
                 registry_auth_file=tmp_path / "auth.json",
                 get_executor=lambda host=None: None,
@@ -176,6 +178,7 @@ class TestBuildPodmanInvocation:
             "ots_containers.commands.image.app.Config",
             return_value=mocker.Mock(
                 db_path=var_dir / "deployments.db",
+                image="ghcr.io/onetimesecret/onetimesecret",
                 registry=None,
                 registry_auth_file=tmp_path / "auth.json",
                 get_executor=lambda host=None: None,
@@ -218,8 +221,10 @@ class TestBuildPodmanInvocation:
             "ots_containers.commands.image.app.Config",
             return_value=mocker.Mock(
                 db_path=var_dir / "deployments.db",
+                image="ghcr.io/onetimesecret/onetimesecret",
                 registry=None,  # No registry configured
                 registry_auth_file=tmp_path / "auth.json",
+                get_executor=lambda host=None: None,
             ),
         )
         mocker.patch("ots_containers.commands.image.app.db.record_deployment")
@@ -255,6 +260,7 @@ class TestBuildPodmanInvocation:
             "ots_containers.commands.image.app.Config",
             return_value=mocker.Mock(
                 db_path=var_dir / "deployments.db",
+                image="ghcr.io/onetimesecret/onetimesecret",
                 registry="registry.example.com",
                 registry_auth_file=tmp_path / "auth.json",
                 get_executor=lambda host=None: None,
@@ -294,6 +300,7 @@ class TestBuildPodmanInvocation:
             "ots_containers.commands.image.app.Config",
             return_value=mocker.Mock(
                 db_path=var_dir / "deployments.db",
+                image="ghcr.io/onetimesecret/onetimesecret",
                 registry=None,
                 registry_auth_file=tmp_path / "auth.json",
                 get_executor=lambda host=None: None,
@@ -336,6 +343,7 @@ class TestBuildPodmanInvocation:
             "ots_containers.commands.image.app.Config",
             return_value=mocker.Mock(
                 db_path=var_dir / "deployments.db",
+                image="ghcr.io/onetimesecret/onetimesecret",
                 registry=None,
                 registry_auth_file=tmp_path / "auth.json",
                 get_executor=lambda host=None: None,
@@ -386,6 +394,7 @@ class TestBuildDefaultBehavior:
             "ots_containers.commands.image.app.Config",
             return_value=mocker.Mock(
                 db_path=var_dir / "deployments.db",
+                image="ghcr.io/onetimesecret/onetimesecret",
                 registry=None,
                 registry_auth_file=tmp_path / "auth.json",
                 get_executor=lambda host=None: None,
@@ -423,6 +432,7 @@ class TestBuildDefaultBehavior:
             "ots_containers.commands.image.app.Config",
             return_value=mocker.Mock(
                 db_path=var_dir / "deployments.db",
+                image="ghcr.io/onetimesecret/onetimesecret",
                 registry=None,
                 registry_auth_file=tmp_path / "auth.json",
                 get_executor=lambda host=None: None,
@@ -466,6 +476,7 @@ class TestBuildDefaultBehavior:
             "ots_containers.commands.image.app.Config",
             return_value=mocker.Mock(
                 db_path=var_dir / "deployments.db",
+                image="ghcr.io/onetimesecret/onetimesecret",
                 registry=None,
                 registry_auth_file=tmp_path / "auth.json",
                 get_executor=lambda host=None: None,
@@ -506,6 +517,7 @@ class TestBuildErrorHandling:
             "ots_containers.commands.image.app.Config",
             return_value=mocker.Mock(
                 db_path=var_dir / "deployments.db",
+                image="ghcr.io/onetimesecret/onetimesecret",
                 registry=None,
                 registry_auth_file=tmp_path / "auth.json",
                 get_executor=lambda host=None: None,
@@ -581,6 +593,7 @@ class TestBuildVariants:
             "ots_containers.commands.image.app.Config",
             return_value=mocker.Mock(
                 db_path=var_dir / "deployments.db",
+                image="ghcr.io/onetimesecret/onetimesecret",
                 registry=None,
                 registry_auth_file=tmp_path / "auth.json",
                 get_executor=lambda host=None: None,
@@ -634,6 +647,7 @@ class TestBuildVariants:
             "ots_containers.commands.image.app.Config",
             return_value=mocker.Mock(
                 db_path=var_dir / "deployments.db",
+                image="ghcr.io/onetimesecret/onetimesecret",
                 registry=None,
                 registry_auth_file=tmp_path / "auth.json",
                 get_executor=lambda host=None: None,
@@ -703,6 +717,7 @@ class TestBuildVariants:
             "ots_containers.commands.image.app.Config",
             return_value=mocker.Mock(
                 db_path=var_dir / "deployments.db",
+                image="ghcr.io/onetimesecret/onetimesecret",
                 registry="registry.example.com",
                 registry_auth_file=tmp_path / "auth.json",
                 get_executor=lambda host=None: None,
@@ -757,6 +772,7 @@ def _mock_build_env(mocker, tmp_path):
         "ots_containers.commands.image.app.Config",
         return_value=mocker.Mock(
             db_path=var_dir / "deployments.db",
+            image="ghcr.io/onetimesecret/onetimesecret",
             registry=None,
             registry_auth_file=tmp_path / "auth.json",
             get_executor=lambda host=None: None,
@@ -1050,6 +1066,7 @@ class TestBuildBaseCleanup:
             "ots_containers.commands.image.app.Config",
             return_value=mocker.Mock(
                 db_path=var_dir / "deployments.db",
+                image="ghcr.io/onetimesecret/onetimesecret",
                 registry=None,
                 registry_auth_file=tmp_path / "auth.json",
                 get_executor=lambda host=None: None,
@@ -1162,3 +1179,96 @@ class TestBuildLegacyPathUnchanged:
         assert "onetimesecret:v0.25.0" in str(buildx_calls[0])
         # No --build-context should be present
         assert "--build-context" not in str(buildx_calls[0])
+
+
+class TestBuildImageNameFallback:
+    """Test that build commands derive image_name from cfg.image when not specified."""
+
+    def _mock_build_env_with_image(self, mocker, tmp_path, image="ghcr.io/org/myimage"):
+        """Like _mock_build_env but sets cfg.image to a custom value."""
+        var_dir = tmp_path / "var"
+        var_dir.mkdir(exist_ok=True)
+
+        def mock_run_factory(cmd, *args, **kwargs):
+            if "git" in cmd:
+                return subprocess.CompletedProcess(cmd, 0, stdout="abc12345\n", stderr="")
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+        mock_run = mocker.patch("subprocess.run", side_effect=mock_run_factory)
+
+        mocker.patch(
+            "ots_containers.commands.image.app.Config",
+            return_value=mocker.Mock(
+                db_path=var_dir / "deployments.db",
+                registry=None,
+                registry_auth_file=tmp_path / "auth.json",
+                image=image,
+                get_executor=lambda host=None: None,
+            ),
+        )
+        mocker.patch("ots_containers.commands.image.app.db.record_deployment")
+
+        return mock_run
+
+    def test_oci_config_without_image_name_uses_cfg_basename(self, mocker, tmp_path):
+        """When .oci-build.json omits image_name, build should use cfg.image basename."""
+        oci_config = {
+            # No "image_name" key
+            "platforms": ["linux/amd64"],
+            "variants": [
+                {"suffix": "", "dockerfile": "Containerfile", "target": "final"},
+            ],
+        }
+        project_dir = _make_project(tmp_path, oci_config=oci_config)
+
+        mock_run = self._mock_build_env_with_image(mocker, tmp_path, image="ghcr.io/org/myimage")
+
+        build(project_dir=project_dir, quiet=True)
+
+        buildx_calls = [
+            c for c in mock_run.call_args_list if "buildx" in str(c) and "build" in str(c)
+        ]
+        assert len(buildx_calls) >= 1
+        # Should use "myimage" (basename of cfg.image), not "onetimesecret"
+        call_str = str(buildx_calls[0])
+        assert "myimage:" in call_str
+        assert "onetimesecret:" not in call_str
+
+    def test_legacy_build_uses_cfg_image_basename(self, mocker, tmp_path):
+        """Legacy build (no .oci-build.json) should use cfg.image basename."""
+        project_dir = _make_project(tmp_path)  # No oci_config
+
+        mock_run = self._mock_build_env_with_image(mocker, tmp_path, image="ghcr.io/org/customapp")
+
+        build(project_dir=project_dir, quiet=True)
+
+        buildx_calls = [
+            c for c in mock_run.call_args_list if "buildx" in str(c) and "build" in str(c)
+        ]
+        assert len(buildx_calls) == 1
+        call_str = str(buildx_calls[0])
+        assert "customapp:v0.25.0" in call_str
+        assert "onetimesecret:" not in call_str
+
+    def test_oci_config_with_image_name_uses_config_value(self, mocker, tmp_path):
+        """When .oci-build.json has image_name, build should use that, not cfg.image."""
+        oci_config = {
+            "image_name": "explicit-name",
+            "platforms": ["linux/amd64"],
+            "variants": [
+                {"suffix": "", "dockerfile": "Containerfile", "target": "final"},
+            ],
+        }
+        project_dir = _make_project(tmp_path, oci_config=oci_config)
+
+        mock_run = self._mock_build_env_with_image(mocker, tmp_path, image="ghcr.io/org/myimage")
+
+        build(project_dir=project_dir, quiet=True)
+
+        buildx_calls = [
+            c for c in mock_run.call_args_list if "buildx" in str(c) and "build" in str(c)
+        ]
+        assert len(buildx_calls) >= 1
+        call_str = str(buildx_calls[0])
+        # Should use "explicit-name" from .oci-build.json, not "myimage" from cfg
+        assert "explicit-name:" in call_str

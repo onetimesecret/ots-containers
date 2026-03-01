@@ -280,8 +280,21 @@ def get_resource_limits_section(cfg: Config) -> str:
     """
     lines = []
     if cfg.memory_max:
+        from ots_containers.config import MEMORY_MAX_RE
+
+        if not MEMORY_MAX_RE.match(cfg.memory_max):
+            raise ValueError(
+                f"Invalid MEMORY_MAX: {cfg.memory_max!r}. "
+                "Must be a systemd memory value (e.g. 512M, 1G, infinity)."
+            )
         lines.append(f"MemoryMax={cfg.memory_max}")
     if cfg.cpu_quota:
+        from ots_containers.config import CPU_QUOTA_RE
+
+        if not CPU_QUOTA_RE.match(cfg.cpu_quota):
+            raise ValueError(
+                f"Invalid CPU_QUOTA: {cfg.cpu_quota!r}. Must be a percentage (e.g. 80%, 150%)."
+            )
         lines.append(f"CPUQuota={cfg.cpu_quota}")
     return "\n".join(lines) + "\n" if lines else ""
 

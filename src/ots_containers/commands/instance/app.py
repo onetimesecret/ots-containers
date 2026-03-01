@@ -2,6 +2,7 @@
 
 """Instance management app and commands for OTS containers."""
 
+import dataclasses
 import difflib
 import logging
 import sys
@@ -10,7 +11,7 @@ from typing import Annotated
 import cyclopts
 
 from ots_containers import assets, context, db, quadlet, systemd
-from ots_containers.config import Config
+from ots_containers.config import Config, parse_image_reference
 from ots_containers.podman import Podman
 
 from ..common import (
@@ -18,9 +19,11 @@ from ..common import (
     EXIT_PARTIAL,
     DryRun,
     Follow,
+    ImageRef,
     JsonOutput,
     Lines,
     Quiet,
+    TagFlag,
     Yes,
 )
 from ._helpers import (
@@ -397,11 +400,13 @@ def run(
 
 @app.command
 def deploy(
+    reference: ImageRef = None,
     identifiers: Identifiers = (),
     instance_type: TypeSelector = None,
     web: WebFlag = False,
     worker: WorkerFlag = False,
     scheduler: SchedulerFlag = False,
+    tag: TagFlag = None,
     delay: Delay = 5,
     dry_run: DryRun = False,
     quiet: Quiet = False,
@@ -476,6 +481,8 @@ def deploy(
         ots instances deploy --web 7043 --wait      # Wait up to 60s for HTTP health check
         ots instances deploy --web 7043 --pre-hook './scan.sh'   # Validate before deploy
         ots instances deploy --web 7043 --post-hook './notify.sh'  # Notify after deploy
+        ots instances deploy ghcr.io/org/image:v1.0 --web 7043  # Explicit image reference
+        ots instances deploy --tag v0.24.0 --web 7043  # Specific tag only
     """
     import datetime
     import json as json_mod
@@ -491,12 +498,19 @@ def deploy(
         raise SystemExit("Instance type required for deploy. Use --web, --worker, or --scheduler.")
 
     cfg = Config()
+
+    # Apply image reference overrides (positional ref > --tag flag > env/config)
+    ref_image, ref_tag = parse_image_reference(reference) if reference else (None, None)
+    override_tag = ref_tag or tag
+    if ref_image or override_tag:
+        cfg = dataclasses.replace(cfg, image=ref_image or cfg.image, tag=override_tag or cfg.tag)
+
     ex = cfg.get_executor(host=context.host_var.get(None))
 
-    # Resolve image/tag (handles CURRENT/ROLLBACK aliases)
-    image, tag = cfg.resolve_image_tag(executor=ex)
+    # Resolve image/tag (handles @current/@rollback aliases)
+    image, resolved_tag = cfg.resolve_image_tag(executor=ex)
     if not quiet and not json_output:
-        print(f"Image: {image}:{tag}")
+        print(f"Image: {image}:{resolved_tag}")
         config_files = cfg.get_existing_config_files(executor=ex)
         if config_files:
             mounted = [f.name for f in config_files]
@@ -540,7 +554,7 @@ def deploy(
             "instance_type": itype.value,
             "identifiers": list(identifiers),
             "image": image,
-            "tag": tag,
+            "tag": resolved_tag,
             "quadlet_path": str(template_path),
             "quadlet_changed": bool(diff_lines),
         }
@@ -602,7 +616,7 @@ def deploy(
                 db.record_deployment(
                     cfg.get_db_path(ex),
                     image=image,
-                    tag=tag,
+                    tag=resolved_tag,
                     action=f"deploy-{inst_type.value}",
                     port=port,
                     success=True,
@@ -616,7 +630,7 @@ def deploy(
                         "identifier": id_,
                         "success": True,
                         "image": image,
-                        "tag": tag,
+                        "tag": resolved_tag,
                         "timestamp": datetime.datetime.now(datetime.UTC).isoformat(),
                     }
                 )
@@ -629,7 +643,7 @@ def deploy(
                 db.record_deployment(
                     cfg.get_db_path(ex),
                     image=image,
-                    tag=tag,
+                    tag=resolved_tag,
                     action=f"deploy-{inst_type.value}",
                     port=port,
                     success=False,
@@ -644,7 +658,7 @@ def deploy(
                         "success": False,
                         "error": str(e),
                         "image": image,
-                        "tag": tag,
+                        "tag": resolved_tag,
                         "timestamp": datetime.datetime.now(datetime.UTC).isoformat(),
                     }
                 )
@@ -660,7 +674,7 @@ def deploy(
                 db.record_deployment(
                     cfg.get_db_path(ex),
                     image=image,
-                    tag=tag,
+                    tag=resolved_tag,
                     action=f"deploy-{inst_type.value}",
                     port=port,
                     success=False,
@@ -675,7 +689,7 @@ def deploy(
                         "success": False,
                         "error": str(e),
                         "image": image,
-                        "tag": tag,
+                        "tag": resolved_tag,
                         "timestamp": datetime.datetime.now(datetime.UTC).isoformat(),
                     }
                 )
@@ -709,11 +723,13 @@ def deploy(
 
 @app.command
 def redeploy(
+    reference: ImageRef = None,
     identifiers: Identifiers = (),
     instance_type: TypeSelector = None,
     web: WebFlag = False,
     worker: WorkerFlag = False,
     scheduler: SchedulerFlag = False,
+    tag: TagFlag = None,
     delay: Delay = 30,
     force: Annotated[
         bool,
@@ -788,12 +804,21 @@ def redeploy(
         ots instances redeploy --web 7043 --wait    # Wait up to 60s for HTTP health check
         ots instances redeploy --pre-hook './scan.sh'    # Validate before redeploy
         ots instances redeploy --post-hook './notify.sh'  # Notify after redeploy
+        ots instances redeploy ghcr.io/org/image:v1.0    # Explicit image reference
+        ots instances redeploy --tag v0.24.0             # Specific tag only
     """
     import datetime
     import json as json_mod
 
     itype = resolve_instance_type(instance_type, web, worker, scheduler)
     cfg = Config()
+
+    # Apply image reference overrides (positional ref > --tag flag > env/config)
+    ref_image, ref_tag = parse_image_reference(reference) if reference else (None, None)
+    override_tag = ref_tag or tag
+    if ref_image or override_tag:
+        cfg = dataclasses.replace(cfg, image=ref_image or cfg.image, tag=override_tag or cfg.tag)
+
     ex = cfg.get_executor(host=context.host_var.get(None))
     instances = resolve_identifiers(identifiers, itype, running_only=True, executor=ex)
 
