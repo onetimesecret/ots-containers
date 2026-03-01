@@ -251,13 +251,14 @@ def list_instances(
 
 @app.command
 def run(
+    reference: ImageRef = None,
     port: Annotated[
-        int,
+        int | None,
         cyclopts.Parameter(
             name=["--port", "-p"],
             help="Container port to run on",
         ),
-    ],
+    ] = None,
     detach: Annotated[
         bool,
         cyclopts.Parameter(
@@ -287,13 +288,7 @@ def run(
         ),
     ] = None,
     quiet: Quiet = False,
-    tag: Annotated[
-        str | None,
-        cyclopts.Parameter(
-            name=["--tag", "-t"],
-            help="Image tag to run (default: from TAG env or 'current' alias)",
-        ),
-    ] = None,
+    tag: TagFlag = None,
 ):
     """Run a container directly with podman (no systemd).
 
@@ -304,16 +299,23 @@ def run(
         ots instance run -p 7143 --tag plop-2   # specific tag
         ots instance run -p 7143 -d             # detached
         ots instance run -p 7143 --production   # full production config
+        ots instance run ghcr.io/org/image:v1.0 -p 7143  # explicit image ref
     """
+    if port is None:
+        raise SystemExit("--port / -p is required. Example: ots instance run -p 7143")
+
     cfg = Config()
+
+    # Apply image reference overrides (positional ref > --tag flag > env/config)
+    ref_image, ref_tag = parse_image_reference(reference) if reference else (None, None)
+    override_tag = ref_tag or tag
+    if ref_image or override_tag:
+        cfg = dataclasses.replace(cfg, image=ref_image or cfg.image, tag=override_tag or cfg.tag)
+
     ex = cfg.get_executor(host=context.host_var.get(None))
 
-    # Resolve image/tag from config (IMAGE/TAG env vars or database aliases)
-    if tag:
-        image = cfg.image
-        resolved_tag = tag
-    else:
-        image, resolved_tag = cfg.resolve_image_tag(executor=ex)
+    # Resolve image/tag (handles @current/@rollback aliases)
+    image, resolved_tag = cfg.resolve_image_tag(executor=ex)
     full_image = f"{image}:{resolved_tag}"
 
     # Container name
@@ -1648,6 +1650,7 @@ def exec_shell(
 
 @app.command
 def shell(
+    reference: ImageRef = None,
     persistent: Annotated[
         str | None,
         cyclopts.Parameter(
@@ -1677,13 +1680,7 @@ def shell(
         ),
     ] = None,
     quiet: Quiet = False,
-    tag: Annotated[
-        str | None,
-        cyclopts.Parameter(
-            name=["--tag", "-t"],
-            help="Image tag to use (default: from TAG env or 'current' alias)",
-        ),
-    ] = None,
+    tag: TagFlag = None,
 ):
     """Run ephemeral shell for migrations and maintenance.
 
@@ -1700,6 +1697,7 @@ def shell(
         ots instance shell -v ./data                    # bind-mount ./data at /app/data
         ots instance shell -v ./data -e REDIS_URL=redis://10.0.0.5:6379/0  # with env
         ots instance shell -e FOO=bar -e BAZ=qux        # multiple env vars, tmpfs default
+        ots instance shell ghcr.io/org/image:v0.24.0     # explicit image ref
     """
     from pathlib import Path
 
@@ -1709,17 +1707,19 @@ def shell(
 
     cfg = Config()
 
+    # Apply image reference overrides (positional ref > --tag flag > env/config)
+    ref_image, ref_tag = parse_image_reference(reference) if reference else (None, None)
+    override_tag = ref_tag or tag
+    if ref_image or override_tag:
+        cfg = dataclasses.replace(cfg, image=ref_image or cfg.image, tag=override_tag or cfg.tag)
+
     # Obtain executor early for remote env file checks
     from ots_containers.systemd import _get_executor
 
     ex = _get_executor(cfg.get_executor(host=context.host_var.get(None)))
 
-    # Resolve image/tag from config (IMAGE/TAG env vars or database aliases)
-    if tag:
-        image = cfg.image
-        resolved_tag = tag
-    else:
-        image, resolved_tag = cfg.resolve_image_tag(executor=ex)
+    # Resolve image/tag (handles @current/@rollback aliases)
+    image, resolved_tag = cfg.resolve_image_tag(executor=ex)
     full_image = f"{image}:{resolved_tag}"
 
     # Build podman run command
@@ -1797,13 +1797,14 @@ def shell(
 
 @app.command(name="config-transform")
 def config_transform(
+    reference: ImageRef = None,
     command: Annotated[
-        str,
+        str | None,
         cyclopts.Parameter(
             name=["--command", "-c"],
             help="Migration command to run (e.g., 'bin/ots migrate 20250727_01')",
         ),
-    ],
+    ] = None,
     file: Annotated[
         str,
         cyclopts.Parameter(
@@ -1819,13 +1820,7 @@ def config_transform(
         ),
     ] = False,
     quiet: Quiet = False,
-    tag: Annotated[
-        str | None,
-        cyclopts.Parameter(
-            name=["--tag", "-t"],
-            help="Image tag to use (default: from TAG env or 'current' alias)",
-        ),
-    ] = None,
+    tag: TagFlag = None,
 ):
     """Transform config files with backup/apply workflow.
 
@@ -1852,12 +1847,28 @@ def config_transform(
 
         # Different config file
         ots instance config-transform -c "bin/ots migrate auth_fix" -f auth.yaml --apply
+
+        # Explicit image reference
+        ots instance config-transform ghcr.io/org/image:v0.25.0 -c "bin/ots migrate fix"
     """
     import difflib
     import time
     from pathlib import Path
 
+    if command is None:
+        raise SystemExit(
+            "--command / -c is required. "
+            "Example: ots instance config-transform -c 'bin/ots migrate fix'"
+        )
+
     cfg = Config()
+
+    # Apply image reference overrides (positional ref > --tag flag > env/config)
+    ref_image, ref_tag = parse_image_reference(reference) if reference else (None, None)
+    override_tag = ref_tag or tag
+    if ref_image or override_tag:
+        cfg = dataclasses.replace(cfg, image=ref_image or cfg.image, tag=override_tag or cfg.tag)
+
     ex = cfg.get_executor(host=context.host_var.get(None))
     p = Podman(executor=ex)
 
@@ -1877,12 +1888,8 @@ def config_transform(
     elif not config_path.exists():
         raise SystemExit(f"Config file not found: {config_path}")
 
-    # Resolve image/tag from config (IMAGE/TAG env vars or database aliases)
-    if tag:
-        image = cfg.image
-        resolved_tag = tag
-    else:
-        image, resolved_tag = cfg.resolve_image_tag(executor=ex)
+    # Resolve image/tag (handles @current/@rollback aliases)
+    image, resolved_tag = cfg.resolve_image_tag(executor=ex)
     full_image = f"{image}:{resolved_tag}"
 
     # Create temporary volume with timestamp

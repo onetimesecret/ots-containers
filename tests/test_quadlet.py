@@ -1490,3 +1490,35 @@ class TestGetConfigVolumesSectionRemote:
         assert "Volume=/etc/onetimesecret/config.yaml:/app/etc/config.yaml:ro" in result
         assert "auth.yaml" not in result
         cfg.get_existing_config_files.assert_called_once_with(executor=mock_ex)
+
+
+class TestValkeyDependenciesDefenseInDepth:
+    """Defense-in-depth: _get_valkey_unit_dependencies re-validates valkey_service."""
+
+    @pytest.mark.parametrize(
+        "bad_service",
+        [
+            "valkey\nExecStart=/evil",
+            "valkey;rm -rf /",
+            "valkey$(whoami).service",
+            " leading-space.service",
+        ],
+    )
+    def test_rejects_injection(self, bad_service):
+        from ots_containers.config import Config
+        from ots_containers.quadlet import _get_valkey_unit_dependencies
+
+        cfg = MagicMock(spec=Config)
+        cfg.valkey_service = bad_service
+        with pytest.raises(ValueError, match="Invalid valkey_service"):
+            _get_valkey_unit_dependencies(cfg)
+
+    def test_accepts_valid_service(self):
+        from ots_containers.config import Config
+        from ots_containers.quadlet import _get_valkey_unit_dependencies
+
+        cfg = MagicMock(spec=Config)
+        cfg.valkey_service = "valkey-server@6379.service"
+        after, wants = _get_valkey_unit_dependencies(cfg)
+        assert "valkey-server@6379.service" in after
+        assert "valkey-server@6379.service" in wants

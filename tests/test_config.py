@@ -1553,3 +1553,60 @@ class TestConfigResolveImageTagWithOverride:
         image, tag = new_cfg.resolve_image_tag()
         assert image == "custom/image"
         assert tag == "@current"  # literal sentinel returned when no alias
+
+
+class TestConfigDataclassesReplace:
+    """Verify validate() fires on dataclasses.replace(), not just construction."""
+
+    def test_replace_rejects_bad_tag(self, monkeypatch):
+        import dataclasses
+
+        monkeypatch.delenv("IMAGE", raising=False)
+        monkeypatch.delenv("TAG", raising=False)
+        monkeypatch.delenv("OTS_REGISTRY", raising=False)
+
+        from ots_containers.config import Config
+
+        cfg = Config()
+        with pytest.raises(ValueError, match="Invalid tag"):
+            dataclasses.replace(cfg, tag="$(whoami)")
+
+    def test_replace_rejects_bad_image(self, monkeypatch):
+        import dataclasses
+
+        monkeypatch.delenv("IMAGE", raising=False)
+        monkeypatch.delenv("TAG", raising=False)
+        monkeypatch.delenv("OTS_REGISTRY", raising=False)
+
+        from ots_containers.config import Config
+
+        cfg = Config()
+        with pytest.raises(ValueError, match="Invalid image"):
+            dataclasses.replace(cfg, image="../evil")
+
+    def test_replace_rejects_bad_registry(self, monkeypatch):
+        import dataclasses
+
+        monkeypatch.delenv("IMAGE", raising=False)
+        monkeypatch.delenv("TAG", raising=False)
+        monkeypatch.delenv("OTS_REGISTRY", raising=False)
+
+        from ots_containers.config import Config
+
+        cfg = Config()
+        with pytest.raises(ValueError, match="Invalid OTS_REGISTRY"):
+            dataclasses.replace(cfg, registry="reg/../evil")
+
+    def test_replace_accepts_valid_overrides(self, monkeypatch):
+        import dataclasses
+
+        monkeypatch.delenv("IMAGE", raising=False)
+        monkeypatch.delenv("TAG", raising=False)
+        monkeypatch.delenv("OTS_REGISTRY", raising=False)
+
+        from ots_containers.config import Config
+
+        cfg = Config()
+        new_cfg = dataclasses.replace(cfg, image="ghcr.io/other/image", tag="v2.0")
+        assert new_cfg.image == "ghcr.io/other/image"
+        assert new_cfg.tag == "v2.0"

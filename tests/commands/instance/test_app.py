@@ -2324,19 +2324,35 @@ class TestRunCommandExists:
 
     def test_run_with_tag(self, mocker, tmp_path):
         """run --tag should use specified tag in image."""
+        from unittest.mock import Mock
+
+        from ots_containers.config import Config
+
         mock_executor = mocker.MagicMock()
         mock_executor.run_stream.return_value = 0
 
-        mock_config = mocker.Mock()
-        mock_config.tag = "v0.23.0"
-        mock_config.image = "ghcr.io/onetimesecret/onetimesecret"
-        mock_config.registry = None
-        mock_config.existing_config_files = []
-        mock_config.get_executor.return_value = mock_executor
-        mocker.patch("ots_containers.commands.instance.app.Config", return_value=mock_config)
+        cfg = Config()
+        cfg.resolve_image_tag = Mock(return_value=(cfg.image, "v0.19.0"))
+        cfg.get_executor = Mock(return_value=mock_executor)
+        mocker.patch("ots_containers.commands.instance.app.Config", lambda: cfg)
         mocker.patch(
             "ots_containers.commands.instance.app.quadlet.DEFAULT_ENV_FILE",
             tmp_path / "nonexistent",
+        )
+
+        # Patch dataclasses.replace to re-attach mocks on the same instance
+        def tracking_replace(obj, **kwargs):
+            for k, v in kwargs.items():
+                object.__setattr__(obj, k, v)
+            new_image = kwargs.get("image", obj.image)
+            new_tag = kwargs.get("tag", obj.tag)
+            obj.resolve_image_tag = Mock(return_value=(new_image, new_tag))
+            obj.get_executor = Mock(return_value=mock_executor)
+            return obj
+
+        mocker.patch(
+            "ots_containers.commands.instance.app.dataclasses.replace",
+            side_effect=tracking_replace,
         )
 
         instance.run(port=7143, tag="v0.19.0", quiet=True)

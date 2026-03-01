@@ -837,6 +837,161 @@ class TestConfigTransformRemote:
         assert len(tee_calls) >= 1
 
 
+class TestConfigTransformPositionalReference:
+    """config_transform() accepts positional image reference."""
+
+    def test_reference_overrides_image_and_tag(self, mocker, tmp_path):
+        """config_transform with positional reference should override image and tag."""
+        mock_config = mocker.MagicMock()
+        mock_config.get_executor.return_value = LocalExecutor()
+        mock_config.tag = "current"
+        mock_config.image = "ghcr.io/onetimesecret/onetimesecret"
+        mock_config.resolve_image_tag.return_value = ("custom/image", "v2.0")
+        mock_config.config_dir = tmp_path / "etc"
+        mock_config.config_dir.mkdir()
+        (mock_config.config_dir / "config.yaml").write_text("key: value\n")
+        mocker.patch("ots_containers.commands.instance.app.Config", return_value=mock_config)
+        mocker.patch(
+            "ots_containers.commands.instance.app.quadlet.DEFAULT_ENV_FILE",
+            tmp_path / "nonexistent",
+        )
+
+        # Track dataclasses.replace calls
+        replace_calls = []
+
+        def tracking_replace(obj, **kwargs):
+            replace_calls.append(kwargs)
+            for k, v in kwargs.items():
+                setattr(obj, k, v)
+            new_image = kwargs.get("image", obj.image)
+            new_tag = kwargs.get("tag", obj.tag)
+            obj.resolve_image_tag.return_value = (new_image, new_tag)
+            return obj
+
+        mocker.patch(
+            "ots_containers.commands.instance.app.dataclasses.replace",
+            side_effect=tracking_replace,
+        )
+
+        def mock_run_side_effect(*args, **kwargs):
+            cmd = args[0] if args else kwargs.get("args", [])
+            if "volume" in cmd:
+                return subprocess.CompletedProcess(cmd, 0)
+            if "/bin/cp" in cmd:
+                return subprocess.CompletedProcess(cmd, 0)
+            if "/bin/cat" in cmd:
+                return subprocess.CompletedProcess(cmd, 0, stdout="key: value\n", stderr="")
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+        mocker.patch("subprocess.run", side_effect=mock_run_side_effect)
+
+        instance.config_transform(reference="custom/image:v2.0", command="echo test", quiet=True)
+
+        assert len(replace_calls) == 1
+        assert replace_calls[0]["image"] == "custom/image"
+        assert replace_calls[0]["tag"] == "v2.0"
+
+    def test_reference_tag_beats_flag_tag(self, mocker, tmp_path):
+        """Positional ref tag takes precedence over --tag flag."""
+        mock_config = mocker.MagicMock()
+        mock_config.get_executor.return_value = LocalExecutor()
+        mock_config.tag = "current"
+        mock_config.image = "ghcr.io/onetimesecret/onetimesecret"
+        mock_config.resolve_image_tag.return_value = ("img", "ref-tag")
+        mock_config.config_dir = tmp_path / "etc"
+        mock_config.config_dir.mkdir()
+        (mock_config.config_dir / "config.yaml").write_text("key: value\n")
+        mocker.patch("ots_containers.commands.instance.app.Config", return_value=mock_config)
+        mocker.patch(
+            "ots_containers.commands.instance.app.quadlet.DEFAULT_ENV_FILE",
+            tmp_path / "nonexistent",
+        )
+
+        replace_calls = []
+
+        def tracking_replace(obj, **kwargs):
+            replace_calls.append(kwargs)
+            for k, v in kwargs.items():
+                setattr(obj, k, v)
+            new_image = kwargs.get("image", obj.image)
+            new_tag = kwargs.get("tag", obj.tag)
+            obj.resolve_image_tag.return_value = (new_image, new_tag)
+            return obj
+
+        mocker.patch(
+            "ots_containers.commands.instance.app.dataclasses.replace",
+            side_effect=tracking_replace,
+        )
+
+        def mock_run_side_effect(*args, **kwargs):
+            cmd = args[0] if args else kwargs.get("args", [])
+            if "volume" in cmd:
+                return subprocess.CompletedProcess(cmd, 0)
+            if "/bin/cp" in cmd:
+                return subprocess.CompletedProcess(cmd, 0)
+            if "/bin/cat" in cmd:
+                return subprocess.CompletedProcess(cmd, 0, stdout="key: value\n", stderr="")
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+        mocker.patch("subprocess.run", side_effect=mock_run_side_effect)
+
+        instance.config_transform(
+            reference="img:ref-tag", command="echo test", tag="flag-tag", quiet=True
+        )
+
+        assert len(replace_calls) == 1
+        # Reference tag should win over flag tag
+        assert replace_calls[0]["tag"] == "ref-tag"
+
+    def test_no_reference_no_replace(self, mocker, tmp_path):
+        """config_transform without reference or tag should not call replace."""
+        mock_config = mocker.MagicMock()
+        mock_config.get_executor.return_value = LocalExecutor()
+        mock_config.tag = "current"
+        mock_config.image = "ghcr.io/onetimesecret/onetimesecret"
+        mock_config.resolve_image_tag.return_value = (
+            "ghcr.io/onetimesecret/onetimesecret",
+            "current",
+        )
+        mock_config.config_dir = tmp_path / "etc"
+        mock_config.config_dir.mkdir()
+        (mock_config.config_dir / "config.yaml").write_text("key: value\n")
+        mocker.patch("ots_containers.commands.instance.app.Config", return_value=mock_config)
+        mocker.patch(
+            "ots_containers.commands.instance.app.quadlet.DEFAULT_ENV_FILE",
+            tmp_path / "nonexistent",
+        )
+
+        replace_calls = []
+
+        def tracking_replace(obj, **kwargs):
+            replace_calls.append(kwargs)
+            for k, v in kwargs.items():
+                setattr(obj, k, v)
+            return obj
+
+        mocker.patch(
+            "ots_containers.commands.instance.app.dataclasses.replace",
+            side_effect=tracking_replace,
+        )
+
+        def mock_run_side_effect(*args, **kwargs):
+            cmd = args[0] if args else kwargs.get("args", [])
+            if "volume" in cmd:
+                return subprocess.CompletedProcess(cmd, 0)
+            if "/bin/cp" in cmd:
+                return subprocess.CompletedProcess(cmd, 0)
+            if "/bin/cat" in cmd:
+                return subprocess.CompletedProcess(cmd, 0, stdout="key: value\n", stderr="")
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+        mocker.patch("subprocess.run", side_effect=mock_run_side_effect)
+
+        instance.config_transform(command="echo test", quiet=True)
+
+        assert len(replace_calls) == 0
+
+
 class TestConfigTransformCLI:
     """Test config-transform CLI integration."""
 

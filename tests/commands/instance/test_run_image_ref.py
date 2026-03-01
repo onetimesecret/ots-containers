@@ -5,7 +5,10 @@ Verifies --tag override, resolve_image_tag fallback, and IMAGE/TAG
 env var precedence through the run command.
 """
 
+from unittest.mock import Mock
+
 from ots_containers.commands import instance
+from ots_containers.config import Config
 
 
 def _setup_run_mocks(mocker, tmp_path, **config_overrides):
@@ -17,26 +20,40 @@ def _setup_run_mocks(mocker, tmp_path, **config_overrides):
     mock_executor.run_stream.return_value = 0
     mock_executor.run.return_value = mocker.MagicMock(stdout="abc123deadbeef\n", ok=True)
 
-    mock_config = mocker.Mock()
-    mock_config.image = config_overrides.get("image", "ghcr.io/onetimesecret/onetimesecret")
-    mock_config.tag = config_overrides.get("tag", "v0.23.0")
-    mock_config.registry = config_overrides.get("registry", None)
-    mock_config.existing_config_files = config_overrides.get("existing_config_files", [])
-    mock_config.resolve_image_tag.return_value = config_overrides.get(
-        "resolve_image_tag", (mock_config.image, mock_config.tag)
+    image = config_overrides.get("image", "ghcr.io/onetimesecret/onetimesecret")
+    tag = config_overrides.get("tag", "v0.23.0")
+
+    cfg = Config(image=image, tag=tag)
+    cfg.resolve_image_tag = Mock(
+        return_value=config_overrides.get("resolve_image_tag", (image, tag))
     )
-    mock_config.get_executor.return_value = mock_executor
+    cfg.get_executor = Mock(return_value=mock_executor)
 
     mocker.patch(
         "ots_containers.commands.instance.app.Config",
-        return_value=mock_config,
+        lambda: cfg,
     )
     mocker.patch(
         "ots_containers.commands.instance.app.quadlet.DEFAULT_ENV_FILE",
         tmp_path / "nonexistent",
     )
 
-    return mock_config, mock_executor
+    # Track dataclasses.replace calls; apply kwargs to same cfg and re-attach mocks
+    def tracking_replace(obj, **kwargs):
+        for k, v in kwargs.items():
+            object.__setattr__(obj, k, v)
+        new_image = kwargs.get("image", obj.image)
+        new_tag = kwargs.get("tag", obj.tag)
+        obj.resolve_image_tag = Mock(return_value=(new_image, new_tag))
+        obj.get_executor = Mock(return_value=mock_executor)
+        return obj
+
+    mocker.patch(
+        "ots_containers.commands.instance.app.dataclasses.replace",
+        side_effect=tracking_replace,
+    )
+
+    return cfg, mock_executor
 
 
 class TestRunTagOverride:
@@ -54,12 +71,16 @@ class TestRunTagOverride:
         assert "ghcr.io/onetimesecret/onetimesecret" in full_image
 
     def test_tag_flag_skips_resolve(self, mocker, tmp_path):
-        """run --tag should not call resolve_image_tag()."""
+        """run --tag sets the tag via replace; resolve_image_tag passes it through."""
         mock_config, mock_executor = _setup_run_mocks(mocker, tmp_path)
 
         instance.run(port=7143, tag="v0.19.0", quiet=True)
 
-        mock_config.resolve_image_tag.assert_not_called()
+        # resolve_image_tag IS called (always called in the unified flow),
+        # but the concrete tag passes through (not an alias).
+        cmd = mock_executor.run_stream.call_args[0][0]
+        full_image = cmd[-1]
+        assert "v0.19.0" in full_image
 
     def test_tag_flag_uses_cfg_image(self, mocker, tmp_path):
         """run --tag uses cfg.image (from IMAGE env) as the image portion."""
@@ -159,6 +180,51 @@ class TestRunImageEnvVars:
         full_image = cmd[-1]
         assert "from-flag" in full_image
         assert "from-env" not in full_image
+
+
+class TestRunPositionalReference:
+    """run() accepts positional image reference."""
+
+    def test_reference_overrides_image_and_tag(self, mocker, tmp_path):
+        """run with positional reference should override both image and tag."""
+        _mock_config, mock_executor = _setup_run_mocks(mocker, tmp_path)
+
+        instance.run(reference="custom/image:v2.0", port=7143, quiet=True)
+
+        cmd = mock_executor.run_stream.call_args[0][0]
+        full_image = cmd[-1]
+        assert full_image == "custom/image:v2.0"
+
+    def test_reference_image_only(self, mocker, tmp_path):
+        """run with positional reference (no tag) should override image only."""
+        _mock_config, mock_executor = _setup_run_mocks(mocker, tmp_path)
+
+        instance.run(reference="custom/image", port=7143, quiet=True)
+
+        cmd = mock_executor.run_stream.call_args[0][0]
+        full_image = cmd[-1]
+        assert "custom/image" in full_image
+
+    def test_reference_tag_beats_flag_tag(self, mocker, tmp_path):
+        """Positional ref tag takes precedence over --tag flag."""
+        _mock_config, mock_executor = _setup_run_mocks(mocker, tmp_path)
+
+        instance.run(reference="img:ref-tag", port=7143, tag="flag-tag", quiet=True)
+
+        cmd = mock_executor.run_stream.call_args[0][0]
+        full_image = cmd[-1]
+        assert "ref-tag" in full_image
+        assert "flag-tag" not in full_image
+
+    def test_reference_with_registry_port(self, mocker, tmp_path):
+        """run with registry:port/image:tag should parse correctly."""
+        _mock_config, mock_executor = _setup_run_mocks(mocker, tmp_path)
+
+        instance.run(reference="registry:5000/org/image:v1.0", port=7143, quiet=True)
+
+        cmd = mock_executor.run_stream.call_args[0][0]
+        full_image = cmd[-1]
+        assert full_image == "registry:5000/org/image:v1.0"
 
 
 class TestRunDetachedMode:

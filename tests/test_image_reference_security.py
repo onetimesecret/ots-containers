@@ -12,6 +12,7 @@ from ots_containers.config import (
     CPU_QUOTA_RE,
     IMAGE_RE,
     MEMORY_MAX_RE,
+    REGISTRY_RE,
     SYSTEMD_UNIT_RE,
     TAG_RE,
     Config,
@@ -276,6 +277,17 @@ class TestConfigValidate:
         # Should not raise
         cfg.validate()
 
+    def test_validate_rejects_bad_registry(self, monkeypatch):
+        """OTS_REGISTRY with path traversal should be rejected at construction time."""
+        monkeypatch.setenv("OTS_REGISTRY", "registry/../evil")
+        monkeypatch.delenv("IMAGE", raising=False)
+        monkeypatch.delenv("TAG", raising=False)
+        monkeypatch.delenv("MEMORY_MAX", raising=False)
+        monkeypatch.delenv("CPU_QUOTA", raising=False)
+        monkeypatch.delenv("OTS_VALKEY_SERVICE", raising=False)
+        with pytest.raises(ValueError, match="Invalid OTS_REGISTRY"):
+            Config()
+
     def test_validate_is_called_on_construction(self, monkeypatch):
         """validate() is called in __post_init__ -- bad values are rejected at construction time."""
         monkeypatch.setenv("TAG", "$(whoami)")
@@ -286,3 +298,35 @@ class TestConfigValidate:
         monkeypatch.delenv("OTS_REGISTRY", raising=False)
         with pytest.raises(ValueError, match="Invalid tag"):
             Config()
+
+
+class TestRegistryRegexSecurity:
+    """REGISTRY_RE must reject path traversal and shell metacharacters."""
+
+    @pytest.mark.parametrize(
+        "bad_registry",
+        [
+            "registry/../evil",
+            "../registry",
+            "a..b/image",
+            "registry;rm -rf /",
+            "registry$(whoami)",
+            "registry\nevil",
+            " leading-space",
+            "",
+        ],
+    )
+    def test_rejects_bad_registries(self, bad_registry):
+        assert not REGISTRY_RE.match(bad_registry), f"Should reject: {bad_registry!r}"
+
+    @pytest.mark.parametrize(
+        "good_registry",
+        [
+            "registry.example.com",
+            "registry:5000",
+            "ghcr.io/org",
+            "localhost:5000/path",
+        ],
+    )
+    def test_accepts_valid_registries(self, good_registry):
+        assert REGISTRY_RE.match(good_registry), f"Should accept: {good_registry!r}"

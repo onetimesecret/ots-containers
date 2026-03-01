@@ -312,6 +312,13 @@ def _get_valkey_unit_dependencies(cfg: Config) -> tuple[str, str]:
     """
     if not cfg.valkey_service:
         return "", ""
+    from ots_containers.config import SYSTEMD_UNIT_RE
+
+    if not SYSTEMD_UNIT_RE.match(cfg.valkey_service):
+        raise ValueError(
+            f"Invalid valkey_service: {cfg.valkey_service!r}. "
+            "Must be a valid systemd unit name (e.g. valkey-server@6379.service)."
+        )
     return f" {cfg.valkey_service}", f"\nWants={cfg.valkey_service}"
 
 

@@ -8,6 +8,7 @@ for ephemeral and persistent migration shells.
 import pytest
 
 from ots_containers.commands import instance
+from ots_containers.config import DEFAULT_IMAGE, Config
 
 
 def _setup_shell_mocks(mocker, tmp_path, **config_overrides):
@@ -15,24 +16,25 @@ def _setup_shell_mocks(mocker, tmp_path, **config_overrides):
 
     Returns (mock_config, mock_executor) so tests can inspect calls.
     """
-    from ots_containers.config import DEFAULT_IMAGE
+    from unittest.mock import Mock
 
-    mock_config = mocker.MagicMock()
-    mock_config.image = config_overrides.get("image", DEFAULT_IMAGE)
-    mock_config.tag = config_overrides.get("tag", "current")
-    mock_config.config_dir = tmp_path / "etc"
-    mock_config.config_dir.mkdir(exist_ok=True)
-    mock_config.get_existing_config_files.return_value = config_overrides.get(
-        "existing_config_files", []
+    image = config_overrides.get("image", DEFAULT_IMAGE)
+    tag = config_overrides.get("tag", "current")
+
+    cfg = Config(image=image, tag=tag)
+    cfg.config_dir = tmp_path / "etc"
+    cfg.config_dir.mkdir(exist_ok=True)
+    cfg.get_existing_config_files = Mock(
+        return_value=config_overrides.get("existing_config_files", [])
     )
 
     # Default resolve_image_tag returns (image, tag) — can be overridden
-    default_resolve = (mock_config.image, mock_config.tag)
-    mock_config.resolve_image_tag.return_value = config_overrides.get(
-        "resolve_image_tag", default_resolve
+    default_resolve = (image, tag)
+    cfg.resolve_image_tag = Mock(
+        return_value=config_overrides.get("resolve_image_tag", default_resolve)
     )
 
-    mocker.patch("ots_containers.commands.instance.app.Config", return_value=mock_config)
+    mocker.patch("ots_containers.commands.instance.app.Config", lambda: cfg)
 
     # Mock env file not existing by default
     env_file = config_overrides.get("env_file", tmp_path / "nonexistent")
@@ -53,9 +55,27 @@ def _setup_shell_mocks(mocker, tmp_path, **config_overrides):
     mock_run_result.ok = env_exists
     mock_executor.run.return_value = mock_run_result
 
-    mock_config.get_executor.return_value = mock_executor
+    cfg.get_executor = Mock(return_value=mock_executor)
 
-    return mock_config, mock_executor
+    # Track dataclasses.replace calls; apply kwargs to same cfg and re-attach mocks
+    def tracking_replace(obj, **kwargs):
+        for k, v in kwargs.items():
+            object.__setattr__(obj, k, v)
+        new_image = kwargs.get("image", obj.image)
+        new_tag = kwargs.get("tag", obj.tag)
+        obj.resolve_image_tag = Mock(return_value=(new_image, new_tag))
+        obj.get_executor = Mock(return_value=mock_executor)
+        obj.get_existing_config_files = Mock(
+            return_value=config_overrides.get("existing_config_files", [])
+        )
+        return obj
+
+    mocker.patch(
+        "ots_containers.commands.instance.app.dataclasses.replace",
+        side_effect=tracking_replace,
+    )
+
+    return cfg, mock_executor
 
 
 def _get_cmd_from_executor(mock_executor, interactive=True):
@@ -289,8 +309,7 @@ class TestShellImageReference:
         mock_config.resolve_image_tag.assert_called_once()
 
     def test_shell_tag_flag_bypasses_resolve(self, mocker, tmp_path):
-        """shell --tag should use cfg.image + provided tag, skipping resolve_image_tag."""
-        from ots_containers.config import DEFAULT_IMAGE
+        """shell --tag sets the tag via replace; resolve_image_tag passes it through."""
 
         mock_config, mock_executor = _setup_shell_mocks(mocker, tmp_path)
 
@@ -298,8 +317,6 @@ class TestShellImageReference:
 
         cmd = _get_cmd_from_executor(mock_executor, interactive=True)
         assert f"{DEFAULT_IMAGE}:v0.24.0" in cmd
-        # resolve_image_tag should NOT have been called when --tag is provided
-        mock_config.resolve_image_tag.assert_not_called()
 
     def test_shell_image_env_override(self, mocker, tmp_path):
         """shell should use IMAGE env var via config when set."""
@@ -343,6 +360,46 @@ class TestShellImageReference:
         cmd = _get_cmd_from_executor(mock_executor, interactive=True)
         # Should use the resolved tag, not the literal "@current"
         assert "ghcr.io/onetimesecret/onetimesecret:v0.22.1" in cmd
+
+
+class TestShellPositionalReference:
+    """shell() accepts positional image reference."""
+
+    def test_reference_overrides_image_and_tag(self, mocker, tmp_path):
+        """shell with positional reference should override both image and tag."""
+        _mock_config, mock_executor = _setup_shell_mocks(mocker, tmp_path)
+
+        instance.shell(reference="custom/image:v2.0", quiet=True)
+
+        cmd = _get_cmd_from_executor(mock_executor, interactive=True)
+        assert "custom/image:v2.0" in cmd
+
+    def test_reference_image_only(self, mocker, tmp_path):
+        """shell with positional reference (no tag) should override image."""
+        _mock_config, mock_executor = _setup_shell_mocks(mocker, tmp_path)
+
+        instance.shell(reference="custom/image", quiet=True)
+
+        cmd = _get_cmd_from_executor(mock_executor, interactive=True)
+        assert any("custom/image" in part for part in cmd)
+
+    def test_reference_tag_beats_flag_tag(self, mocker, tmp_path):
+        """Positional ref tag takes precedence over --tag flag."""
+        _mock_config, mock_executor = _setup_shell_mocks(mocker, tmp_path)
+
+        instance.shell(reference="img:ref-tag", tag="flag-tag", quiet=True)
+
+        cmd = _get_cmd_from_executor(mock_executor, interactive=True)
+        assert "img:ref-tag" in cmd
+
+    def test_reference_with_registry_port(self, mocker, tmp_path):
+        """shell with registry:port/image:tag should parse correctly."""
+        _mock_config, mock_executor = _setup_shell_mocks(mocker, tmp_path)
+
+        instance.shell(reference="registry:5000/org/image:v1.0", quiet=True)
+
+        cmd = _get_cmd_from_executor(mock_executor, interactive=True)
+        assert "registry:5000/org/image:v1.0" in cmd
 
 
 class TestShellHelp:

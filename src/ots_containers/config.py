@@ -61,8 +61,9 @@ SYSTEMD_UNIT_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._@:-]{0,255}$")
 
 # OCI registry URL: hostname with optional port and path components.
 # Examples: "registry.example.com", "registry:5000", "registry.example.com/org"
+# The negative lookahead rejects '..' path traversal sequences anywhere in the reference.
 # Rejects shell metacharacters, whitespace, and newlines.
-REGISTRY_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._/:-]{0,254}$")
+REGISTRY_RE = re.compile(r"^(?!.*\.\.)[a-zA-Z0-9][a-zA-Z0-9._/:-]{0,254}$")
 
 
 # Session-scoped SSH connection cache: hostname -> paramiko.SSHClient.
