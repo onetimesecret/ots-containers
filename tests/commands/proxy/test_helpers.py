@@ -1,7 +1,10 @@
 # tests/commands/proxy/test_helpers.py
 """Tests for proxy command helpers."""
 
+import json
+import socket
 import subprocess
+import urllib.request
 
 import pytest
 
@@ -489,3 +492,195 @@ class TestRemoteReloadCaddy:
             timeout=30,
             check=True,
         )
+
+
+class TestFindFreePort:
+    """Test find_free_port function."""
+
+    def test_returns_int_in_valid_range(self):
+        """Should return an integer port in the ephemeral range."""
+        from rots.commands.proxy._helpers import find_free_port
+
+        port = find_free_port()
+        assert isinstance(port, int)
+        assert 1024 < port < 65536
+
+    def test_port_is_bindable(self):
+        """Returned port should be immediately bindable."""
+        from rots.commands.proxy._helpers import find_free_port
+
+        port = find_free_port()
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.bind(("127.0.0.1", port))  # should not raise
+
+
+class TestPatchCaddyJson:
+    """Test patch_caddy_json function."""
+
+    def _minimal_config(self, *, upstreams: str = "app:3000") -> dict:
+        """Build a minimal Caddy JSON config for testing."""
+        return {
+            "apps": {
+                "http": {
+                    "servers": {
+                        "srv0": {
+                            "listen": [":443"],
+                            "routes": [
+                                {
+                                    "handle": [
+                                        {
+                                            "handler": "reverse_proxy",
+                                            "upstreams": [{"dial": upstreams}],
+                                        }
+                                    ]
+                                }
+                            ],
+                        }
+                    }
+                }
+            }
+        }
+
+    def test_replaces_listen_port(self):
+        from rots.commands.proxy._helpers import patch_caddy_json
+
+        result = patch_caddy_json(self._minimal_config(), caddy_port=9999, echo_addr="x:1")
+        srv = result["apps"]["http"]["servers"]["srv0"]
+        assert srv["listen"] == [":9999"]
+
+    def test_replaces_upstreams(self):
+        from rots.commands.proxy._helpers import patch_caddy_json
+
+        result = patch_caddy_json(
+            self._minimal_config(), caddy_port=9999, echo_addr="127.0.0.1:8888"
+        )
+        handler = result["apps"]["http"]["servers"]["srv0"]["routes"][0]["handle"][0]
+        assert handler["upstreams"][0]["dial"] == "127.0.0.1:8888"
+
+    def test_disables_https(self):
+        from rots.commands.proxy._helpers import patch_caddy_json
+
+        result = patch_caddy_json(self._minimal_config(), caddy_port=9999, echo_addr="x:1")
+        srv = result["apps"]["http"]["servers"]["srv0"]
+        assert srv["automatic_https"] == {"disable": True}
+
+    def test_disables_admin(self):
+        from rots.commands.proxy._helpers import patch_caddy_json
+
+        result = patch_caddy_json(self._minimal_config(), caddy_port=9999, echo_addr="x:1")
+        assert result["admin"]["disabled"] is True
+
+    def test_does_not_mutate_input(self):
+        from rots.commands.proxy._helpers import patch_caddy_json
+
+        original = self._minimal_config()
+        import copy
+
+        frozen = copy.deepcopy(original)
+        patch_caddy_json(original, caddy_port=9999, echo_addr="x:1")
+        assert original == frozen
+
+    def test_handles_nested_subroutes(self):
+        from rots.commands.proxy._helpers import patch_caddy_json
+
+        config = {
+            "apps": {
+                "http": {
+                    "servers": {
+                        "srv0": {
+                            "listen": [":443"],
+                            "routes": [
+                                {
+                                    "handle": [
+                                        {
+                                            "handler": "subroute",
+                                            "routes": [
+                                                {
+                                                    "handle": [
+                                                        {
+                                                            "handler": "reverse_proxy",
+                                                            "upstreams": [{"dial": "app:3000"}],
+                                                        }
+                                                    ]
+                                                }
+                                            ],
+                                        }
+                                    ]
+                                }
+                            ],
+                        }
+                    }
+                }
+            }
+        }
+        result = patch_caddy_json(config, caddy_port=9999, echo_addr="127.0.0.1:7777")
+        nested = result["apps"]["http"]["servers"]["srv0"]["routes"][0]["handle"][0]
+        proxy = nested["routes"][0]["handle"][0]
+        assert proxy["upstreams"][0]["dial"] == "127.0.0.1:7777"
+
+    def test_handles_multiple_servers(self):
+        from rots.commands.proxy._helpers import patch_caddy_json
+
+        config = {
+            "apps": {
+                "http": {
+                    "servers": {
+                        "srv0": {
+                            "listen": [":443"],
+                            "routes": [],
+                        },
+                        "srv1": {
+                            "listen": [":8443"],
+                            "routes": [],
+                        },
+                    }
+                }
+            }
+        }
+        result = patch_caddy_json(config, caddy_port=5555, echo_addr="x:1")
+        for srv in result["apps"]["http"]["servers"].values():
+            assert srv["listen"] == [":5555"]
+
+    def test_raises_on_missing_servers(self):
+        from rots.commands.proxy._helpers import ProxyError, patch_caddy_json
+
+        with pytest.raises(ProxyError, match="No apps.http.servers"):
+            patch_caddy_json({}, caddy_port=9999, echo_addr="x:1")
+
+        with pytest.raises(ProxyError, match="No apps.http.servers"):
+            patch_caddy_json({"apps": {"http": {}}}, caddy_port=9999, echo_addr="x:1")
+
+
+class TestRunEchoServer:
+    """Test run_echo_server context manager."""
+
+    def test_returns_json_body(self):
+        from rots.commands.proxy._helpers import find_free_port, run_echo_server
+
+        port = find_free_port()
+        with run_echo_server(port) as (addr, _received):
+            resp = urllib.request.urlopen(f"http://{addr}/test")  # noqa: S310
+            body = json.loads(resp.read())
+            assert body["method"] == "GET"
+            assert body["path"] == "/test"
+
+    def test_captures_host_header(self):
+        from rots.commands.proxy._helpers import find_free_port, run_echo_server
+
+        port = find_free_port()
+        with run_echo_server(port) as (addr, received):
+            req = urllib.request.Request(f"http://{addr}/hello")
+            req.add_header("Host", "example.com")
+            urllib.request.urlopen(req)  # noqa: S310
+            assert len(received) == 1
+            assert received[0]["headers"]["Host"] == "example.com"
+
+    def test_shuts_down_after_context_exit(self):
+        from rots.commands.proxy._helpers import find_free_port, run_echo_server
+
+        port = find_free_port()
+        with run_echo_server(port):
+            pass  # server active inside
+        # After exiting, port should be unbound (server shut down)
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.bind(("127.0.0.1", port))  # should not raise

@@ -1,6 +1,7 @@
 # tests/commands/proxy/test_app.py
 """Tests for proxy app commands."""
 
+import json
 from unittest.mock import ANY
 
 import pytest
@@ -513,3 +514,213 @@ class TestValidateCommand:
             validate(config_file=config)
 
         assert "caddy not found" in str(exc_info.value)
+
+
+class TestTraceCommand:
+    """Test trace command."""
+
+    def _mock_remote_executor(self, mocker):
+        """Create a mock remote executor for rejection tests."""
+        mock_ex = mocker.MagicMock()
+        mock_ex.__class__ = type("SSHExecutor", (), {})
+        return mock_ex
+
+    def test_rejects_remote_host(self, tmp_path, mocker):
+        """trace should exit when --host is used."""
+        from rots.commands.proxy.app import trace
+
+        config = tmp_path / "Caddyfile"
+        config.write_text("localhost { }")
+
+        mock_ex = self._mock_remote_executor(mocker)
+        mock_cfg = mocker.MagicMock()
+        mock_cfg.get_executor.return_value = mock_ex
+        mocker.patch("rots.commands.proxy.app.Config", return_value=mock_cfg)
+
+        with pytest.raises(SystemExit) as exc_info:
+            trace(config_file=config, url="localhost/test")
+
+        assert "local-only" in str(exc_info.value)
+
+    def test_exits_on_missing_config(self, tmp_path, mocker):
+        """trace should exit when config file doesn't exist."""
+        from rots.commands.proxy.app import trace
+
+        missing = tmp_path / "nonexistent.conf"
+
+        with pytest.raises(SystemExit) as exc_info:
+            trace(config_file=missing, url="localhost/test")
+
+        assert "not found" in str(exc_info.value)
+
+    def test_parses_host_and_path(self, tmp_path, mocker, capsys):
+        """trace should split url into Host header and request path."""
+        from rots.commands.proxy.app import trace
+
+        config = tmp_path / "Caddyfile"
+        config.write_text("localhost { }")
+
+        adapted_json = json.dumps(
+            {
+                "apps": {
+                    "http": {
+                        "servers": {
+                            "srv0": {
+                                "listen": [":443"],
+                                "routes": [
+                                    {
+                                        "handle": [
+                                            {
+                                                "handler": "reverse_proxy",
+                                                "upstreams": [{"dial": "app:3000"}],
+                                            }
+                                        ]
+                                    }
+                                ],
+                            }
+                        }
+                    }
+                }
+            }
+        )
+
+        mocker.patch(
+            "rots.commands.proxy.app.adapt_to_json",
+            return_value=adapted_json,
+        )
+
+        captured_req = {}
+
+        def mock_run_echo(port):
+            import contextlib
+
+            @contextlib.contextmanager
+            def _ctx():
+                received = [
+                    {
+                        "method": "GET",
+                        "path": "/api/v2/status",
+                        "headers": {"Host": "us.onetime.co"},
+                    }
+                ]
+                yield f"127.0.0.1:{port}", received
+
+            return _ctx()
+
+        def mock_run_caddy(cfg, port):
+            import contextlib
+
+            captured_req["config"] = cfg
+            captured_req["port"] = port
+
+            @contextlib.contextmanager
+            def _ctx():
+                yield mocker.MagicMock()
+
+            return _ctx()
+
+        # Mock urllib to avoid actually connecting
+        mock_resp = mocker.MagicMock()
+        mock_resp.status = 200
+        mock_resp.headers = {"X-Custom": "value"}
+        mock_resp.__enter__ = lambda s: s
+        mock_resp.__exit__ = mocker.MagicMock(return_value=False)
+        mocker.patch("urllib.request.urlopen", return_value=mock_resp)
+
+        mocker.patch("rots.commands.proxy.app.run_echo_server", side_effect=mock_run_echo)
+        mocker.patch("rots.commands.proxy.app.run_caddy", side_effect=mock_run_caddy)
+        mocker.patch("rots.commands.proxy.app.find_free_port", side_effect=[9000, 9001])
+
+        trace(config_file=config, url="us.onetime.co/api/v2/status")
+
+        captured = capsys.readouterr()
+        assert "us.onetime.co/api/v2/status" in captured.out
+        assert "response:" in captured.out
+        assert "200" in captured.out
+        assert "upstream:" in captured.out
+
+    def test_handles_blocked_request(self, tmp_path, mocker, capsys):
+        """trace should show blocked message when echo server gets no request."""
+        from rots.commands.proxy.app import trace
+
+        config = tmp_path / "Caddyfile"
+        config.write_text("localhost { }")
+
+        adapted_json = json.dumps(
+            {
+                "apps": {
+                    "http": {
+                        "servers": {
+                            "srv0": {
+                                "listen": [":443"],
+                                "routes": [],
+                            }
+                        }
+                    }
+                }
+            }
+        )
+
+        mocker.patch(
+            "rots.commands.proxy.app.adapt_to_json",
+            return_value=adapted_json,
+        )
+
+        def mock_run_echo(port):
+            import contextlib
+
+            @contextlib.contextmanager
+            def _ctx():
+                yield f"127.0.0.1:{port}", []  # empty received = blocked
+
+            return _ctx()
+
+        def mock_run_caddy(cfg, port):
+            import contextlib
+
+            @contextlib.contextmanager
+            def _ctx():
+                yield mocker.MagicMock()
+
+            return _ctx()
+
+        import urllib.error
+
+        mocker.patch(
+            "urllib.request.urlopen",
+            side_effect=urllib.error.HTTPError(
+                url="http://localhost",
+                code=404,
+                msg="Not Found",
+                hdrs={},  # type: ignore[arg-type]
+                fp=None,
+            ),
+        )
+
+        mocker.patch("rots.commands.proxy.app.run_echo_server", side_effect=mock_run_echo)
+        mocker.patch("rots.commands.proxy.app.run_caddy", side_effect=mock_run_caddy)
+        mocker.patch("rots.commands.proxy.app.find_free_port", side_effect=[9000, 9001])
+
+        trace(config_file=config, url="example.com/.env")
+
+        captured = capsys.readouterr()
+        assert "404" in captured.out
+        assert "blocked by matcher" in captured.out
+
+    def test_exits_on_proxy_error(self, tmp_path, mocker):
+        """trace should exit cleanly on ProxyError."""
+        from rots.commands.proxy._helpers import ProxyError
+        from rots.commands.proxy.app import trace
+
+        config = tmp_path / "Caddyfile"
+        config.write_text("localhost { }")
+
+        mocker.patch(
+            "rots.commands.proxy.app.adapt_to_json",
+            side_effect=ProxyError("caddy adapt failed"),
+        )
+
+        with pytest.raises(SystemExit) as exc_info:
+            trace(config_file=config, url="localhost/test")
+
+        assert "caddy adapt failed" in str(exc_info.value)

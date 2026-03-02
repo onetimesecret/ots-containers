@@ -21,8 +21,12 @@ from ..common import DryRun
 from ._helpers import (
     ProxyError,
     adapt_to_json,
+    find_free_port,
+    patch_caddy_json,
     reload_caddy,
     render_template,
+    run_caddy,
+    run_echo_server,
     validate_caddy_config,
 )
 
@@ -316,3 +320,123 @@ def diff(
     )
     print("".join(result), end="")
     raise SystemExit(1)
+
+
+@app.command
+def trace(
+    config_file: Annotated[
+        Path,
+        cyclopts.Parameter(help="Caddyfile to test"),
+    ],
+    url: Annotated[
+        str,
+        cyclopts.Parameter(help="host/path to request (e.g. us.onetime.co/api/v2/status)"),
+    ],
+    header: Annotated[
+        tuple[str, ...],
+        cyclopts.Parameter(
+            name=["--header", "-H"],
+            help="Extra request header (repeatable, curl-style 'Key: Value')",
+        ),
+    ] = (),
+    caddy_port: Annotated[
+        int | None,
+        cyclopts.Parameter(help="Override Caddy listen port (default: ephemeral)"),
+    ] = None,
+    echo_port: Annotated[
+        int | None,
+        cyclopts.Parameter(help="Override echo server port (default: ephemeral)"),
+    ] = None,
+) -> None:
+    """Smoke-test a Caddyfile against a local echo server.
+
+    Starts a real Caddy process and a lightweight echo backend, sends a
+    request through Caddy, and prints exactly what the client received
+    and what the upstream (Puma) would have seen.
+
+    Local only — rejects --host.
+
+    Examples:
+        rots proxy trace Caddyfile us.onetime.co/api/v2/status
+        rots proxy trace Caddyfile us.onetime.co/.env
+        rots proxy trace Caddyfile us.onetime.co/api/v2/secret/conceal \\
+            -H "Origin: https://onetimesecret.com"
+    """
+    import json
+    import urllib.error
+    import urllib.request
+
+    from ots_shared.ssh import is_remote
+
+    cfg = Config()
+    ex = cfg.get_executor(host=context.host_var.get(None))
+
+    if is_remote(ex):
+        raise SystemExit("proxy trace is local-only. Do not use --host.")
+
+    if not config_file.exists():
+        raise SystemExit(f"Config file not found: {config_file}")
+
+    # Parse url → host + path
+    parts = url.split("/", 1)
+    host_header = parts[0]
+    request_path = "/" + parts[1] if len(parts) > 1 else "/"
+
+    # Adapt Caddyfile → JSON, then patch for local use
+    try:
+        raw_json = adapt_to_json(config_file, executor=ex)
+        caddy_config = json.loads(raw_json)
+    except ProxyError as e:
+        raise SystemExit(str(e)) from e
+
+    c_port = caddy_port or find_free_port()
+    e_port = echo_port or find_free_port()
+    echo_addr = f"127.0.0.1:{e_port}"
+
+    try:
+        patched = patch_caddy_json(caddy_config, caddy_port=c_port, echo_addr=echo_addr)
+    except ProxyError as e:
+        raise SystemExit(str(e)) from e
+
+    try:
+        with run_echo_server(e_port) as (_, received), run_caddy(patched, c_port):
+            # Build the request
+            req_url = f"http://127.0.0.1:{c_port}{request_path}"
+            req = urllib.request.Request(req_url)
+            req.add_header("Host", host_header)
+            for h in header:
+                key, _, value = h.partition(":")
+                if key and value:
+                    req.add_header(key.strip(), value.strip())
+
+            try:
+                resp = urllib.request.urlopen(req)  # noqa: S310
+                status_code = resp.status
+                resp_headers = dict(resp.headers)
+            except urllib.error.HTTPError as e:
+                status_code = e.code
+                resp_headers = dict(e.headers)
+
+            # Output
+            print(f"{host_header}{request_path}\n")
+            print("response:")
+            print(f"  {status_code}")
+            # Filter noisy headers
+            skip = {"server", "date", "content-length", "content-type", "transfer-encoding"}
+            for k, v in sorted(resp_headers.items()):
+                if k.lower() not in skip:
+                    print(f"  {k}: {v}")
+
+            if received:
+                print("\nupstream:")
+                up = received[0]
+                print(f"  {up['method']} {up['path']}")
+                skip_up = {"content-length", "content-type", "accept-encoding", "user-agent"}
+                for k, v in sorted(up["headers"].items()):
+                    if k.lower() not in skip_up:
+                        print(f"  {k}: {v}")
+            else:
+                print("\n  (no upstream — request blocked by matcher)")
+
+    except ProxyError as e:
+        raise SystemExit(str(e)) from e
