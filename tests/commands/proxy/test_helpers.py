@@ -546,7 +546,7 @@ class TestPatchCaddyJson:
 
         result = patch_caddy_json(self._minimal_config(), caddy_port=9999, echo_addr="x:1")
         srv = result["apps"]["http"]["servers"]["srv0"]
-        assert srv["listen"] == [":9999"]
+        assert srv["listen"] == ["127.0.0.1:9999"]
 
     def test_replaces_upstreams(self):
         from rots.commands.proxy._helpers import patch_caddy_json
@@ -618,7 +618,50 @@ class TestPatchCaddyJson:
         proxy = nested["routes"][0]["handle"][0]
         assert proxy["upstreams"][0]["dial"] == "127.0.0.1:7777"
 
-    def test_handles_multiple_servers(self):
+    def test_merges_multiple_servers(self):
+        from rots.commands.proxy._helpers import patch_caddy_json
+
+        config = {
+            "apps": {
+                "http": {
+                    "servers": {
+                        "srv0": {
+                            "listen": [":443"],
+                            "routes": [{"handle": [{"handler": "static_response"}]}],
+                        },
+                        "srv1": {
+                            "listen": [":8443"],
+                            "routes": [{"handle": [{"handler": "encode"}]}],
+                        },
+                    }
+                }
+            }
+        }
+        result = patch_caddy_json(config, caddy_port=5555, echo_addr="x:1")
+        servers = result["apps"]["http"]["servers"]
+        assert len(servers) == 1
+        srv = servers["srv0"]
+        assert srv["listen"] == ["127.0.0.1:5555"]
+        # Routes from both original servers are merged
+        assert len(srv["routes"]) == 2
+
+    def test_strips_tls_app(self):
+        from rots.commands.proxy._helpers import patch_caddy_json
+
+        config = {
+            "apps": {
+                "http": {
+                    "servers": {
+                        "srv0": {"listen": [":443"], "routes": []},
+                    }
+                },
+                "tls": {"automation": {"policies": [{"issuers": [{"module": "acme"}]}]}},
+            }
+        }
+        result = patch_caddy_json(config, caddy_port=9999, echo_addr="x:1")
+        assert "tls" not in result["apps"]
+
+    def test_strips_tls_connection_policies(self):
         from rots.commands.proxy._helpers import patch_caddy_json
 
         config = {
@@ -628,18 +671,14 @@ class TestPatchCaddyJson:
                         "srv0": {
                             "listen": [":443"],
                             "routes": [],
-                        },
-                        "srv1": {
-                            "listen": [":8443"],
-                            "routes": [],
+                            "tls_connection_policies": [{"match": {}}],
                         },
                     }
                 }
             }
         }
-        result = patch_caddy_json(config, caddy_port=5555, echo_addr="x:1")
-        for srv in result["apps"]["http"]["servers"].values():
-            assert srv["listen"] == [":5555"]
+        result = patch_caddy_json(config, caddy_port=9999, echo_addr="x:1")
+        assert "tls_connection_policies" not in result["apps"]["http"]["servers"]["srv0"]
 
     def test_raises_on_missing_servers(self):
         from rots.commands.proxy._helpers import ProxyError, patch_caddy_json

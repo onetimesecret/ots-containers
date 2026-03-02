@@ -9,6 +9,7 @@ container .env files to avoid mixing host and container configurations.
 All commands support remote execution via the global ``--host`` flag.
 """
 
+import logging
 from pathlib import Path
 from typing import Annotated
 
@@ -29,6 +30,8 @@ from ._helpers import (
     run_echo_server,
     validate_caddy_config,
 )
+
+log = logging.getLogger(__name__)
 
 app = cyclopts.App(
     name="proxy",
@@ -337,7 +340,7 @@ def trace(
     header: Annotated[
         tuple[str, ...],
         cyclopts.Parameter(
-            name=["--header", "-H"],
+            name="--header",
             help="Extra request header (repeatable, curl-style 'Key: Value')",
         ),
     ] = (),
@@ -401,7 +404,12 @@ def trace(
         raise SystemExit(str(e)) from e
 
     try:
-        with run_echo_server(e_port) as (_, received), run_caddy(patched, c_port):
+        with run_echo_server(e_port) as (_, received), run_caddy(patched, c_port) as proc:
+            # Discard health-check probes that arrived during startup
+            received.clear()
+
+            print(f"caddy pid={proc.pid} on 127.0.0.1:{c_port}\n")
+
             # Build the request
             req_url = f"http://127.0.0.1:{c_port}{request_path}"
             req = urllib.request.Request(req_url)
@@ -415,14 +423,15 @@ def trace(
                 resp = urllib.request.urlopen(req)  # noqa: S310
                 status_code = resp.status
                 resp_headers = dict(resp.headers)
+                resp_body = resp.read().decode(errors="replace")
             except urllib.error.HTTPError as e:
                 status_code = e.code
                 resp_headers = dict(e.headers)
+                resp_body = e.read().decode(errors="replace")
 
             # Output
-            print(f"{host_header}{request_path}\n")
-            print("response:")
-            print(f"  {status_code}")
+            print(f"{host_header}{request_path}")
+            print(f"\nresponse: {status_code}")
             # Filter noisy headers
             skip = {"server", "date", "content-length", "content-type", "transfer-encoding"}
             for k, v in sorted(resp_headers.items()):
@@ -437,8 +446,20 @@ def trace(
                 for k, v in sorted(up["headers"].items()):
                     if k.lower() not in skip_up:
                         print(f"  {k}: {v}")
+
+                # Show the echo body that round-tripped through Caddy
+                if resp_body and log.isEnabledFor(logging.DEBUG):
+                    try:
+                        echo_data = json.loads(resp_body)
+                        print(f"\necho: {json.dumps(echo_data, indent=2)}")
+                    except json.JSONDecodeError:
+                        print(f"\necho: {resp_body}")
             else:
-                print("\n  (no upstream — request blocked by matcher)")
+                if resp_body:
+                    print(f"\nblocked: {status_code}")
+                    print(f"  body: {resp_body[:500]}")
+                else:
+                    print(f"\nblocked: {status_code} (no body)")
 
     except ProxyError as e:
         raise SystemExit(str(e)) from e

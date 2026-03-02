@@ -19,6 +19,7 @@ import socket
 import subprocess
 import tempfile
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -256,9 +257,11 @@ def patch_caddy_json(
     """Deep-copy *config* and patch it for local trace use.
 
     Modifications:
-    - ``servers[*].listen`` → ``[":{caddy_port}"]``
-    - ``servers[*].automatic_https`` → ``{"disable": true}``
+    - Merges all server routes into one server on ``:{caddy_port}``
+    - ``automatic_https`` → ``{"disable": true}``
+    - ``tls_connection_policies`` removed
     - All ``reverse_proxy`` handler ``upstreams[].dial`` → *echo_addr*
+    - ``apps.tls`` removed (avoids provisioning DNS providers, etc.)
     - ``admin`` → ``{"disabled": true}``
 
     Raises:
@@ -270,11 +273,26 @@ def patch_caddy_json(
     if not servers:
         raise ProxyError("No apps.http.servers in Caddy config")
 
+    # Merge all servers into a single server to avoid "listener address
+    # repeated" errors — production configs often have multiple servers
+    # (Cloudflare-proxied, direct, on-demand TLS) each on :443.
+    merged_routes: list[dict] = []
     for srv in servers.values():
-        srv["listen"] = [f":{caddy_port}"]
-        srv["automatic_https"] = {"disable": True}
-        for route in srv.get("routes", []):
-            _patch_handler_upstreams(route.get("handle", []), echo_addr)
+        merged_routes.extend(srv.get("routes", []))
+
+    for route in merged_routes:
+        _patch_handler_upstreams(route.get("handle", []), echo_addr)
+
+    merged = {
+        "listen": [f"127.0.0.1:{caddy_port}"],
+        "automatic_https": {"disable": True},
+        "routes": merged_routes,
+    }
+    patched["apps"]["http"]["servers"] = {"srv0": merged}
+
+    # Remove the TLS app entirely — local trace doesn't need certificates
+    # and provisioning may fail (e.g. Cloudflare DNS token not set).
+    patched.get("apps", {}).pop("tls", None)
 
     patched.setdefault("admin", {})["disabled"] = True
     return patched
@@ -372,32 +390,56 @@ def run_caddy(config: dict, port: int) -> Generator[subprocess.Popen, None, None
         json.dump(config, tmp)
         tmp.close()
 
+        # Caddy redirects its logger to stdout and dumps the full
+        # config as debug JSON — often hundreds of KB.  Piping either
+        # stream fills the OS pipe buffer (64 KB) and stalls Caddy.
+        # Write stderr to a temp file so we can read it on failure.
+        stderr_tmp = tempfile.NamedTemporaryFile(  # noqa: SIM115
+            mode="w",
+            suffix=".caddy-stderr",
+            delete=False,
+        )
+        stderr_path = Path(stderr_tmp.name)
+        stderr_fd = stderr_tmp
+
         proc = subprocess.Popen(
             ["caddy", "run", "--config", tmp.name],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            stdout=subprocess.DEVNULL,
+            stderr=stderr_fd,
         )
+        stderr_fd.close()
 
-        # Wait for Caddy to accept connections
+        def _read_stderr() -> str:
+            return stderr_path.read_text(errors="replace").strip()
+
+        # Wait for Caddy to accept connections.  Connection-refused
+        # returns instantly (not after the timeout), so we sleep
+        # between attempts to give Caddy time to start.
         deadline = 50  # 50 × 0.1 s = 5 s
         for _ in range(deadline):
             if proc.poll() is not None:
-                stderr = proc.stderr.read().decode() if proc.stderr else ""
-                raise ProxyError(f"Caddy exited early:\n{stderr}")
+                raise ProxyError(f"Caddy exited early:\n{_read_stderr()}")
             try:
-                with socket.create_connection(("127.0.0.1", port), timeout=0.1):
+                with socket.create_connection(("127.0.0.1", port), timeout=0.5):
                     break
             except OSError:
-                pass
+                time.sleep(0.1)
         else:
             proc.terminate()
-            raise ProxyError(f"Caddy did not accept connections on :{port} within 5 s")
+            proc.wait(timeout=3)
+            msg = f"Caddy did not accept connections on :{port} within 5 s"
+            stderr_text = _read_stderr()
+            if stderr_text:
+                msg += f"\n{stderr_text}"
+            raise ProxyError(msg)
 
         yield proc
     except FileNotFoundError as e:
         raise ProxyError("caddy not found in PATH") from e
     finally:
         Path(tmp.name).unlink(missing_ok=True)
+        if "stderr_path" in locals():
+            stderr_path.unlink(missing_ok=True)
         if "proc" in locals():
             proc.terminate()
             try:

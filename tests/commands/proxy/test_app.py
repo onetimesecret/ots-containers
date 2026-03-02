@@ -591,19 +591,22 @@ class TestTraceCommand:
 
         captured_req = {}
 
+        # The echo server list starts empty; urlopen's side-effect populates
+        # it (simulating Caddy forwarding the request to the echo backend).
+        echo_entry = {
+            "method": "GET",
+            "path": "/api/v2/status",
+            "headers": {"Host": "us.onetime.co"},
+        }
+        echo_body = json.dumps(echo_entry).encode()
+        shared_received: list[dict] = []
+
         def mock_run_echo(port):
             import contextlib
 
             @contextlib.contextmanager
             def _ctx():
-                received = [
-                    {
-                        "method": "GET",
-                        "path": "/api/v2/status",
-                        "headers": {"Host": "us.onetime.co"},
-                    }
-                ]
-                yield f"127.0.0.1:{port}", received
+                yield f"127.0.0.1:{port}", shared_received
 
             return _ctx()
 
@@ -615,17 +618,26 @@ class TestTraceCommand:
 
             @contextlib.contextmanager
             def _ctx():
-                yield mocker.MagicMock()
+                mock_proc = mocker.MagicMock()
+                mock_proc.pid = 12345
+                yield mock_proc
 
             return _ctx()
 
-        # Mock urllib to avoid actually connecting
+        # Mock urllib — the side-effect appends to shared_received to
+        # simulate the echo server capturing the forwarded request.
         mock_resp = mocker.MagicMock()
         mock_resp.status = 200
         mock_resp.headers = {"X-Custom": "value"}
+        mock_resp.read.return_value = echo_body
         mock_resp.__enter__ = lambda s: s
         mock_resp.__exit__ = mocker.MagicMock(return_value=False)
-        mocker.patch("urllib.request.urlopen", return_value=mock_resp)
+
+        def fake_urlopen(req, **_kwargs):
+            shared_received.append(echo_entry)
+            return mock_resp
+
+        mocker.patch("urllib.request.urlopen", side_effect=fake_urlopen)
 
         mocker.patch("rots.commands.proxy.app.run_echo_server", side_effect=mock_run_echo)
         mocker.patch("rots.commands.proxy.app.run_caddy", side_effect=mock_run_caddy)
@@ -634,13 +646,17 @@ class TestTraceCommand:
         trace(config_file=config, url="us.onetime.co/api/v2/status")
 
         captured = capsys.readouterr()
+        assert "caddy pid=12345 on 127.0.0.1:9000" in captured.out
         assert "us.onetime.co/api/v2/status" in captured.out
-        assert "response:" in captured.out
-        assert "200" in captured.out
+        assert "response: 200" in captured.out
         assert "upstream:" in captured.out
+        # echo JSON body is only shown with --verbose (DEBUG logging)
+        assert "echo:" not in captured.out
 
     def test_handles_blocked_request(self, tmp_path, mocker, capsys):
         """trace should show blocked message when echo server gets no request."""
+        import io
+
         from rots.commands.proxy.app import trace
 
         config = tmp_path / "Caddyfile"
@@ -680,7 +696,9 @@ class TestTraceCommand:
 
             @contextlib.contextmanager
             def _ctx():
-                yield mocker.MagicMock()
+                mock_proc = mocker.MagicMock()
+                mock_proc.pid = 99999
+                yield mock_proc
 
             return _ctx()
 
@@ -693,7 +711,7 @@ class TestTraceCommand:
                 code=404,
                 msg="Not Found",
                 hdrs={},  # type: ignore[arg-type]
-                fp=None,
+                fp=io.BytesIO(b""),
             ),
         )
 
@@ -704,8 +722,7 @@ class TestTraceCommand:
         trace(config_file=config, url="example.com/.env")
 
         captured = capsys.readouterr()
-        assert "404" in captured.out
-        assert "blocked by matcher" in captured.out
+        assert "blocked: 404" in captured.out
 
     def test_exits_on_proxy_error(self, tmp_path, mocker):
         """trace should exit cleanly on ProxyError."""
