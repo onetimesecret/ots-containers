@@ -354,6 +354,13 @@ def trace(
         int | None,
         cyclopts.Parameter(help="Override echo server port (default: ephemeral)"),
     ] = None,
+    render: Annotated[
+        bool,
+        cyclopts.Parameter(
+            name="--render",
+            help="Run envsubst on the Caddyfile before tracing (like 'rots proxy render')",
+        ),
+    ] = False,
 ) -> None:
     """Smoke-test a Caddyfile against a local echo server.
 
@@ -361,15 +368,20 @@ def trace(
     request through Caddy, and prints exactly what the client received
     and what the upstream (Puma) would have seen.
 
+    Use ``--render`` when the Caddyfile contains ``$ENV_VAR`` placeholders
+    that need envsubst expansion before Caddy can parse it.
+
     Local only — rejects --host.
 
     Examples:
         rots proxy trace Caddyfile https://us.onetime.co/api/v2/status
         rots proxy trace Caddyfile us.onetime.co/.env
+        rots proxy trace --render Caddyfile.template https://us.onetime.co/api/v2/status
         rots proxy trace Caddyfile https://us.onetime.co/api/v2/secret/conceal \\
             -H "Origin: https://onetimesecret.com"
     """
     import json
+    import tempfile
     import urllib.error
     import urllib.parse
     import urllib.request
@@ -396,9 +408,26 @@ def trace(
     if parsed.query:
         request_path = f"{request_path}?{parsed.query}"
 
-    # Adapt Caddyfile → JSON, then patch for local use
+    # Optionally render env vars via envsubst, then adapt to JSON.
+    # The temp file lives in the same directory as the original so
+    # Caddy can resolve relative import paths.
     try:
-        raw_json = adapt_to_json(config_file, executor=ex)
+        if render:
+            rendered = render_template(config_file, executor=ex)
+            with tempfile.NamedTemporaryFile(
+                mode="w",
+                suffix=".Caddyfile",
+                dir=config_file.parent,
+                delete=False,
+            ) as f:
+                f.write(rendered)
+                adapt_path = Path(f.name)
+            try:
+                raw_json = adapt_to_json(adapt_path, executor=ex)
+            finally:
+                adapt_path.unlink(missing_ok=True)
+        else:
+            raw_json = adapt_to_json(config_file, executor=ex)
         caddy_config = json.loads(raw_json)
     except ProxyError as e:
         raise SystemExit(str(e)) from e

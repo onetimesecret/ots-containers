@@ -724,6 +724,93 @@ class TestTraceCommand:
         captured = capsys.readouterr()
         assert "blocked: 404" in captured.out
 
+    def test_render_flag_runs_envsubst(self, tmp_path, mocker, capsys):
+        """--render should pipe through render_template before adapting."""
+        from rots.commands.proxy.app import trace
+
+        config = tmp_path / "Caddyfile.template"
+        config.write_text("$HOST { }")
+
+        adapted_json = json.dumps(
+            {
+                "apps": {
+                    "http": {
+                        "servers": {
+                            "srv0": {
+                                "listen": [":443"],
+                                "routes": [
+                                    {
+                                        "handle": [
+                                            {
+                                                "handler": "reverse_proxy",
+                                                "upstreams": [{"dial": "app:3000"}],
+                                            }
+                                        ]
+                                    }
+                                ],
+                            }
+                        }
+                    }
+                }
+            }
+        )
+
+        mock_render = mocker.patch(
+            "rots.commands.proxy.app.render_template",
+            return_value="localhost { }",
+        )
+        mock_adapt = mocker.patch(
+            "rots.commands.proxy.app.adapt_to_json",
+            return_value=adapted_json,
+        )
+
+        echo_entry = {"method": "GET", "path": "/", "headers": {"Host": "localhost"}}
+        shared_received: list[dict] = []
+
+        def mock_run_echo(port):
+            import contextlib
+
+            @contextlib.contextmanager
+            def _ctx():
+                yield f"127.0.0.1:{port}", shared_received
+
+            return _ctx()
+
+        def mock_run_caddy(cfg, port):
+            import contextlib
+
+            @contextlib.contextmanager
+            def _ctx():
+                mock_proc = mocker.MagicMock()
+                mock_proc.pid = 11111
+                yield mock_proc
+
+            return _ctx()
+
+        mock_resp = mocker.MagicMock()
+        mock_resp.status = 200
+        mock_resp.headers = {}
+        mock_resp.read.return_value = json.dumps(echo_entry).encode()
+
+        def fake_urlopen(req, **_kw):
+            shared_received.append(echo_entry)
+            return mock_resp
+
+        mocker.patch("urllib.request.urlopen", side_effect=fake_urlopen)
+        mocker.patch("rots.commands.proxy.app.run_echo_server", side_effect=mock_run_echo)
+        mocker.patch("rots.commands.proxy.app.run_caddy", side_effect=mock_run_caddy)
+        mocker.patch("rots.commands.proxy.app.find_free_port", side_effect=[9000, 9001])
+
+        trace(config_file=config, url="localhost/test", render=True)
+
+        mock_render.assert_called_once_with(config, executor=ANY)
+        # adapt_to_json receives the temp file in the same directory
+        adapt_call_path = mock_adapt.call_args[0][0]
+        assert adapt_call_path.parent == tmp_path
+
+        captured = capsys.readouterr()
+        assert "response: 200" in captured.out
+
     def test_exits_on_proxy_error(self, tmp_path, mocker):
         """trace should exit cleanly on ProxyError."""
         from rots.commands.proxy._helpers import ProxyError
