@@ -492,6 +492,16 @@ def trace(
 
             # Output
             print(f"{parsed.hostname}{request_path}")
+
+            if not live and received:
+                print("\nforwarded request:")
+                up = received[0]
+                print(f"  {up['method']} {up['path']}")
+                skip_up = {"content-length", "content-type", "accept-encoding", "user-agent"}
+                for k, v in sorted(up["headers"].items()):
+                    if k.lower() not in skip_up:
+                        print(f"  {k}: {v}")
+
             print(f"\nresponse: {status_code}")
             # Filter noisy headers
             skip = {"server", "date", "content-length", "content-type", "transfer-encoding"}
@@ -500,31 +510,22 @@ def trace(
                     print(f"  {k}: {v}")
 
             if live:
-                # Live mode: show response body snippet
                 if resp_body:
                     print(f"\nbody: {resp_body[:500]}")
-            elif received:
-                print("\nupstream:")
-                up = received[0]
-                print(f"  {up['method']} {up['path']}")
-                skip_up = {"content-length", "content-type", "accept-encoding", "user-agent"}
-                for k, v in sorted(up["headers"].items()):
-                    if k.lower() not in skip_up:
-                        print(f"  {k}: {v}")
-
-                # Show the echo body that round-tripped through Caddy
-                if resp_body and log.isEnabledFor(logging.DEBUG):
-                    try:
-                        echo_data = json.loads(resp_body)
-                        print(f"\necho: {json.dumps(echo_data, indent=2)}")
-                    except json.JSONDecodeError:
-                        print(f"\necho: {resp_body}")
-            else:
+            elif not received:
                 if resp_body:
                     print(f"\nblocked: {status_code}")
                     print(f"  body: {resp_body[:500]}")
                 else:
                     print(f"\nblocked: {status_code} (no body)")
+
+            # Show the echo body that round-tripped through Caddy
+            if received and resp_body and log.isEnabledFor(logging.DEBUG):
+                try:
+                    echo_data = json.loads(resp_body)
+                    print(f"\necho: {json.dumps(echo_data, indent=2)}")
+                except json.JSONDecodeError:
+                    print(f"\necho: {resp_body}")
 
     except ProxyError as e:
         raise SystemExit(str(e)) from e

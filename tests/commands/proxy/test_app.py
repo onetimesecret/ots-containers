@@ -648,8 +648,10 @@ class TestTraceCommand:
         captured = capsys.readouterr()
         assert "caddy pid=12345 on 127.0.0.1:9000" in captured.out
         assert "us.onetime.co/api/v2/status" in captured.out
+        assert "forwarded request:" in captured.out
         assert "response: 200" in captured.out
-        assert "upstream:" in captured.out
+        # upstream (request) prints before response
+        assert captured.out.index("forwarded request:") < captured.out.index("response:")
         # echo JSON body is only shown with --verbose (DEBUG logging)
         assert "echo:" not in captured.out
 
@@ -892,4 +894,4 @@ class TestTraceCommand:
         captured = capsys.readouterr()
         assert "response: 200" in captured.out
         assert "body: OK" in captured.out
-        assert "upstream:" not in captured.out
+        assert "forwarded request:" not in captured.out
