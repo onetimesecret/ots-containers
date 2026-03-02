@@ -142,6 +142,50 @@ def validate_caddy_config(content: str, *, executor: Executor | None = None) -> 
         Path(temp_path).unlink(missing_ok=True)
 
 
+def adapt_to_json(config_path: Path, *, executor: Executor | None = None) -> str:
+    """Run ``caddy adapt`` on a Caddyfile and return sorted JSON.
+
+    Args:
+        config_path: Path to the Caddyfile.
+        executor: Executor for command dispatch.
+
+    Returns:
+        Sorted JSON string of the adapted config.
+
+    Raises:
+        ProxyError: If caddy adapt fails or the file is not found.
+    """
+    cmd = ["caddy", "adapt", "--config", str(config_path), "--adapter", "caddyfile"]
+
+    if _is_remote(executor):
+        result = executor.run(["test", "-f", str(config_path)])  # type: ignore[union-attr]
+        if not result.ok:
+            raise ProxyError(f"Config file not found: {config_path}")
+        result = executor.run(cmd, timeout=30)  # type: ignore[union-attr]
+        if not result.ok:
+            raise ProxyError(f"caddy adapt failed for {config_path}:\n{result.stderr}")
+        raw = result.stdout
+    else:
+        if not config_path.exists():
+            raise ProxyError(f"Config file not found: {config_path}")
+        try:
+            proc = subprocess.run(cmd, capture_output=True, text=True)
+            if proc.returncode != 0:
+                raise ProxyError(f"caddy adapt failed for {config_path}:\n{proc.stderr}")
+            raw = proc.stdout
+        except FileNotFoundError as e:
+            raise ProxyError("caddy not found in PATH") from e
+
+    import json
+
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError as e:
+        raise ProxyError(f"caddy adapt produced invalid JSON: {e}") from e
+
+    return json.dumps(parsed, indent=2, sort_keys=True) + "\n"
+
+
 def reload_caddy(*, executor: Executor | None = None) -> None:
     """Reload Caddy service via systemctl.
 

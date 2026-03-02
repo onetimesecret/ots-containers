@@ -192,6 +192,153 @@ class TestReloadCaddy:
         assert "Failed to reload" in str(exc_info.value)
 
 
+class TestAdaptToJson:
+    """Test adapt_to_json function."""
+
+    def test_adapt_to_json_returns_sorted_json(self, tmp_path, mocker):
+        """Should run caddy adapt and return sorted JSON."""
+        from rots.commands.proxy._helpers import adapt_to_json
+
+        config = tmp_path / "Caddyfile"
+        config.write_text("localhost { }")
+
+        # caddy adapt returns unsorted JSON
+        raw_json = '{"z_key": 1, "a_key": 2}'
+        mock_result = mocker.Mock()
+        mock_result.returncode = 0
+        mock_result.stdout = raw_json
+        mock_result.stderr = ""
+        mocker.patch("subprocess.run", return_value=mock_result)
+
+        result = adapt_to_json(config)
+
+        import json
+
+        parsed = json.loads(result)
+        assert parsed == {"a_key": 2, "z_key": 1}
+        # Keys should be sorted in output
+        keys = list(json.loads(result).keys())
+        assert keys == ["a_key", "z_key"]
+
+    def test_adapt_to_json_missing_file_raises(self, tmp_path):
+        """Should raise ProxyError when config file not found."""
+        from rots.commands.proxy._helpers import ProxyError, adapt_to_json
+
+        missing = tmp_path / "nonexistent.conf"
+
+        with pytest.raises(ProxyError, match="Config file not found"):
+            adapt_to_json(missing)
+
+    def test_adapt_to_json_caddy_failure_raises(self, tmp_path, mocker):
+        """Should raise ProxyError when caddy adapt fails."""
+        from rots.commands.proxy._helpers import ProxyError, adapt_to_json
+
+        config = tmp_path / "Caddyfile"
+        config.write_text("invalid {{{")
+
+        mock_result = mocker.Mock()
+        mock_result.returncode = 1
+        mock_result.stdout = ""
+        mock_result.stderr = "adapt: parse error"
+        mocker.patch("subprocess.run", return_value=mock_result)
+
+        with pytest.raises(ProxyError, match="caddy adapt failed"):
+            adapt_to_json(config)
+
+    def test_adapt_to_json_invalid_json_raises(self, tmp_path, mocker):
+        """Should raise ProxyError when caddy adapt returns invalid JSON."""
+        from rots.commands.proxy._helpers import ProxyError, adapt_to_json
+
+        config = tmp_path / "Caddyfile"
+        config.write_text("localhost { }")
+
+        mock_result = mocker.Mock()
+        mock_result.returncode = 0
+        mock_result.stdout = "not json at all"
+        mock_result.stderr = ""
+        mocker.patch("subprocess.run", return_value=mock_result)
+
+        with pytest.raises(ProxyError, match="invalid JSON"):
+            adapt_to_json(config)
+
+    def test_adapt_to_json_caddy_not_found_raises(self, tmp_path, mocker):
+        """Should raise ProxyError when caddy not in PATH."""
+        from rots.commands.proxy._helpers import ProxyError, adapt_to_json
+
+        config = tmp_path / "Caddyfile"
+        config.write_text("localhost { }")
+
+        mocker.patch("subprocess.run", side_effect=FileNotFoundError("caddy not found"))
+
+        with pytest.raises(ProxyError, match="caddy not found"):
+            adapt_to_json(config)
+
+    def test_adapt_to_json_calls_caddy_adapt_correctly(self, tmp_path, mocker):
+        """Should call caddy adapt with --config and --adapter caddyfile."""
+        from rots.commands.proxy._helpers import adapt_to_json
+
+        config = tmp_path / "Caddyfile"
+        config.write_text("localhost { }")
+
+        mock_result = mocker.Mock()
+        mock_result.returncode = 0
+        mock_result.stdout = "{}"
+        mock_result.stderr = ""
+        mock_run = mocker.patch("subprocess.run", return_value=mock_result)
+
+        adapt_to_json(config)
+
+        call_args = mock_run.call_args[0][0]
+        assert call_args == ["caddy", "adapt", "--config", str(config), "--adapter", "caddyfile"]
+
+
+class TestRemoteAdaptToJson:
+    """Test adapt_to_json with a remote executor."""
+
+    def _make_executor(self, mocker, responses):
+        from ots_shared.ssh.executor import Result
+
+        mock_ex = mocker.MagicMock()
+        mock_ex.run.side_effect = [
+            Result(command=r[0], returncode=r[1], stdout=r[2], stderr=r[3]) for r in responses
+        ]
+        return mock_ex
+
+    def test_adapt_to_json_remote(self, mocker):
+        """Should run caddy adapt on remote and return sorted JSON."""
+        from pathlib import Path
+
+        from rots.commands.proxy._helpers import adapt_to_json
+
+        ex = self._make_executor(
+            mocker,
+            [
+                ("test -f /etc/caddy/Caddyfile", 0, "", ""),
+                ("caddy adapt ...", 0, '{"z": 1, "a": 2}', ""),
+            ],
+        )
+
+        result = adapt_to_json(Path("/etc/caddy/Caddyfile"), executor=ex)
+
+        import json
+
+        assert list(json.loads(result).keys()) == ["a", "z"]
+
+    def test_adapt_to_json_remote_missing(self, mocker):
+        """Should raise ProxyError when remote file not found."""
+        from pathlib import Path
+
+        from rots.commands.proxy._helpers import ProxyError, adapt_to_json
+
+        ex = self._make_executor(
+            mocker,
+            [("test -f /missing", 1, "", "")],
+        )
+
+        with pytest.raises(ProxyError, match="Config file not found"):
+            adapt_to_json(Path("/missing"), executor=ex)
+
+
 class TestRemoteRenderTemplate:
     """Test render_template with a remote executor."""
 

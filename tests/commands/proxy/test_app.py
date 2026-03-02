@@ -233,6 +233,98 @@ class TestPushCommand:
         assert "Failed to write" in str(exc_info.value)
 
 
+class TestDiffCommand:
+    """Test diff command."""
+
+    def test_diff_equivalent_configs(self, tmp_path, mocker, capsys):
+        """Should print [ok] when configs produce identical JSON."""
+        from rots.commands.proxy.app import diff
+
+        old = tmp_path / "old.conf"
+        new = tmp_path / "new.conf"
+        old.write_text("old")
+        new.write_text("new")
+
+        mocker.patch(
+            "rots.commands.proxy.app.adapt_to_json",
+            return_value='{"same": true}\n',
+        )
+
+        diff(old=old, new=new)
+
+        captured = capsys.readouterr()
+        assert "[ok] Configs are equivalent" in captured.out
+
+    def test_diff_different_configs_exits_1(self, tmp_path, mocker, capsys):
+        """Should print unified diff and exit 1 when configs differ."""
+        from rots.commands.proxy.app import diff
+
+        old = tmp_path / "old.conf"
+        new = tmp_path / "new.conf"
+        old.write_text("old")
+        new.write_text("new")
+
+        def mock_adapt(path, **kwargs):
+            if path == old:
+                return '{\n  "key": "old_value"\n}\n'
+            return '{\n  "key": "new_value"\n}\n'
+
+        mocker.patch("rots.commands.proxy.app.adapt_to_json", side_effect=mock_adapt)
+
+        with pytest.raises(SystemExit) as exc_info:
+            diff(old=old, new=new)
+
+        assert exc_info.value.code == 1
+        captured = capsys.readouterr()
+        assert "---" in captured.out
+        assert "+++" in captured.out
+        assert '-  "key": "old_value"' in captured.out
+        assert '+  "key": "new_value"' in captured.out
+
+    def test_diff_adapt_error_exits(self, tmp_path, mocker):
+        """Should exit with error message when caddy adapt fails."""
+        from rots.commands.proxy._helpers import ProxyError
+        from rots.commands.proxy.app import diff
+
+        old = tmp_path / "old.conf"
+        new = tmp_path / "new.conf"
+        old.write_text("old")
+        new.write_text("new")
+
+        mocker.patch(
+            "rots.commands.proxy.app.adapt_to_json",
+            side_effect=ProxyError("caddy adapt failed for old.conf"),
+        )
+
+        with pytest.raises(SystemExit) as exc_info:
+            diff(old=old, new=new)
+
+        assert "caddy adapt failed" in str(exc_info.value)
+
+    def test_diff_shows_file_names_in_output(self, tmp_path, mocker, capsys):
+        """Should use file paths as labels in the diff header."""
+        from rots.commands.proxy.app import diff
+
+        old = tmp_path / "monolith.conf"
+        new = tmp_path / "snippets.conf"
+        old.write_text("old")
+        new.write_text("new")
+
+        def mock_adapt(path, **kwargs):
+            if path == old:
+                return '{"a": 1}\n'
+            return '{"a": 2}\n'
+
+        mocker.patch("rots.commands.proxy.app.adapt_to_json", side_effect=mock_adapt)
+
+        with pytest.raises(SystemExit):
+            diff(old=old, new=new)
+
+        captured = capsys.readouterr()
+        assert str(old) in captured.out
+        assert str(new) in captured.out
+
+
 class TestReloadCommand:
     """Test reload command."""
 

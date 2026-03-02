@@ -20,6 +20,7 @@ from rots.config import Config
 from ..common import DryRun
 from ._helpers import (
     ProxyError,
+    adapt_to_json,
     reload_caddy,
     render_template,
     validate_caddy_config,
@@ -264,3 +265,54 @@ def validate(
         raise SystemExit(str(e)) from e
     except FileNotFoundError as e:
         raise SystemExit("caddy not found in PATH") from e
+
+
+@app.command
+def diff(
+    old: Annotated[
+        Path,
+        cyclopts.Parameter(help="Original Caddyfile (e.g. monolithic config)"),
+    ],
+    new: Annotated[
+        Path,
+        cyclopts.Parameter(help="New Caddyfile (e.g. snippet-based config)"),
+    ],
+) -> None:
+    """Diff two Caddyfiles by their adapted JSON representation.
+
+    Runs 'caddy adapt' on both files, sorts the resulting JSON, and
+    prints a unified diff.  Useful for verifying that a refactored
+    Caddyfile (e.g. snippet-based) produces the same effective config
+    as the original monolith.
+
+    Exit codes:
+      0  configs are equivalent
+      1  configs differ (or an error occurred)
+
+    Examples:
+        rots proxy diff /etc/caddy/Caddyfile.old /etc/caddy/Caddyfile
+        rots --host eu-web-01 proxy diff /tmp/monolith.conf /tmp/snippets.conf
+    """
+    import difflib
+
+    cfg = Config()
+    ex = cfg.get_executor(host=context.host_var.get(None))
+
+    try:
+        old_json = adapt_to_json(old, executor=ex)
+        new_json = adapt_to_json(new, executor=ex)
+    except ProxyError as e:
+        raise SystemExit(str(e)) from e
+
+    if old_json == new_json:
+        print("[ok] Configs are equivalent")
+        return
+
+    result = difflib.unified_diff(
+        old_json.splitlines(keepends=True),
+        new_json.splitlines(keepends=True),
+        fromfile=str(old),
+        tofile=str(new),
+    )
+    print("".join(result), end="")
+    raise SystemExit(1)
