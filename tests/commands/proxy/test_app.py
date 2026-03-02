@@ -892,6 +892,8 @@ class TestTraceCommand:
 
         mock_echo.assert_not_called()
         captured = capsys.readouterr()
+        assert "-> live upstream" in captured.out
+        assert "127.0.0.1:" not in captured.out
         assert "response: 200" in captured.out
         assert "body: OK" in captured.out
         assert "forwarded request:" not in captured.out

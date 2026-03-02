@@ -469,7 +469,10 @@ def trace(
             # Discard health-check probes that arrived during startup
             received.clear()
 
-            print(f"caddy pid={proc.pid} on 127.0.0.1:{c_port}\n")
+            if live:
+                print(f"caddy pid={proc.pid} -> live upstream\n")
+            else:
+                print(f"caddy pid={proc.pid} on 127.0.0.1:{c_port}\n")
 
             # Build the request
             req_url = f"http://127.0.0.1:{c_port}{request_path}"
