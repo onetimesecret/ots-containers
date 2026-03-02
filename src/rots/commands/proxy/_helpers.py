@@ -20,6 +20,7 @@ import subprocess
 import tempfile
 import threading
 import time
+import urllib.parse
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -34,6 +35,25 @@ if TYPE_CHECKING:
 
 class ProxyError(Exception):
     """Error during proxy configuration."""
+
+
+def parse_trace_url(url: str) -> urllib.parse.ParseResult:
+    """Normalise and validate a URL for ``proxy trace``.
+
+    Accepts both full URLs (``https://host/path``) and bare
+    ``host/path`` shorthand.  Returns the stdlib ``ParseResult``
+    so callers can access ``.hostname``, ``.path``, ``.query``,
+    ``.scheme``, etc.
+
+    Raises:
+        ProxyError: When the URL has no hostname after parsing.
+    """
+    if "://" not in url:
+        url = f"https://{url}"
+    parsed = urllib.parse.urlparse(url)
+    if not parsed.hostname:
+        raise ProxyError(f"Invalid URL (no hostname): {url}")
+    return parsed
 
 
 def render_template(template_path: Path, *, executor: Executor | None = None) -> str:
@@ -252,15 +272,16 @@ def patch_caddy_json(
     config: dict,
     *,
     caddy_port: int,
-    echo_addr: str,
+    echo_addr: str | None = None,
 ) -> dict:
     """Deep-copy *config* and patch it for local trace use.
 
     Modifications:
-    - Merges all server routes into one server on ``:{caddy_port}``
+    - Merges all server routes into one server on ``127.0.0.1:{caddy_port}``
     - ``automatic_https`` → ``{"disable": true}``
     - ``tls_connection_policies`` removed
-    - All ``reverse_proxy`` handler ``upstreams[].dial`` → *echo_addr*
+    - When *echo_addr* is set, all ``reverse_proxy`` upstreams → *echo_addr*
+    - When *echo_addr* is ``None`` (live mode), upstreams are left as-is
     - ``apps.tls`` removed (avoids provisioning DNS providers, etc.)
     - ``admin`` → ``{"disabled": true}``
     - Each route gets an ``X-Trace-Route`` response header identifying
@@ -282,7 +303,8 @@ def patch_caddy_json(
     for srv in servers.values():
         listen = srv.get("listen", [])
         for route in srv.get("routes", []):
-            _patch_handler_upstreams(route.get("handle", []), echo_addr)
+            if echo_addr is not None:
+                _patch_handler_upstreams(route.get("handle", []), echo_addr)
             _inject_trace_header(route, listen)
             merged_routes.append(route)
 

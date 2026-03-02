@@ -828,3 +828,68 @@ class TestTraceCommand:
             trace(config_file=config, url="localhost/test")
 
         assert "caddy adapt failed" in str(exc_info.value)
+
+    def test_live_skips_echo_server(self, tmp_path, mocker, capsys):
+        """--live should not start an echo server and should show body instead of upstream."""
+        from rots.commands.proxy.app import trace
+
+        config = tmp_path / "Caddyfile"
+        config.write_text("localhost { }")
+
+        adapted_json = json.dumps(
+            {
+                "apps": {
+                    "http": {
+                        "servers": {
+                            "srv0": {
+                                "listen": [":443"],
+                                "routes": [
+                                    {
+                                        "handle": [
+                                            {
+                                                "handler": "reverse_proxy",
+                                                "upstreams": [{"dial": "app:3000"}],
+                                            }
+                                        ]
+                                    }
+                                ],
+                            }
+                        }
+                    }
+                }
+            }
+        )
+
+        mocker.patch(
+            "rots.commands.proxy.app.adapt_to_json",
+            return_value=adapted_json,
+        )
+
+        def mock_run_caddy(cfg, port):
+            import contextlib
+
+            @contextlib.contextmanager
+            def _ctx():
+                yield mocker.MagicMock(pid=99999)
+
+            return _ctx()
+
+        mock_resp = mocker.MagicMock()
+        mock_resp.status = 200
+        mock_resp.headers = {"X-Custom": "live-value"}
+        mock_resp.read.return_value = b"OK"
+
+        mocker.patch("urllib.request.urlopen", return_value=mock_resp)
+        mocker.patch("rots.commands.proxy.app.run_caddy", side_effect=mock_run_caddy)
+        mocker.patch("rots.commands.proxy.app.find_free_port", return_value=9000)
+
+        # Echo server should NOT be started
+        mock_echo = mocker.patch("rots.commands.proxy.app.run_echo_server")
+
+        trace(config_file=config, url="localhost/health", live=True)
+
+        mock_echo.assert_not_called()
+        captured = capsys.readouterr()
+        assert "response: 200" in captured.out
+        assert "body: OK" in captured.out
+        assert "upstream:" not in captured.out

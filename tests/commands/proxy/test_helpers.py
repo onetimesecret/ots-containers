@@ -719,6 +719,21 @@ class TestPatchCaddyJson:
         # No host matcher → wildcard
         assert label == ":443 *"
 
+    def test_live_mode_preserves_upstreams(self):
+        from rots.commands.proxy._helpers import patch_caddy_json
+
+        result = patch_caddy_json(
+            self._minimal_config(upstreams="app:3000"),
+            caddy_port=9999,
+            echo_addr=None,
+        )
+        routes = result["apps"]["http"]["servers"]["srv0"]["routes"]
+        # Find the reverse_proxy handler (skip injected trace header)
+        proxy = next(
+            h for r in routes for h in r.get("handle", []) if h.get("handler") == "reverse_proxy"
+        )
+        assert proxy["upstreams"][0]["dial"] == "app:3000"
+
     def test_raises_on_missing_servers(self):
         from rots.commands.proxy._helpers import ProxyError, patch_caddy_json
 
@@ -727,6 +742,63 @@ class TestPatchCaddyJson:
 
         with pytest.raises(ProxyError, match="No apps.http.servers"):
             patch_caddy_json({"apps": {"http": {}}}, caddy_port=9999, echo_addr="x:1")
+
+
+class TestParseTraceUrl:
+    """Test parse_trace_url function."""
+
+    def test_full_url_parsed(self):
+        """Should parse a full https URL and expose semantic attributes."""
+        from rots.commands.proxy._helpers import parse_trace_url
+
+        parsed = parse_trace_url("https://us.onetime.co/api/v2/status")
+        assert parsed.scheme == "https"
+        assert parsed.hostname == "us.onetime.co"
+        assert parsed.path == "/api/v2/status"
+        assert parsed.query == ""
+
+    def test_bare_host_path_gets_scheme(self):
+        """Should prepend https:// when no scheme is provided."""
+        from rots.commands.proxy._helpers import parse_trace_url
+
+        parsed = parse_trace_url("us.onetime.co/api/v2/status")
+        assert parsed.scheme == "https"
+        assert parsed.hostname == "us.onetime.co"
+        assert parsed.path == "/api/v2/status"
+
+    def test_preserves_query_string(self):
+        """Should preserve query parameters as a separate attribute."""
+        from rots.commands.proxy._helpers import parse_trace_url
+
+        parsed = parse_trace_url("https://example.com/search?q=test&page=2")
+        assert parsed.hostname == "example.com"
+        assert parsed.path == "/search"
+        assert parsed.query == "q=test&page=2"
+
+    def test_no_hostname_raises(self):
+        """Should raise ProxyError when URL has no hostname."""
+        from rots.commands.proxy._helpers import ProxyError, parse_trace_url
+
+        with pytest.raises(ProxyError, match="no hostname"):
+            parse_trace_url("https:///no-host")
+
+    def test_bare_host_no_path(self):
+        """Should handle a bare hostname with no path."""
+        from rots.commands.proxy._helpers import parse_trace_url
+
+        parsed = parse_trace_url("example.com")
+        assert parsed.hostname == "example.com"
+        assert parsed.path == ""
+
+    def test_http_scheme_preserved(self):
+        """Should not override an explicit http:// scheme."""
+        from rots.commands.proxy._helpers import parse_trace_url
+
+        parsed = parse_trace_url("http://localhost:8080/health")
+        assert parsed.scheme == "http"
+        assert parsed.hostname == "localhost"
+        assert parsed.port == 8080
+        assert parsed.path == "/health"
 
 
 class TestRunEchoServer:

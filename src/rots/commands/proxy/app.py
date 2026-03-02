@@ -9,6 +9,7 @@ container .env files to avoid mixing host and container configurations.
 All commands support remote execution via the global ``--host`` flag.
 """
 
+import contextlib
 import logging
 from pathlib import Path
 from typing import Annotated
@@ -23,6 +24,7 @@ from ._helpers import (
     ProxyError,
     adapt_to_json,
     find_free_port,
+    parse_trace_url,
     patch_caddy_json,
     reload_caddy,
     render_template,
@@ -361,12 +363,24 @@ def trace(
             help="Run envsubst on the Caddyfile before tracing (like 'rots proxy render')",
         ),
     ] = False,
+    live: Annotated[
+        bool,
+        cyclopts.Parameter(
+            name="--live",
+            help="Forward to real upstream instead of echo server",
+        ),
+    ] = False,
 ) -> None:
     """Smoke-test a Caddyfile against a local echo server.
 
     Starts a real Caddy process and a lightweight echo backend, sends a
     request through Caddy, and prints exactly what the client received
     and what the upstream (Puma) would have seen.
+
+    With ``--live``, skips the echo server and forwards requests to the
+    real upstream backends (as defined in the Caddyfile).  The response
+    section shows actual application output; no upstream section is
+    printed since there is no echo server to capture it.
 
     Use ``--render`` when the Caddyfile contains ``$ENV_VAR`` placeholders
     that need envsubst expansion before Caddy can parse it.
@@ -376,14 +390,14 @@ def trace(
     Examples:
         rots proxy trace Caddyfile https://us.onetime.co/api/v2/status
         rots proxy trace Caddyfile us.onetime.co/.env
+        rots proxy trace --live Caddyfile https://us.onetime.co/api/v2/status
         rots proxy trace --render Caddyfile.template https://us.onetime.co/api/v2/status
         rots proxy trace Caddyfile https://us.onetime.co/api/v2/secret/conceal \\
-            -H "Origin: https://onetimesecret.com"
+            --header "Origin: https://onetimesecret.com"
     """
     import json
     import tempfile
     import urllib.error
-    import urllib.parse
     import urllib.request
 
     from ots_shared.ssh import is_remote
@@ -397,13 +411,12 @@ def trace(
     if not config_file.exists():
         raise SystemExit(f"Config file not found: {config_file}")
 
-    # Parse url — accept bare host/path or full URLs
-    if "://" not in url:
-        url = f"https://{url}"
-    parsed = urllib.parse.urlparse(url)
-    if not parsed.hostname:
-        raise SystemExit(f"Invalid URL (no hostname): {url}")
-    host_header = parsed.hostname
+    try:
+        parsed = parse_trace_url(url)
+    except ProxyError as e:
+        raise SystemExit(str(e)) from e
+    assert parsed.hostname  # guaranteed by parse_trace_url
+
     request_path = parsed.path or "/"
     if parsed.query:
         request_path = f"{request_path}?{parsed.query}"
@@ -433,8 +446,13 @@ def trace(
         raise SystemExit(str(e)) from e
 
     c_port = caddy_port or find_free_port()
-    e_port = echo_port or find_free_port()
-    echo_addr = f"127.0.0.1:{e_port}"
+
+    if live:
+        # Live mode: forward to real upstream, no echo server
+        echo_addr = None
+    else:
+        e_port = echo_port or find_free_port()
+        echo_addr = f"127.0.0.1:{e_port}"
 
     try:
         patched = patch_caddy_json(caddy_config, caddy_port=c_port, echo_addr=echo_addr)
@@ -442,7 +460,12 @@ def trace(
         raise SystemExit(str(e)) from e
 
     try:
-        with run_echo_server(e_port) as (_, received), run_caddy(patched, c_port) as proc:
+        with contextlib.ExitStack() as stack:
+            received: list[dict] = []
+            if not live:
+                _, received = stack.enter_context(run_echo_server(e_port))
+            proc = stack.enter_context(run_caddy(patched, c_port))
+
             # Discard health-check probes that arrived during startup
             received.clear()
 
@@ -451,7 +474,7 @@ def trace(
             # Build the request
             req_url = f"http://127.0.0.1:{c_port}{request_path}"
             req = urllib.request.Request(req_url)
-            req.add_header("Host", host_header)
+            req.add_header("Host", parsed.hostname)
             for h in header:
                 key, _, value = h.partition(":")
                 if key and value:
@@ -468,7 +491,7 @@ def trace(
                 resp_body = e.read().decode(errors="replace")
 
             # Output
-            print(f"{host_header}{request_path}")
+            print(f"{parsed.hostname}{request_path}")
             print(f"\nresponse: {status_code}")
             # Filter noisy headers
             skip = {"server", "date", "content-length", "content-type", "transfer-encoding"}
@@ -476,7 +499,11 @@ def trace(
                 if k.lower() not in skip:
                     print(f"  {k}: {v}")
 
-            if received:
+            if live:
+                # Live mode: show response body snippet
+                if resp_body:
+                    print(f"\nbody: {resp_body[:500]}")
+            elif received:
                 print("\nupstream:")
                 up = received[0]
                 print(f"  {up['method']} {up['path']}")
