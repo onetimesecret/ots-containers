@@ -263,6 +263,8 @@ def patch_caddy_json(
     - All ``reverse_proxy`` handler ``upstreams[].dial`` → *echo_addr*
     - ``apps.tls`` removed (avoids provisioning DNS providers, etc.)
     - ``admin`` → ``{"disabled": true}``
+    - Each route gets an ``X-Trace-Route`` response header identifying
+      its origin server block and host matchers
 
     Raises:
         ProxyError: When ``apps.http.servers`` is missing or empty.
@@ -278,10 +280,11 @@ def patch_caddy_json(
     # (Cloudflare-proxied, direct, on-demand TLS) each on :443.
     merged_routes: list[dict] = []
     for srv in servers.values():
-        merged_routes.extend(srv.get("routes", []))
-
-    for route in merged_routes:
-        _patch_handler_upstreams(route.get("handle", []), echo_addr)
+        listen = srv.get("listen", [])
+        for route in srv.get("routes", []):
+            _patch_handler_upstreams(route.get("handle", []), echo_addr)
+            _inject_trace_header(route, listen)
+            merged_routes.append(route)
 
     merged = {
         "listen": [f"127.0.0.1:{caddy_port}"],
@@ -307,6 +310,27 @@ def _patch_handler_upstreams(handlers: list[dict], echo_addr: str) -> None:
         # Recurse into subroutes
         for route in handler.get("routes", []):
             _patch_handler_upstreams(route.get("handle", []), echo_addr)
+
+
+def _inject_trace_header(route: dict, listen: list[str]) -> None:
+    """Prepend a ``headers`` handler that stamps ``X-Trace-Route``.
+
+    The label uses the server's listen address and the route's host
+    matchers to produce something recognisable from the Caddyfile,
+    e.g. ``:443 us.example.com, eu.example.com`` or ``:80 *``.
+    """
+    hosts: list[str] = []
+    for m in route.get("match", []):
+        hosts.extend(m.get("host", []))
+
+    port = listen[0] if listen else ":?"
+    label = f"{port} {', '.join(hosts)}" if hosts else f"{port} *"
+
+    marker: dict = {
+        "handler": "headers",
+        "response": {"set": {"X-Trace-Route": [label]}},
+    }
+    route.setdefault("handle", []).insert(0, marker)
 
 
 def _echo_handler_class(received: list[dict]) -> type[BaseHTTPRequestHandler]:

@@ -554,8 +554,10 @@ class TestPatchCaddyJson:
         result = patch_caddy_json(
             self._minimal_config(), caddy_port=9999, echo_addr="127.0.0.1:8888"
         )
-        handler = result["apps"]["http"]["servers"]["srv0"]["routes"][0]["handle"][0]
-        assert handler["upstreams"][0]["dial"] == "127.0.0.1:8888"
+        route_handlers = result["apps"]["http"]["servers"]["srv0"]["routes"][0]["handle"]
+        # First handler is the injected X-Trace-Route marker
+        assert route_handlers[0]["handler"] == "headers"
+        assert route_handlers[1]["upstreams"][0]["dial"] == "127.0.0.1:8888"
 
     def test_disables_https(self):
         from rots.commands.proxy._helpers import patch_caddy_json
@@ -614,7 +616,8 @@ class TestPatchCaddyJson:
             }
         }
         result = patch_caddy_json(config, caddy_port=9999, echo_addr="127.0.0.1:7777")
-        nested = result["apps"]["http"]["servers"]["srv0"]["routes"][0]["handle"][0]
+        # handle[0] is the injected marker, handle[1] is the subroute
+        nested = result["apps"]["http"]["servers"]["srv0"]["routes"][0]["handle"][1]
         proxy = nested["routes"][0]["handle"][0]
         assert proxy["upstreams"][0]["dial"] == "127.0.0.1:7777"
 
@@ -679,6 +682,42 @@ class TestPatchCaddyJson:
         }
         result = patch_caddy_json(config, caddy_port=9999, echo_addr="x:1")
         assert "tls_connection_policies" not in result["apps"]["http"]["servers"]["srv0"]
+
+    def test_injects_trace_header_with_hosts(self):
+        from rots.commands.proxy._helpers import patch_caddy_json
+
+        config = {
+            "apps": {
+                "http": {
+                    "servers": {
+                        "srv0": {
+                            "listen": [":443"],
+                            "routes": [
+                                {
+                                    "match": [{"host": ["a.example.com", "b.example.com"]}],
+                                    "handle": [{"handler": "static_response"}],
+                                }
+                            ],
+                        }
+                    }
+                }
+            }
+        }
+        result = patch_caddy_json(config, caddy_port=9999, echo_addr="x:1")
+        marker = result["apps"]["http"]["servers"]["srv0"]["routes"][0]["handle"][0]
+        assert marker["handler"] == "headers"
+        label = marker["response"]["set"]["X-Trace-Route"][0]
+        assert label == ":443 a.example.com, b.example.com"
+
+    def test_injects_trace_header_catchall(self):
+        from rots.commands.proxy._helpers import patch_caddy_json
+
+        result = patch_caddy_json(self._minimal_config(), caddy_port=9999, echo_addr="x:1")
+        marker = result["apps"]["http"]["servers"]["srv0"]["routes"][0]["handle"][0]
+        assert marker["handler"] == "headers"
+        label = marker["response"]["set"]["X-Trace-Route"][0]
+        # No host matcher → wildcard
+        assert label == ":443 *"
 
     def test_raises_on_missing_servers(self):
         from rots.commands.proxy._helpers import ProxyError, patch_caddy_json
