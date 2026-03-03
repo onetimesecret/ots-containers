@@ -2128,6 +2128,13 @@ class TestEnableDisableRequireSystemctl:
 class TestListInstancesJsonOutput:
     """Tests for list_instances JSON output path."""
 
+    @pytest.fixture(autouse=True)
+    def _mock_health_map(self, mocker):
+        mocker.patch(
+            "rots.commands.instance.app.systemd.get_container_health_map",
+            return_value={},
+        )
+
     def test_list_json_output(self, mocker, capsys, tmp_path):
         """list --json should output valid JSON."""
         import json
@@ -2147,10 +2154,6 @@ class TestListInstancesJsonOutput:
         mocker.patch(
             "rots.commands.instance.app.systemd.is_active",
             return_value="active",
-        )
-        mocker.patch(
-            "rots.commands.instance.app.systemd.get_container_health_map",
-            return_value={},
         )
 
         mock_config = mocker.Mock()
