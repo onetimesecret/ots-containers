@@ -19,6 +19,11 @@ def _ok(args, **extra):
 class TestAssetsUpdate:
     """Test the assets.update function."""
 
+    @pytest.fixture(autouse=True)
+    def _skip_podman_check(self, mocker):
+        """Bypass require_podman since podman is not available on macOS dev machines."""
+        mocker.patch("rots.assets.require_podman")
+
     def test_update_raises_user_friendly_error_on_volume_mount_failure(self, mocker):
         """Volume mount failure should raise SystemExit with helpful message.
 
@@ -27,7 +32,6 @@ class TestAssetsUpdate:
             # Should show: "Failed to mount volume 'static_assets': <reason>"
             # Not a raw Python traceback
         """
-        mocker.patch("rots.assets.require_podman")
         mock_run = mocker.patch("subprocess.run")
 
         mock_run.side_effect = [
