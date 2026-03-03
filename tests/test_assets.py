@@ -27,6 +27,7 @@ class TestAssetsUpdate:
             # Should show: "Failed to mount volume 'static_assets': <reason>"
             # Not a raw Python traceback
         """
+        mocker.patch("rots.assets.require_podman")
         mock_run = mocker.patch("subprocess.run")
 
         mock_run.side_effect = [
