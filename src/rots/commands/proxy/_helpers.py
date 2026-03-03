@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import contextlib
 import copy
+import dataclasses
 import json
 import socket
 import subprocess
@@ -21,6 +22,7 @@ import tempfile
 import threading
 import time
 import urllib.parse
+from datetime import UTC, datetime
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -35,6 +37,27 @@ if TYPE_CHECKING:
 
 class ProxyError(Exception):
     """Error during proxy configuration."""
+
+
+@dataclasses.dataclass
+class ProbeResult:
+    """Result of probing a URL with curl."""
+
+    url: str
+    http_code: int
+    ssl_verify_result: int  # 0 = valid chain
+    ssl_verify_ok: bool
+    cert_issuer: str
+    cert_subject: str
+    cert_expiry: str
+    http_version: str
+    time_namelookup: float  # seconds
+    time_connect: float
+    time_appconnect: float  # TLS handshake complete
+    time_starttransfer: float  # TTFB
+    time_total: float
+    response_headers: dict[str, list[str]]
+    curl_json: dict  # raw write-out for --json passthrough
 
 
 def parse_trace_url(url: str) -> urllib.parse.ParseResult:
@@ -493,3 +516,281 @@ def run_caddy(config: dict, port: int) -> Generator[subprocess.Popen, None, None
             except subprocess.TimeoutExpired:
                 proc.kill()
                 proc.wait(timeout=3)
+
+
+# ---------------------------------------------------------------------------
+# Probe helpers
+# ---------------------------------------------------------------------------
+
+_CURL_SENTINEL = "%%CURL_JSON%%"
+
+
+def build_curl_args(
+    url: str,
+    *,
+    resolve: str | None = None,
+    connect_to: str | None = None,
+    cacert: Path | None = None,
+    cert_status: bool = False,
+    extra_headers: tuple[str, ...] = (),
+    timeout: int = 30,
+    method: str | None = None,
+    insecure: bool = False,
+    follow_redirects: bool = False,
+) -> list[str]:
+    """Build the curl command list for probing *url*.
+
+    Returns the full argv list without executing anything — purely
+    testable by asserting on the returned list.
+    """
+    cmd = [
+        "curl",
+        "-sS",
+        "-o",
+        "/dev/null",
+        "-D",
+        "-",
+        "-w",
+        f"\n{_CURL_SENTINEL}\n%{{json}}",
+        "--max-time",
+        str(timeout),
+    ]
+
+    if resolve is not None:
+        cmd.extend(["--resolve", resolve])
+    if connect_to is not None:
+        cmd.extend(["--connect-to", connect_to])
+    if cacert is not None:
+        cmd.extend(["--cacert", str(cacert)])
+    if cert_status:
+        cmd.append("--cert-status")
+    for h in extra_headers:
+        cmd.extend(["-H", h])
+    if method is not None:
+        cmd.extend(["-X", method])
+    if insecure:
+        cmd.append("-k")
+    if follow_redirects:
+        cmd.append("-L")
+
+    cmd.append("--")
+    cmd.append(url)
+    return cmd
+
+
+def parse_curl_output(stdout: str) -> ProbeResult:
+    """Parse combined curl output (``-D -`` headers + ``-w '%{json}'``).
+
+    The output is split on the ``%%CURL_JSON%%`` sentinel.  The first
+    part contains HTTP response headers; the second is the JSON blob
+    from curl's ``--write-out '%{json}'``.
+
+    Raises:
+        ProxyError: When the sentinel is missing or JSON is malformed.
+    """
+    if _CURL_SENTINEL not in stdout:
+        raise ProxyError("curl output missing sentinel — unexpected format")
+
+    header_section, json_section = stdout.split(_CURL_SENTINEL, 1)
+
+    # When curl follows redirects (-L), -D - emits multiple header blocks
+    # (one per hop) separated by blank lines.  Only parse the final block
+    # so assertions and output reflect the terminal response.
+    normalized = header_section.replace("\r\n", "\n")
+    header_blocks = [b for b in normalized.split("\n\n") if b.strip()]
+    final_block = header_blocks[-1] if header_blocks else ""
+
+    response_headers: dict[str, list[str]] = {}
+    for line in final_block.splitlines():
+        if ":" in line and not line.startswith("HTTP/"):
+            key, _, value = line.partition(":")
+            key = key.strip()
+            response_headers.setdefault(key, []).append(value.strip())
+
+    try:
+        curl_json = json.loads(json_section.strip())
+    except (json.JSONDecodeError, ValueError) as e:
+        raise ProxyError(f"curl JSON output malformed: {e}") from e
+
+    # Extract cert details from the certs string
+    certs_str = curl_json.get("certs", "")
+    cert_issuer = ""
+    cert_subject = ""
+    cert_expiry = ""
+    for cert_line in certs_str.splitlines():
+        stripped = cert_line.strip()
+        if stripped.startswith("Issuer:") and not cert_issuer:
+            cert_issuer = stripped[len("Issuer:") :].strip()
+        elif stripped.startswith("Subject:") and not cert_subject:
+            cert_subject = stripped[len("Subject:") :].strip()
+        elif stripped.startswith("Expire date:") and not cert_expiry:
+            cert_expiry = stripped[len("Expire date:") :].strip()
+
+    ssl_verify = curl_json.get("ssl_verify_result", -1)
+    return ProbeResult(
+        url=curl_json.get("url_effective", curl_json.get("url", "")),
+        http_code=curl_json.get("http_code", 0),
+        ssl_verify_result=ssl_verify,
+        ssl_verify_ok=ssl_verify == 0,
+        cert_issuer=cert_issuer,
+        cert_subject=cert_subject,
+        cert_expiry=cert_expiry,
+        http_version=curl_json.get("http_version", ""),
+        time_namelookup=curl_json.get("time_namelookup", 0.0),
+        time_connect=curl_json.get("time_connect", 0.0),
+        time_appconnect=curl_json.get("time_appconnect", 0.0),
+        time_starttransfer=curl_json.get("time_starttransfer", 0.0),
+        time_total=curl_json.get("time_total", 0.0),
+        response_headers=response_headers,
+        curl_json=curl_json,
+    )
+
+
+def _parse_cert_expiry_days(cert_expiry: str) -> int | None:
+    """Parse cert expiry string and return days remaining.
+
+    The format comes from curl's ``%{json}`` output, e.g.,
+    ``"Aug 17 23:59:59 2026 GMT"``.
+
+    Returns None on empty string or parse failure.
+    """
+    if not cert_expiry:
+        return None
+    try:
+        expiry = datetime.strptime(cert_expiry, "%b %d %H:%M:%S %Y %Z")
+        expiry = expiry.replace(tzinfo=UTC)
+        now = datetime.now(UTC)
+        return (expiry - now).days
+    except (ValueError, OverflowError):
+        return None
+
+
+def evaluate_assertions(
+    result: ProbeResult,
+    *,
+    expect_status: int | None = None,
+    expect_headers: tuple[str, ...] = (),
+    expect_cert_days: int | None = None,
+) -> list[dict]:
+    """Evaluate assertions against a probe result.
+
+    Returns a list of ``{"check": str, "passed": bool, "expected": str,
+    "actual": str}`` dicts.  Returns an empty list when no assertions
+    are specified.
+    """
+    checks: list[dict] = []
+
+    if expect_status is not None:
+        checks.append(
+            {
+                "check": "status",
+                "passed": result.http_code == expect_status,
+                "expected": str(expect_status),
+                "actual": str(result.http_code),
+            }
+        )
+
+    # Build a case-insensitive lookup of response headers
+    lower_headers = {k.lower(): (k, vs) for k, vs in result.response_headers.items()}
+
+    for header_spec in expect_headers:
+        key, _, expected_value = header_spec.partition(":")
+        key = key.strip()
+        expected_value = expected_value.strip()
+
+        orig_key, actual_values = lower_headers.get(key.lower(), (key, []))
+        checks.append(
+            {
+                "check": f"header {key}",
+                "passed": expected_value in actual_values,
+                "expected": f"{key}: {expected_value}",
+                "actual": (
+                    f"{orig_key}: {', '.join(actual_values)}" if actual_values else "(missing)"
+                ),
+            }
+        )
+
+    if expect_cert_days is not None:
+        days = _parse_cert_expiry_days(result.cert_expiry)
+        if days is None:
+            checks.append(
+                {
+                    "check": "cert-expiry",
+                    "passed": False,
+                    "expected": f">= {expect_cert_days} days",
+                    "actual": "(no expiry date available)",
+                }
+            )
+        else:
+            checks.append(
+                {
+                    "check": "cert-expiry",
+                    "passed": days >= expect_cert_days,
+                    "expected": f">= {expect_cert_days} days",
+                    "actual": f"{days} days",
+                }
+            )
+
+    return checks
+
+
+def run_probe(
+    url: str,
+    *,
+    resolve: str | None = None,
+    connect_to: str | None = None,
+    cacert: Path | None = None,
+    cert_status: bool = False,
+    extra_headers: tuple[str, ...] = (),
+    timeout: int = 30,
+    method: str | None = None,
+    insecure: bool = False,
+    follow_redirects: bool = False,
+    executor: Executor | None = None,
+) -> ProbeResult:
+    """Execute curl and return parsed probe results.
+
+    Uses *executor* when provided (remote execution via SSH), otherwise
+    runs curl locally via subprocess.
+
+    Raises:
+        ProxyError: On curl errors (not found, timeout, non-zero exit).
+    """
+    cmd = build_curl_args(
+        url,
+        resolve=resolve,
+        connect_to=connect_to,
+        cacert=cacert,
+        cert_status=cert_status,
+        extra_headers=extra_headers,
+        timeout=timeout,
+        method=method,
+        insecure=insecure,
+        follow_redirects=follow_redirects,
+    )
+
+    # Give subprocess a bit more than curl's --max-time to avoid racing
+    subprocess_timeout = timeout + 5
+
+    if _is_remote(executor):
+        result = executor.run(cmd, timeout=subprocess_timeout)  # type: ignore[union-attr]
+        if not result.ok:
+            raise ProxyError(f"curl failed (exit {result.returncode}): {result.stderr}")
+        return parse_curl_output(result.stdout)
+
+    try:
+        proc = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=subprocess_timeout,
+        )
+    except FileNotFoundError as e:
+        raise ProxyError("curl not found in PATH") from e
+    except subprocess.TimeoutExpired as e:
+        raise ProxyError("curl timed out") from e
+
+    if proc.returncode != 0:
+        raise ProxyError(f"curl failed (exit {proc.returncode}): {proc.stderr}")
+
+    return parse_curl_output(proc.stdout)

@@ -10,7 +10,9 @@ All commands support remote execution via the global ``--host`` flag.
 """
 
 import contextlib
+import json
 import logging
+import time
 from pathlib import Path
 from typing import Annotated
 
@@ -19,10 +21,12 @@ import cyclopts
 from rots import context
 from rots.config import Config
 
-from ..common import DryRun
+from ..common import DryRun, JsonOutput
 from ._helpers import (
+    ProbeResult,
     ProxyError,
     adapt_to_json,
+    evaluate_assertions,
     find_free_port,
     parse_trace_url,
     patch_caddy_json,
@@ -30,6 +34,7 @@ from ._helpers import (
     render_template,
     run_caddy,
     run_echo_server,
+    run_probe,
     validate_caddy_config,
 )
 
@@ -532,3 +537,207 @@ def trace(
 
     except ProxyError as e:
         raise SystemExit(str(e)) from e
+
+
+@app.command
+def probe(
+    url: Annotated[str, cyclopts.Parameter(help="URL to probe")],
+    resolve: Annotated[
+        str | None,
+        cyclopts.Parameter(name="--resolve", help="DNS override: host:port:addr"),
+    ] = None,
+    connect_to: Annotated[
+        str | None,
+        cyclopts.Parameter(name="--connect-to", help="Reroute: host:port:host2:port2"),
+    ] = None,
+    cacert: Annotated[
+        Path | None,
+        cyclopts.Parameter(name="--cacert", help="CA cert for verification"),
+    ] = None,
+    cert_status: Annotated[
+        bool,
+        cyclopts.Parameter(name="--cert-status", help="Check OCSP stapling"),
+    ] = False,
+    method: Annotated[
+        str | None,
+        cyclopts.Parameter(name="--method", help="HTTP method (e.g., HEAD, OPTIONS)"),
+    ] = None,
+    insecure: Annotated[
+        bool,
+        cyclopts.Parameter(name="--insecure", help="Skip TLS verification (-k)"),
+    ] = False,
+    follow_redirects: Annotated[
+        bool,
+        cyclopts.Parameter(name="--follow", help="Follow redirects (-L)"),
+    ] = False,
+    header: Annotated[
+        tuple[str, ...],
+        cyclopts.Parameter(name="--header", help="Extra header (repeatable)"),
+    ] = (),
+    expect_status: Annotated[
+        int | None,
+        cyclopts.Parameter(name="--expect-status", help="Assert HTTP status"),
+    ] = None,
+    expect_header: Annotated[
+        tuple[str, ...],
+        cyclopts.Parameter(name="--expect-header", help="Assert header (repeatable)"),
+    ] = (),
+    expect_cert_days: Annotated[
+        int | None,
+        cyclopts.Parameter(
+            name="--expect-cert-days-remaining", help="Assert minimum days until cert expiry"
+        ),
+    ] = None,
+    json_output: JsonOutput = False,
+    retries: Annotated[
+        int,
+        cyclopts.Parameter(name="--retries", help="Number of retry attempts (0 = no retries)"),
+    ] = 0,
+    retry_delay: Annotated[
+        float,
+        cyclopts.Parameter(name="--retry-delay", help="Seconds between retries"),
+    ] = 1.0,
+) -> None:
+    """Probe a live URL with curl and report TLS, headers, and timing.
+
+    Verifies deployed behaviour — does the live endpoint return the right
+    TLS cert, security headers, and status code?
+
+    Supports DNS-independent staging tests via --resolve and --connect-to.
+    When assertions (--expect-status, --expect-header) are provided, exits
+    non-zero on failure for CI use.  Use --retries to wait for a service to
+    become ready (retries both connection errors and assertion failures).
+
+    Examples:
+        rots proxy probe https://us.onetime.co/api/v2/status
+        rots proxy probe https://us.onetime.co/api/v2/status --expect-status 200
+        rots proxy probe https://us.onetime.co/api/v2/status \\
+            --resolve us.onetime.co:443:10.0.0.5
+        rots proxy probe https://us.onetime.co/api/v2/status \\
+            --expect-status 200 --retries 5 --retry-delay 2.0
+        rots --host eu-web-01 proxy probe https://localhost:7043/health
+    """
+    cfg = Config()
+    ex = cfg.get_executor(host=context.host_var.get(None))
+
+    try:
+        parse_trace_url(url)
+    except ProxyError as e:
+        raise SystemExit(str(e)) from e
+
+    last_result: ProbeResult | None = None
+    last_assertions: list[dict] = []
+
+    for attempt in range(retries + 1):
+        try:
+            last_result = run_probe(
+                url,
+                resolve=resolve,
+                connect_to=connect_to,
+                cacert=cacert,
+                cert_status=cert_status,
+                extra_headers=header,
+                method=method,
+                insecure=insecure,
+                follow_redirects=follow_redirects,
+                executor=ex,
+            )
+        except ProxyError as e:
+            if attempt < retries:
+                time.sleep(retry_delay)
+                continue
+            raise SystemExit(str(e)) from e
+
+        last_assertions = evaluate_assertions(
+            last_result,
+            expect_status=expect_status,
+            expect_headers=expect_header,
+            expect_cert_days=expect_cert_days,
+        )
+
+        all_passed = not last_assertions or all(a["passed"] for a in last_assertions)
+        if all_passed or attempt == retries:
+            break
+
+        time.sleep(retry_delay)
+
+    assert last_result is not None  # loop always sets or raises
+
+    if json_output:
+        _print_probe_json(last_result, last_assertions)
+    else:
+        _print_probe_human(last_result, last_assertions)
+
+    # Exit code: 0 if no assertions or all pass, 1 if any fail
+    if last_assertions and not all(a["passed"] for a in last_assertions):
+        raise SystemExit(1)
+
+
+def _print_probe_human(result: ProbeResult, assertions: list[dict]) -> None:
+    """Print human-readable probe output."""
+    print(result.url)
+
+    # TLS section
+    if result.url.startswith("https"):
+        tag = "[ok]" if result.ssl_verify_ok else "[FAIL]"
+        label = (
+            "verified" if result.ssl_verify_ok else (f"verify failed ({result.ssl_verify_result})")
+        )
+        print(f"\n  tls: {tag} {label}")
+        if result.cert_issuer:
+            print(f"       issuer:  {result.cert_issuer}")
+        if result.cert_expiry:
+            print(f"       expiry:  {result.cert_expiry}")
+
+    # Status
+    print(f"\n  status: {result.http_code}")
+
+    # Headers
+    if result.response_headers:
+        print("\n  headers:")
+        for k, vs in sorted(result.response_headers.items()):
+            for v in vs:
+                print(f"    {k}: {v}")
+
+    # Timing
+    print("\n  timing:")
+    print(f"    dns:       {result.time_namelookup * 1000:7.1f} ms")
+    print(f"    connect:   {result.time_connect * 1000:7.1f} ms")
+    print(f"    tls:       {result.time_appconnect * 1000:7.1f} ms")
+    print(f"    ttfb:      {result.time_starttransfer * 1000:7.1f} ms")
+    print(f"    total:     {result.time_total * 1000:7.1f} ms")
+
+    # Assertions
+    if assertions:
+        print()
+        for a in assertions:
+            tag = "[ok]" if a["passed"] else "[FAIL]"
+            if a["passed"]:
+                print(f"  {tag} {a['check']} {a['expected']}")
+            else:
+                print(f"  {tag} {a['check']}: expected {a['expected']}, got {a['actual']}")
+
+
+def _print_probe_json(result: ProbeResult, assertions: list[dict]) -> None:
+    """Print JSON probe output."""
+    output = {
+        "url": result.url,
+        "http_code": result.http_code,
+        "tls": {
+            "verified": result.ssl_verify_ok,
+            "verify_result": result.ssl_verify_result,
+            "issuer": result.cert_issuer,
+            "subject": result.cert_subject,
+            "expiry": result.cert_expiry,
+        },
+        "timing": {
+            "dns_ms": round(result.time_namelookup * 1000, 1),
+            "connect_ms": round(result.time_connect * 1000, 1),
+            "tls_ms": round(result.time_appconnect * 1000, 1),
+            "ttfb_ms": round(result.time_starttransfer * 1000, 1),
+            "total_ms": round(result.time_total * 1000, 1),
+        },
+        "headers": result.response_headers,
+        "assertions": assertions,
+    }
+    print(json.dumps(output, indent=2))
