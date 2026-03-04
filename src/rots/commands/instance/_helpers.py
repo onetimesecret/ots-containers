@@ -80,10 +80,7 @@ def deploy_lock(
         fh = resolved.open("a")  # "a" so we never truncate an existing file
     except OSError as exc:
         # Unable to create/open the lock file — non-fatal on dev machines
-        print(
-            f"Warning: cannot open deploy lock file {resolved}: {exc}",
-            file=sys.stderr,
-        )
+        logger.warning("cannot open deploy lock file %s: %s", resolved, exc)
         yield
         return
 
@@ -91,11 +88,10 @@ def deploy_lock(
         fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except BlockingIOError:
         fh.close()
-        print(
-            "Error: another deploy is already in progress "
-            f"(lock held: {resolved}).\n"
+        logger.error(
+            "another deploy is already in progress (lock held: %s).\n"
             "Wait for it to finish or remove the lock file manually if it is stale.",
-            file=sys.stderr,
+            resolved,
         )
         raise SystemExit(1)
 
@@ -181,13 +177,15 @@ def _remote_lock_acquire(
     # Lock is actively held — report and exit
     cat = executor.run(["cat", str(lock_path)], sudo=True)
     holder = cat.stdout.strip() if cat.ok else "unknown"
-    print(
-        f"Error: another deploy is already in progress on the remote host.\n"
-        f"  Lock file: {lock_path}\n"
-        f"  Held by: {holder}\n"
+    logger.error(
+        "another deploy is already in progress on the remote host.\n"
+        "  Lock file: %s\n"
+        "  Held by: %s\n"
         "Wait for it to finish, or remove the lock if it is stale:\n"
-        f"  ssh <host> sudo rm {lock_path}",
-        file=sys.stderr,
+        "  ssh <host> sudo rm %s",
+        lock_path,
+        holder,
+        lock_path,
     )
     raise SystemExit(1)
 
@@ -219,6 +217,28 @@ def _resolve_lock_path(lock_path: Path) -> Path:
     # Fall back to a user-writable temp location
     tmp = Path(tempfile.gettempdir()) / "ots-deploy.lock"
     return tmp
+
+
+def flush_output() -> None:
+    """Flush stdout and stderr before subprocess/PTY handoff.
+
+    Prevents buffered logger output (which goes to stderr via
+    StreamHandler) from being swallowed when a subprocess inherits
+    the terminal or a PTY switches to raw mode.
+    """
+    sys.stdout.flush()
+    sys.stderr.flush()
+
+
+def apply_quiet(quiet: bool) -> None:
+    """Raise root log level to WARNING when ``--quiet`` is active.
+
+    This suppresses ``logger.info()`` status messages while keeping
+    warnings and errors visible.  Call at the top of any command that
+    accepts the ``--quiet`` flag.
+    """
+    if quiet:
+        logging.getLogger().setLevel(logging.WARNING)
 
 
 def format_command(cmd: Sequence[str]) -> str:
@@ -389,31 +409,32 @@ def for_each_instance(
 
     total = len(items)
     if total == 0:
-        print("No instances found to operate on.")
+        logger.info("No instances found to operate on.")
         return 0
 
     for i, (itype, id_) in enumerate(items, 1):
         unit = systemd.unit_name(itype.value, id_)
-        print(f"[{i}/{total}] {verb} {unit}...")
+        logger.info("[%d/%d] %s %s...", i, total, verb, unit)
         try:
             action(itype, id_)
         except SystemctlError as exc:
-            print(f"Error: {exc}", file=sys.stderr)
+            msg = str(exc)
             if exc.journal:
-                print(f"\nRecent journal output for {exc.unit}:", file=sys.stderr)
+                msg += f"\n\nRecent journal output for {exc.unit}:"
                 for line in exc.journal.splitlines():
-                    print(f"  {line}", file=sys.stderr)
+                    msg += f"\n  {line}"
+            logger.error(msg)
             raise SystemExit(1) from None
         if i < total and delay > 0:
-            print(f"Waiting {delay}s...")
+            logger.info("Waiting %ds...", delay)
             time.sleep(delay)
 
-    print(f"Processed {total} instance(s)")
+    logger.info("Processed %d instance(s)", total)
 
     if show_logs_hint:
         hint = format_journalctl_hint(instances)
         if hint:
-            print(f"\nView logs: {hint}")
+            logger.info("View logs: %s", hint)
 
     return total
 
@@ -446,8 +467,7 @@ def run_hook(
     Raises:
         SystemExit(1): If the hook exits non-zero.
     """
-    if not quiet:
-        print(f"Running {stage}: {hook_cmd}")
+    logger.info("Running %s: %s", stage, hook_cmd)
 
     proc = subprocess.run(
         hook_cmd,
@@ -456,7 +476,6 @@ def run_hook(
     )
 
     if proc.returncode != 0:
-        print(f"  ERROR: {stage} failed (exit {proc.returncode}): {hook_cmd}", file=sys.stderr)
+        logger.error("%s failed (exit %d): %s", stage, proc.returncode, hook_cmd)
         raise SystemExit(1)
-    if not quiet:
-        print(f"  {stage} passed")
+    logger.info("%s passed", stage)

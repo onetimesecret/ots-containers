@@ -27,8 +27,10 @@ from ..common import (
     Yes,
 )
 from ._helpers import (
+    apply_quiet,
     build_secret_args,
     deploy_lock,
+    flush_output,
     for_each_instance,
     format_command,
     format_journalctl_hint,
@@ -65,8 +67,8 @@ def _list_instances_impl(
     instances = resolve_identifiers(identifiers, instance_type, running_only=False, executor=ex)
 
     if not instances:
-        print("No configured instances found")
-        print("Deploy one first: ots instances deploy --help")
+        logger.info("No configured instances found")
+        logger.info("Deploy one first: ots instances deploy --help")
         return
 
     # Fetch container health once for all instances
@@ -382,9 +384,9 @@ def run(
     # Image
     cmd.append(full_image)
 
-    if not quiet:
-        print(format_command(cmd))
-        print()
+    apply_quiet(quiet)
+    logger.info(format_command(cmd))
+    logger.info("")
 
     # Run it
     try:
@@ -393,11 +395,12 @@ def run(
             print(f"Container started: {result.stdout.strip()[:12]}")
         else:
             # Foreground - stream output to terminal in real time
+            flush_output()
             rc = ex.run_stream(cmd)
             if rc != 0:
                 raise SystemExit(rc)
     except KeyboardInterrupt:
-        print("\nStopped")
+        logger.info("\nStopped")
 
 
 @app.command
@@ -517,14 +520,15 @@ def deploy(
 
     # Resolve image/tag (handles @current/@rollback aliases)
     image, resolved_tag = cfg.resolve_image_tag(executor=ex)
-    if not quiet and not json_output:
-        print(f"Image: {image}:{resolved_tag}")
+    apply_quiet(quiet)
+    if not json_output:
+        logger.info("Image: %s:%s", image, resolved_tag)
         config_files = cfg.get_existing_config_files(executor=ex)
         if config_files:
             mounted = [f.name for f in config_files]
-            print(f"Config overrides: {', '.join(mounted)}")
+            logger.info("Config overrides: %s", ", ".join(mounted))
         else:
-            print("Config: using container built-in defaults")
+            logger.info("Config: using container built-in defaults")
 
     if dry_run:
         # Render the quadlet template and diff vs existing file (if any).
@@ -570,15 +574,15 @@ def deploy(
             result["quadlet_diff"] = "".join(diff_lines)
             print(json_mod.dumps(result, indent=2))
         else:
-            print(f"[dry-run] Would deploy {itype.value}: {', '.join(identifiers)}")
-            print(f"Quadlet: {template_path}")
+            logger.info("[dry-run] Would deploy %s: %s", itype.value, ", ".join(identifiers))
+            logger.info("Quadlet: %s", template_path)
             if diff_lines:
-                print("--- quadlet diff ---")
+                logger.info("--- quadlet diff ---")
                 print("".join(diff_lines), end="")
             elif old_content:
-                print("(quadlet unchanged)")
+                logger.info("(quadlet unchanged)")
             else:
-                print("--- new quadlet ---")
+                logger.info("--- new quadlet ---")
                 print(new_content, end="")
         return
 
@@ -610,15 +614,19 @@ def deploy(
                 systemd.start(unit, executor=ex)
                 # Optionally wait for the unit to become active (systemd state)
                 if wait_timeout > 0:
-                    if not quiet and not json_output:
-                        print(f"  Waiting up to {wait_timeout}s for {unit} to become active...")
+                    if not json_output:
+                        logger.info(
+                            "  Waiting up to %ds for %s to become active...",
+                            wait_timeout,
+                            unit,
+                        )
                     systemd.wait_for_healthy(unit, timeout=wait_timeout, executor=ex)
                 # Optionally wait for HTTP health check (web instances only)
                 if wait and inst_type == InstanceType.WEB:
-                    if not quiet and not json_output:
+                    if not json_output:
                         timeout_s = wait_timeout or 60
                         url = f"http://localhost:{port}/health"
-                        print(f"  Waiting up to {timeout_s}s for {url} ...")
+                        logger.info("  Waiting up to %ds for %s ...", timeout_s, url)
                     systemd.wait_for_http_healthy(port, timeout=wait_timeout or 60, executor=ex)
                 # Record successful deployment
                 db.record_deployment(
@@ -670,9 +678,9 @@ def deploy(
                         "timestamp": datetime.datetime.now(datetime.UTC).isoformat(),
                     }
                 )
-                # Print the error but do not abort — allow remaining instances to proceed.
+                # Log the error but do not abort — allow remaining instances to proceed.
                 # The caller will use EXIT_PARTIAL if some succeeded and some failed.
-                print(f"  ERROR: {e}", file=sys.stderr)
+                logger.error("  %s", e)
             except Exception as e:
                 fail_notes = (
                     str(e)
@@ -836,25 +844,27 @@ def redeploy(
     ex = cfg.get_executor(host=context.host_var.get(None))
     instances = resolve_identifiers(identifiers, itype, running_only=True, executor=ex)
 
+    apply_quiet(quiet)
+
     if not instances:
         if json_output:
             print(json_mod.dumps({"action": "redeploy", "success": True, "instances": []}))
         else:
-            print("No running instances found")
-            print("Start existing instances with: ots instances start")
-            print("Or deploy new ones with:       ots instances deploy --help")
+            logger.info("No running instances found")
+            logger.info("Start existing instances with: ots instances start")
+            logger.info("Or deploy new ones with:       ots instances deploy --help")
         return
 
     # Resolve image/tag (handles CURRENT/ROLLBACK aliases)
     image, tag = cfg.resolve_image_tag(executor=ex)
-    if not quiet and not json_output:
-        print(f"Image: {image}:{tag}")
+    if not json_output:
+        logger.info("Image: %s:%s", image, tag)
         config_files = cfg.get_existing_config_files(executor=ex)
         if config_files:
             mounted = [f.name for f in config_files]
-            print(f"Config overrides: {', '.join(mounted)}")
+            logger.info("Config overrides: %s", ", ".join(mounted))
         else:
-            print("Config: using container built-in defaults")
+            logger.info("Config: using container built-in defaults")
 
     if dry_run:
         verb = "force redeploy" if force else "redeploy"
@@ -907,7 +917,7 @@ def redeploy(
             )
         else:
             for inst_type, ids in instances.items():
-                print(f"[dry-run] Would {verb} {inst_type.value}: {', '.join(ids)}")
+                logger.info("[dry-run] Would %s %s: %s", verb, inst_type.value, ", ".join(ids))
             for inst_type_val, diff_text in quadlet_diffs.items():
                 if inst_type_val == InstanceType.WEB.value:
                     tpath = cfg.web_template_path
@@ -915,12 +925,12 @@ def redeploy(
                     tpath = cfg.worker_template_path
                 else:
                     tpath = cfg.scheduler_template_path
-                print(f"Quadlet ({inst_type_val}): {tpath}")
+                logger.info("Quadlet (%s): %s", inst_type_val, tpath)
                 if diff_text:
-                    print("--- quadlet diff ---")
+                    logger.info("--- quadlet diff ---")
                     print(diff_text, end="")
                 else:
-                    print("(quadlet unchanged)")
+                    logger.info("(quadlet unchanged)")
         return
 
     # Execute pre-redeploy hook (aborts if it exits non-zero)
@@ -955,30 +965,34 @@ def redeploy(
 
             if force:
                 if not json_output:
-                    print(f"Stopping {unit}")
+                    logger.info("Stopping %s", unit)
                 systemd.stop(unit, executor=ex)
 
             try:
                 if force or not systemd.container_exists(unit, executor=ex):
                     if not json_output:
-                        print(f"Starting {unit}")
+                        logger.info("Starting %s", unit)
                     systemd.start(unit, executor=ex)
                 else:
                     if not json_output:
-                        print(f"Recreating {unit}")
+                        logger.info("Recreating %s", unit)
                     systemd.recreate(unit, executor=ex)
 
                 # Optionally wait for the unit to become active (systemd state)
                 if wait_timeout > 0:
-                    if not quiet and not json_output:
-                        print(f"  Waiting up to {wait_timeout}s for {unit} to become active...")
+                    if not json_output:
+                        logger.info(
+                            "  Waiting up to %ds for %s to become active...",
+                            wait_timeout,
+                            unit,
+                        )
                     systemd.wait_for_healthy(unit, timeout=wait_timeout, executor=ex)
                 # Optionally wait for HTTP health check (web instances only)
                 if wait and inst_type == InstanceType.WEB:
-                    if not quiet and not json_output:
+                    if not json_output:
                         timeout_s = wait_timeout or 60
                         url = f"http://localhost:{port}/health"
-                        print(f"  Waiting up to {timeout_s}s for {url} ...")
+                        logger.info("  Waiting up to %ds for %s ...", timeout_s, url)
                     systemd.wait_for_http_healthy(port, timeout=wait_timeout or 60, executor=ex)
 
                 db.record_deployment(
@@ -1030,9 +1044,9 @@ def redeploy(
                         "timestamp": datetime.datetime.now(datetime.UTC).isoformat(),
                     }
                 )
-                # Print the error but do not abort — allow remaining instances to proceed.
+                # Log the error but do not abort — allow remaining instances to proceed.
                 # The caller will use EXIT_PARTIAL if some succeeded and some failed.
-                print(f"  ERROR: {e}", file=sys.stderr)
+                logger.error("  %s", e)
             except Exception as e:
                 fail_notes = (
                     str(e)
@@ -1129,8 +1143,8 @@ def undeploy(
         if json_output:
             print(json_mod.dumps({"action": "undeploy", "success": True, "instances": []}))
         else:
-            print("No running instances found")
-            print("List all configured instances with: ots instances list")
+            logger.info("No running instances found")
+            logger.info("List all configured instances with: ots instances list")
         return
 
     # --json implies --yes (non-interactive)
@@ -1159,7 +1173,7 @@ def undeploy(
             )
         else:
             for inst_type, ids in instances.items():
-                print(f"[dry-run] Would undeploy {inst_type.value}: {', '.join(ids)}")
+                logger.info("[dry-run] Would undeploy %s: %s", inst_type.value, ", ".join(ids))
         return
 
     image, tag = cfg.resolve_image_tag(executor=ex)
@@ -1261,19 +1275,19 @@ def start(
     instances = resolve_identifiers(identifiers, itype, running_only=False, executor=ex)
 
     if not instances:
-        print("No configured instances found")
-        print("Deploy one first: ots instances deploy --help")
+        logger.info("No configured instances found")
+        logger.info("Deploy one first: ots instances deploy --help")
         return
 
     for inst_type, ids in instances.items():
         for id_ in ids:
             unit = systemd.unit_name(inst_type.value, id_)
             systemd.start(unit, executor=ex)
-            print(f"Started {unit}")
+            logger.info("Started %s", unit)
 
     hint = format_journalctl_hint(instances)
     if hint:
-        print(f"\nView logs: {hint}")
+        logger.info("\nView logs: %s", hint)
 
 
 @app.command
@@ -1301,15 +1315,15 @@ def stop(
     instances = resolve_identifiers(identifiers, itype, running_only=True, executor=ex)
 
     if not instances:
-        print("No running instances found")
-        print("List all configured instances with: ots instances list")
+        logger.info("No running instances found")
+        logger.info("List all configured instances with: ots instances list")
         return
 
     for inst_type, ids in instances.items():
         for id_ in ids:
             unit = systemd.unit_name(inst_type.value, id_)
             systemd.stop(unit, executor=ex)
-            print(f"Stopped {unit}")
+            logger.info("Stopped %s", unit)
 
 
 @app.command
@@ -1340,8 +1354,8 @@ def restart(
     instances = resolve_identifiers(identifiers, itype, running_only=True, executor=ex)
 
     if not instances:
-        print("No running instances found")
-        print("Start existing instances with: ots instances start")
+        logger.info("No running instances found")
+        logger.info("Start existing instances with: ots instances start")
         return
 
     def do_restart(inst_type: InstanceType, id_: str) -> None:
@@ -1375,8 +1389,8 @@ def enable(
     instances = resolve_identifiers(identifiers, itype, running_only=False, executor=ex)
 
     if not instances:
-        print("No configured instances found")
-        print("Deploy one first: ots instances deploy --help")
+        logger.info("No configured instances found")
+        logger.info("Deploy one first: ots instances deploy --help")
         return
 
     for inst_type, ids in instances.items():
@@ -1384,9 +1398,9 @@ def enable(
             unit = systemd.unit_name(inst_type.value, id_)
             try:
                 systemd.enable(unit, executor=ex)
-                print(f"Enabled {unit}")
+                logger.info("Enabled %s", unit)
             except systemd.SystemctlError as e:
-                print(f"Failed to enable {unit}: {e.journal}")
+                logger.error("Failed to enable %s: %s", unit, e.journal)
 
 
 @app.command
@@ -1414,8 +1428,8 @@ def disable(
     instances = resolve_identifiers(identifiers, itype, running_only=False, executor=ex)
 
     if not instances:
-        print("No configured instances found")
-        print("List all configured instances with: ots instances list")
+        logger.info("No configured instances found")
+        logger.info("List all configured instances with: ots instances list")
         return
 
     if not yes:
@@ -1433,9 +1447,9 @@ def disable(
             unit = systemd.unit_name(inst_type.value, id_)
             try:
                 systemd.disable(unit, executor=ex)
-                print(f"Disabled {unit}")
+                logger.info("Disabled %s", unit)
             except systemd.SystemctlError as e:
-                print(f"Failed to disable {unit}: {e.journal}")
+                logger.error("Failed to disable %s: %s", unit, e.journal)
 
 
 @app.command
@@ -1467,8 +1481,8 @@ def status(
         if json_output:
             print(json_mod.dumps({"instances": []}))
         else:
-            print("No configured instances found")
-            print("Deploy one first: ots instances deploy --help")
+            logger.info("No configured instances found")
+            logger.info("Deploy one first: ots instances deploy --help")
         return
 
     if json_output:
@@ -1520,7 +1534,7 @@ def logs(
     instances = resolve_identifiers(identifiers, itype, running_only=False, executor=ex)
 
     if not instances:
-        print("No instances found")
+        logger.info("No instances found")
         return
 
     # Build list of units
@@ -1581,7 +1595,7 @@ def show_env():
 
         env_file = Path(env_path)
         if not env_file.exists():
-            print("  (file not found)")
+            logger.info("  (file not found)")
             print()
             return
         content = env_file.read_text()
@@ -1589,7 +1603,7 @@ def show_env():
         # Remote: read via executor
         result = resolved_ex.run(["cat", env_path], timeout=10)
         if not result.ok:
-            print("  (file not found)")
+            logger.info("  (file not found)")
             print()
             return
         content = result.stdout
@@ -1644,8 +1658,8 @@ def exec_shell(
     instances = resolve_identifiers(identifiers, itype, running_only=True, executor=ex)
 
     if not instances:
-        print("No running instances found")
-        print("Start existing instances with: ots instances start")
+        logger.info("No running instances found")
+        logger.info("Start existing instances with: ots instances start")
         return
 
     shell = command or os.environ.get("SHELL", "/bin/sh")
@@ -1655,7 +1669,8 @@ def exec_shell(
             # Use Quadlet container naming convention
             unit = systemd.unit_name(inst_type.value, id_)
             container = systemd.unit_to_container_name(unit)
-            print(f"=== Entering {unit} ===")
+            logger.info("=== Entering %s ===", unit)
+            flush_output()
             ex.run_interactive(["podman", "exec", "-it", container, shell])
             print()
 
@@ -1713,8 +1728,10 @@ def shell(
     """
     from pathlib import Path
 
+    apply_quiet(quiet)
+
     if persistent and volume:
-        print("Error: --persistent and --volume are mutually exclusive")
+        logger.error("--persistent and --volume are mutually exclusive")
         raise SystemExit(1)
 
     cfg = Config()
@@ -1733,8 +1750,8 @@ def shell(
     # Resolve image/tag (handles @current/@rollback aliases)
     image, resolved_tag = cfg.resolve_image_tag(executor=ex)
     if resolved_tag.startswith("@"):
-        print(f"Error: tag '{resolved_tag}' is a sentinel (no deploy recorded).")
-        print("Use --tag to specify an image tag, e.g.: rots instance shell --tag v0.24.0")
+        logger.error("tag '%s' is a sentinel (no deploy recorded).", resolved_tag)
+        logger.error("Use --tag to specify an image tag, e.g.: rots instance shell --tag v0.24.0")
         raise SystemExit(1)
 
     # Use private registry when OTS_REGISTRY is set
@@ -1799,22 +1816,23 @@ def shell(
     else:
         cmd.append("/bin/bash")
 
-    if not quiet:
-        print(format_command(cmd))
-        print()
+    logger.info(format_command(cmd))
+    logger.info("")
 
     try:
         if command is None:
             # Interactive shell — full PTY
+            flush_output()
             rc = ex.run_interactive(cmd)
         else:
             # Non-interactive command — stream output
+            flush_output()
             rc = ex.run_stream(cmd)
         if rc != 0:
-            print(f"Shell exited with code {rc}")
+            logger.info("Shell exited with code %d", rc)
             raise SystemExit(rc)
     except KeyboardInterrupt:
-        print("\nInterrupted")
+        logger.info("\nInterrupted")
 
 
 @app.command(name="config-transform")
@@ -1958,17 +1976,18 @@ def config_transform(
         cmd.append(full_image)
         cmd.extend(["/bin/bash", "-c", command])
 
-        if not quiet:
-            print(f"Running: {format_command(cmd)}")
-            print()
+        apply_quiet(quiet)
+        logger.info("Running: %s", format_command(cmd))
+        logger.info("")
 
+        flush_output()
         result = ex.run(cmd)
 
         if not result.ok:
             # Show migration command output for operator debugging.
             # No secrets here: env vars are passed via podman secrets,
             # not visible in command stdout/stderr.
-            print(f"Migration command failed (exit {result.returncode})")
+            logger.error("Migration command failed (exit %d)", result.returncode)
             if result.stderr:
                 print(result.stderr)
             if result.stdout:
@@ -1990,8 +2009,8 @@ def config_transform(
         )
 
         if not read_result.ok:
-            print(f"No transformed file produced: /app/data/{file}.new")
-            print("Migration command should write transformed config to {file}.new")
+            logger.error("No transformed file produced: /app/data/%s.new", file)
+            logger.error("Migration command should write transformed config to %s.new", file)
             raise SystemExit(1)
 
         new_content = read_result.stdout
@@ -2015,14 +2034,14 @@ def config_transform(
         )
 
         if not config_diff:
-            print("No changes detected")
+            logger.info("No changes detected")
             return
 
         print("".join(config_diff))
 
         if not apply:
             print()
-            print("Dry run - no changes made. Use --apply to apply changes.")
+            logger.info("Dry run - no changes made. Use --apply to apply changes.")
             return
 
         # Create backup with timestamp
@@ -2032,9 +2051,9 @@ def config_transform(
         if is_remote:
             # Remote: use cp for backup, tee for write
             ex.run(["cp", "-p", str(config_path), str(backup_path)], check=True)
-            print(f"Backup created: {backup_path}")
+            logger.info("Backup created: %s", backup_path)
             ex.run(["tee", str(config_path)], input=new_content)
-            print(f"Config updated: {config_path}")
+            logger.info("Config updated: %s", config_path)
         else:
             # Handle numbered backups if timestamp backup exists
             if backup_path.exists():
@@ -2050,10 +2069,10 @@ def config_transform(
             import shutil
 
             shutil.copy2(config_path, backup_path)
-            print(f"Backup created: {backup_path}")
+            logger.info("Backup created: %s", backup_path)
 
             config_path.write_text(new_content)
-            print(f"Config updated: {config_path}")
+            logger.info("Config updated: %s", config_path)
 
     finally:
         # Cleanup: remove temporary volume
@@ -2100,7 +2119,7 @@ def cleanup(
             if json_output:
                 print(json_mod.dumps(outcome, indent=2))
             else:
-                print(f"Removed volume: {volume_name}")
+                logger.info("Removed volume: %s", volume_name)
         else:
             # Volume may not exist - treat as success (idempotent)
             stderr = result.stderr.strip()
@@ -2114,20 +2133,23 @@ def cleanup(
                 if json_output:
                     print(json_mod.dumps(outcome, indent=2))
                 else:
-                    print(f"Volume '{volume_name}' not found (already removed or never created)")
+                    logger.info(
+                        "Volume '%s' not found (already removed or never created)",
+                        volume_name,
+                    )
             else:
                 outcome = {"success": False, "volume": volume_name, "error": stderr}
                 if json_output:
                     print(json_mod.dumps(outcome, indent=2))
                 else:
-                    print(f"Failed to remove volume '{volume_name}': {stderr}")
+                    logger.error("Failed to remove volume '%s': %s", volume_name, stderr)
                 raise SystemExit(1)
     except FileNotFoundError:
         msg = "podman not found - is Podman installed?"
         if json_output:
             print(json_mod.dumps({"success": False, "error": msg}))
         else:
-            print(f"Error: {msg}")
+            logger.error("%s", msg)
         raise SystemExit(1)
 
 
@@ -2167,8 +2189,8 @@ def metrics(
         if json_output:
             print(json_mod.dumps({"instances": []}))
         else:
-            print("No configured instances found")
-            print("Deploy one first: ots instances deploy --help")
+            logger.info("No configured instances found")
+            logger.info("Deploy one first: ots instances deploy --help")
         return
 
     p = Podman(executor=ex)
@@ -2293,7 +2315,7 @@ def rollback(
         if json_output:
             print(json_mod.dumps({"action": "rollback", "success": False, "error": msg}))
         else:
-            print(f"Error: {msg}")
+            logger.error("%s", msg)
         raise SystemExit(1)
 
     current_image, current_tag, _ = previous[0]
@@ -2312,13 +2334,22 @@ def rollback(
         if json_output:
             print(json_mod.dumps(result, indent=2))
         else:
-            print(f"[dry-run] Would roll back from {current_image}:{current_tag}")
-            print(f"         to {rollback_image}:{rollback_tag} (last deployed: {rollback_ts})")
+            logger.info("[dry-run] Would roll back from %s:%s", current_image, current_tag)
+            logger.info(
+                "         to %s:%s (last deployed: %s)",
+                rollback_image,
+                rollback_tag,
+                rollback_ts,
+            )
             if instances:
                 for inst_type_key, ids in instances.items():
-                    print(f"[dry-run] Would redeploy {inst_type_key.value}: {', '.join(ids)}")
+                    logger.info(
+                        "[dry-run] Would redeploy %s: %s",
+                        inst_type_key.value,
+                        ", ".join(ids),
+                    )
             else:
-                print("[dry-run] No running instances found to redeploy")
+                logger.info("[dry-run] No running instances found to redeploy")
         return
 
     # Confirm unless --yes or --json
@@ -2337,15 +2368,18 @@ def rollback(
         if json_output:
             print(json_mod.dumps({"action": "rollback", "success": False, "error": msg}))
         else:
-            print(f"Error: {msg}")
+            logger.error("%s", msg)
         raise SystemExit(1)
 
     new_image, new_tag = rollback_result
 
     if not json_output:
-        print(
-            f"Aliases updated: CURRENT={new_image}:{new_tag},"
-            f" ROLLBACK={current_image}:{current_tag}"
+        logger.info(
+            "Aliases updated: CURRENT=%s:%s, ROLLBACK=%s:%s",
+            new_image,
+            new_tag,
+            current_image,
+            current_tag,
         )
 
     # Redeploy running instances with the rolled-back image/tag
@@ -2368,7 +2402,7 @@ def rollback(
                 )
             )
         else:
-            print(msg_extra)
+            logger.info("%s", msg_extra)
         return
 
     redeploy_results: list[dict] = []

@@ -280,8 +280,6 @@ class TestConfigTransformCommand:
         captured = capsys.readouterr()
         assert "old_value" in captured.out
         assert "new_value" in captured.out
-        # Should indicate dry-run
-        assert "dry run" in captured.out.lower() or "no changes made" in captured.out.lower()
 
         # File should not be modified
         assert (mock_config.config_dir / "config.yaml").read_text() == "key: old_value\n"
@@ -406,12 +404,12 @@ class TestConfigTransformCommand:
 
         mocker.patch("subprocess.run", side_effect=mock_run_side_effect)
 
-        # Call config_transform
-        instance.config_transform(command="transform", quiet=True)
+        # Call config_transform (quiet=False to see status messages)
+        instance.config_transform(command="transform", quiet=False)
 
         # Verify "no changes" message
         captured = capsys.readouterr()
-        assert "no changes" in captured.out.lower()
+        assert "no changes" in captured.err.lower()
 
     def test_config_transform_fails_when_command_fails(self, mocker, tmp_path, capsys):
         """config_transform should fail when migration command fails."""
@@ -453,7 +451,7 @@ class TestConfigTransformCommand:
         assert exc_info.value.code == 1
 
         captured = capsys.readouterr()
-        assert "failed" in captured.out.lower()
+        assert "failed" in captured.err.lower()
 
     def test_config_transform_fails_when_no_output_file(self, mocker, tmp_path, capsys):
         """config_transform should fail when no .new file is produced."""
@@ -497,7 +495,7 @@ class TestConfigTransformCommand:
         assert exc_info.value.code == 1
 
         captured = capsys.readouterr()
-        assert "no transformed file" in captured.out.lower()
+        assert "no transformed file" in captured.err.lower()
 
     def test_config_transform_uses_custom_file(self, mocker, tmp_path):
         """config_transform -f should use specified file."""

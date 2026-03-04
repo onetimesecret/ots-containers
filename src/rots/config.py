@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import atexit
+import logging
 import os
 import re
 from dataclasses import dataclass, field
@@ -11,6 +12,8 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from ots_shared.ssh.executor import Executor
+
+logger = logging.getLogger(__name__)
 
 # Default image registry (public)
 DEFAULT_IMAGE = "ghcr.io/onetimesecret/onetimesecret"
@@ -458,9 +461,7 @@ class Config:
             return LocalExecutor()
 
         if resolved not in _ssh_cache:
-            import sys
-
-            print(f"Connecting to {resolved}...", file=sys.stderr, flush=True)
+            logger.info("Connecting to %s...", resolved)
             try:
                 _ssh_cache[resolved] = ssh_connect(resolved)
             except ImportError:
@@ -496,7 +497,7 @@ class Config:
                         "Check your SSH configuration (~/.ssh/config) and known_hosts."
                     )
                 raise
-            print("Connected.", file=sys.stderr, flush=True)
+            logger.info("Connected.")
         return SSHExecutor(_ssh_cache[resolved])
 
     def resolve_image_tag(self, *, executor: Executor | None = None) -> tuple[str, str]:

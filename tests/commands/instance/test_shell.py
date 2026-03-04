@@ -275,7 +275,7 @@ class TestShellCommand:
         instance.shell(quiet=False)
 
         captured = capsys.readouterr()
-        assert "podman run" in captured.out
+        assert "podman run" in captured.err
 
     def test_shell_suppresses_output_when_quiet(self, mocker, tmp_path, capsys):
         """shell --quiet should suppress output."""
@@ -419,8 +419,8 @@ class TestShellSentinelRejection:
 
         assert exc_info.value.code == 1
         captured = capsys.readouterr()
-        assert "sentinel" in captured.out
-        assert "--tag" in captured.out
+        assert "sentinel" in captured.err
+        assert "--tag" in captured.err
 
     def test_shell_rejects_at_rollback_sentinel(self, mocker, tmp_path, capsys):
         """shell should exit 1 when resolve_image_tag returns @rollback."""
@@ -436,7 +436,7 @@ class TestShellSentinelRejection:
 
         assert exc_info.value.code == 1
         captured = capsys.readouterr()
-        assert "sentinel" in captured.out
+        assert "sentinel" in captured.err
 
 
 class TestShellPrivateRegistry:

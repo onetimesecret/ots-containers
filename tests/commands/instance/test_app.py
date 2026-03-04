@@ -393,7 +393,7 @@ class TestRedeployCommand:
         instance.redeploy(identifiers=())
 
         captured = capsys.readouterr()
-        assert "No running instances found" in captured.out
+        assert "No running instances found" in captured.err
 
     def test_redeploy_uses_cfg_web_template_path(self, mocker, tmp_path):
         """redeploy should use cfg.web_template_path."""
@@ -491,7 +491,7 @@ class TestExecCommand:
         )
         instance.exec_shell(identifiers=())
         captured = capsys.readouterr()
-        assert "No running instances found" in captured.out
+        assert "No running instances found" in captured.err
 
     def test_exec_calls_podman_exec(self, mocker, capsys):
         """exec_shell should call run_interactive with correct container name."""
@@ -536,7 +536,7 @@ class TestListInstancesCommand:
         instance.list_instances()
 
         captured = capsys.readouterr()
-        assert "No configured instances found" in captured.out
+        assert "No configured instances found" in captured.err
 
     def test_list_displays_header(self, mocker, capsys, tmp_path):
         """list should display table header."""
@@ -613,7 +613,7 @@ class TestEnableCommand:
         mock_enable.assert_called_once_with("onetime-web@7043", executor=None)
 
         captured = capsys.readouterr()
-        assert "Enabled" in captured.out
+        assert "Enabled" in captured.err
 
 
 class TestStopCommand:
@@ -632,7 +632,7 @@ class TestStopCommand:
 
         mock_stop.assert_called_once_with("onetime-web@7043", executor=None)
         captured = capsys.readouterr()
-        assert "Stopped onetime-web@7043" in captured.out
+        assert "Stopped onetime-web@7043" in captured.err
 
     def test_stop_discovers_instances_when_no_identifiers(self, mocker):
         """stop with no identifiers should discover all types."""
@@ -675,7 +675,7 @@ class TestRestartCommand:
 
         mock_restart.assert_called_once_with("onetime-web@7043", executor=None)
         captured = capsys.readouterr()
-        assert "Restarting onetime-web@7043" in captured.out
+        assert "Restarting onetime-web@7043" in captured.err
 
     def test_restart_multiple(self, mocker, capsys):
         """restart should call systemd.restart for each instance with delay."""
@@ -785,7 +785,7 @@ class TestDisableCommand:
         assert call_args[0][0] == "onetime-web@7043"
 
         captured = capsys.readouterr()
-        assert "Disabled" in captured.out
+        assert "Disabled" in captured.err
 
 
 class TestResolveInstanceType:
@@ -854,7 +854,7 @@ class TestSchedulerCommands:
 
         mock_stop.assert_called_once_with("onetime-scheduler@main", executor=None)
         captured = capsys.readouterr()
-        assert "Stopped onetime-scheduler@main" in captured.out
+        assert "Stopped onetime-scheduler@main" in captured.err
 
     def test_restart_scheduler_with_flag(self, mocker, capsys):
         """restart --scheduler should call systemd.restart for scheduler instances."""
@@ -864,7 +864,7 @@ class TestSchedulerCommands:
 
         mock_restart.assert_called_once_with("onetime-scheduler@main", executor=None)
         captured = capsys.readouterr()
-        assert "Restarting onetime-scheduler@main" in captured.out
+        assert "Restarting onetime-scheduler@main" in captured.err
 
     def test_start_scheduler_with_flag(self, mocker, capsys):
         """start --scheduler should call systemd.start for scheduler instances."""
@@ -874,7 +874,7 @@ class TestSchedulerCommands:
 
         mock_start.assert_called_once_with("onetime-scheduler@main", executor=None)
         captured = capsys.readouterr()
-        assert "Started onetime-scheduler@main" in captured.out
+        assert "Started onetime-scheduler@main" in captured.err
 
     def test_status_scheduler_with_flag(self, mocker, capsys):
         """status --scheduler should show status for scheduler instances."""
@@ -1005,8 +1005,9 @@ class TestDeployEnvVarResolution:
         instance.deploy(identifiers=("7043",), web=True, dry_run=True)
 
         captured = capsys.readouterr()
-        assert "custom.registry.io/myorg/myapp:v1.0.0" in captured.out
-        assert "dry-run" in captured.out
+        combined = captured.out + captured.err
+        assert "custom.registry.io/myorg/myapp:v1.0.0" in combined
+        assert "dry-run" in combined
 
     def test_deploy_records_correct_image_tag(self, mocker, monkeypatch, tmp_path, capsys):
         """Scenario 18b: deploy with IMAGE/TAG env vars flows image to db.record_deployment."""
@@ -1074,8 +1075,9 @@ class TestRedeployEnvVarResolution:
         instance.redeploy(identifiers=("7043",), web=True, dry_run=True)
 
         captured = capsys.readouterr()
-        assert "custom.registry.io/myorg/myapp:v1.0.0" in captured.out
-        assert "dry-run" in captured.out
+        combined = captured.out + captured.err
+        assert "custom.registry.io/myorg/myapp:v1.0.0" in combined
+        assert "dry-run" in combined
 
     def test_redeploy_records_correct_image_tag(self, mocker, monkeypatch, tmp_path, capsys):
         """Scenario 19b: redeploy with IMAGE/TAG env vars flows image to db.record_deployment."""
@@ -1569,7 +1571,7 @@ class TestCleanupCommand:
         instance.cleanup(yes=True)
 
         captured = capsys.readouterr()
-        assert "not found" in captured.out.lower() or "already removed" in captured.out.lower()
+        assert "not found" in captured.err.lower() or "already removed" in captured.err.lower()
 
     def test_cleanup_failure_exits_nonzero(self, mocker, capsys):
         """Unexpected failure from podman should exit 1."""
@@ -1614,7 +1616,7 @@ class TestCleanupCommand:
 
         assert exc_info.value.code == 1
         captured = capsys.readouterr()
-        assert "podman" in captured.out.lower()
+        assert "podman" in captured.err.lower()
 
 
 class TestRollbackCommand:
@@ -1643,7 +1645,7 @@ class TestRollbackCommand:
 
         assert exc_info.value.code == 1
         captured = capsys.readouterr()
-        assert "no previous deployment" in captured.out.lower()
+        assert "no previous deployment" in captured.err.lower()
 
     def test_rollback_exits_when_empty_history(self, mocker, tmp_path, capsys):
         """rollback should exit 1 when deployment history is completely empty."""
@@ -1677,9 +1679,9 @@ class TestRollbackCommand:
         instance.rollback(web=True, dry_run=True)
 
         captured = capsys.readouterr()
-        assert "v2.0.0" in captured.out
-        assert "v1.0.0" in captured.out
-        assert "dry-run" in captured.out.lower()
+        assert "v2.0.0" in captured.err
+        assert "v1.0.0" in captured.err
+        assert "dry-run" in captured.err.lower()
         mock_recreate.assert_not_called()
 
     def test_rollback_dry_run_json_output(self, mocker, tmp_path, capsys):
@@ -1786,7 +1788,7 @@ class TestRollbackCommand:
         # Should succeed without redeploying
         mock_recreate.assert_not_called()
         captured = capsys.readouterr()
-        assert "no running" in captured.out.lower()
+        assert "no running" in captured.err.lower()
 
 
 class TestDeployHooks:
@@ -2428,11 +2430,12 @@ class TestRunCommandExists:
             tmp_path / "nonexistent",
         )
 
-        # Should not raise
+        # Should not raise (quiet suppresses the "Stopped" message)
         instance.run(port=7143, quiet=True)
 
+        # With quiet=True, logger.info() is suppressed (level raised to WARNING)
         captured = capsys.readouterr()
-        assert "Stopped" in captured.out
+        assert "Stopped" not in captured.err
 
     def test_run_without_rm_flag(self, mocker, tmp_path):
         """run with rm=False should not add --rm to command."""
@@ -2484,7 +2487,7 @@ class TestExecShellCommand:
         instance.exec_shell()
 
         captured = capsys.readouterr()
-        assert "No running instances found" in captured.out
+        assert "No running instances found" in captured.err
 
     def test_exec_calls_podman_exec(self, mocker, capsys):
         """exec with running instances should call run_interactive."""
@@ -2566,7 +2569,7 @@ class TestMetricsCommand:
         instance.metrics()
 
         captured = capsys.readouterr()
-        assert "No configured instances found" in captured.out
+        assert "No configured instances found" in captured.err
 
     def test_metrics_no_instances_json(self, mocker, capsys):
         """metrics --json with no instances should output empty JSON list."""

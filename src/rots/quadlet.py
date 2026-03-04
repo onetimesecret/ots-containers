@@ -9,7 +9,7 @@ SECRET_VARIABLE_NAMES defined in the environment file.
 
 from __future__ import annotations
 
-import sys
+import logging
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -25,6 +25,8 @@ from .environment_file import (
 
 if TYPE_CHECKING:
     from ots_shared.ssh import Executor
+
+logger = logging.getLogger(__name__)
 
 # EXIT_PRECOND (3) is intentionally not imported from commands.common to avoid
 # a circular import: quadlet -> commands -> env -> quadlet.
@@ -155,7 +157,7 @@ def get_secrets_section(
 
     if not env_exists:
         msg = (
-            f"ERROR: Environment file not found: {env_path}\n"
+            f"Environment file not found: {env_path}\n"
             "\n"
             "The environment file must exist before deploying. It defines which\n"
             "variables are secrets and provides infrastructure configuration.\n"
@@ -172,15 +174,15 @@ def get_secrets_section(
             "(the application will fail at runtime without required secrets)."
         )
         if force:
-            print(f"WARNING: {msg}", file=sys.stderr)
+            logger.warning(msg)
             return "# No secrets configured (env file not found - deployed with --force)"
-        print(msg, file=sys.stderr)
+        logger.error(msg)
         raise SystemExit(_EXIT_PRECOND)
 
     secrets = get_secrets_from_env_file(env_path, executor=executor)
     if not secrets:
         msg = (
-            f"ERROR: No secrets configured in {env_path}\n"
+            f"No secrets configured in {env_path}\n"
             "\n"
             "SECRET_VARIABLE_NAMES is not set or is empty. The application requires\n"
             "secrets (HMAC_SECRET, SECRET, SESSION_SECRET, etc.) to function.\n"
@@ -193,9 +195,9 @@ def get_secrets_section(
             "(the application will fail at runtime without required secrets)."
         )
         if force:
-            print(f"WARNING: {msg}", file=sys.stderr)
+            logger.warning(msg)
             return "# No secrets configured (SECRET_VARIABLE_NAMES not set - deployed with --force)"
-        print(msg, file=sys.stderr)
+        logger.error(msg)
         raise SystemExit(_EXIT_PRECOND)
 
     # Defense-in-depth: only include secrets that actually exist as podman secrets.
@@ -211,17 +213,17 @@ def get_secrets_section(
 
     if missing:
         names = ", ".join(s.secret_name for s in missing)
-        print(
-            f"WARNING: Podman secrets not found: {names}\n"
+        logger.warning(
+            "Podman secrets not found: %s\n"
             "These secrets are listed in SECRET_VARIABLE_NAMES but don't exist in\n"
             "the podman secret store. Run 'ots env process' to create them.\n"
             "Skipping their Secret= lines in the quadlet.",
-            file=sys.stderr,
+            names,
         )
 
     if not verified:
         msg = (
-            "ERROR: No podman secrets found for any configured secret variable.\n"
+            "No podman secrets found for any configured secret variable.\n"
             "\n"
             f"Secrets listed in {env_path} (SECRET_VARIABLE_NAMES) have not been\n"
             "created in the podman secret store. The application will fail at\n"
@@ -234,9 +236,9 @@ def get_secrets_section(
             "(the application will fail at runtime without required secrets)."
         )
         if force:
-            print(f"WARNING: {msg}", file=sys.stderr)
+            logger.warning(msg)
             return "# No secrets configured (no podman secrets found - deployed with --force)"
-        print(msg, file=sys.stderr)
+        logger.error(msg)
         raise SystemExit(_EXIT_PRECOND)
 
     return generate_quadlet_secret_lines(verified)
