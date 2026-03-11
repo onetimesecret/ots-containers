@@ -100,13 +100,13 @@ def resolve_instance_type(
         return (type_, ())
 
     if web is not None:
-        ids = tuple(web.split(",")) if web else ()
+        ids = tuple(x for x in web.split(",") if x) if web else ()
         return (InstanceType.WEB, ids)
     if worker is not None:
-        ids = tuple(worker.split(",")) if worker else ()
+        ids = tuple(x for x in worker.split(",") if x) if worker else ()
         return (InstanceType.WORKER, ids)
     if scheduler is not None:
-        ids = tuple(scheduler.split(",")) if scheduler else ()
+        ids = tuple(x for x in scheduler.split(",") if x) if scheduler else ()
         return (InstanceType.SCHEDULER, ids)
 
     return (None, ())  # All types
