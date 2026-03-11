@@ -649,7 +649,9 @@ class TestConfigPrivateImage:
         from rots.config import Config
 
         cfg = Config()
-        assert cfg.private_image == "registry.example.com/myorg/onetimesecret"
+        # Default IMAGE is ghcr.io/onetimesecret/onetimesecret; strip
+        # the ghcr.io registry, keep onetimesecret/onetimesecret path.
+        assert cfg.private_image == "registry.example.com/myorg/onetimesecret/onetimesecret"
 
     def test_private_image_with_tag_none_when_no_registry(self, monkeypatch):
         """Should return None when registry is None."""
@@ -660,13 +662,14 @@ class TestConfigPrivateImage:
         assert cfg.private_image_with_tag is None
 
     def test_private_image_with_tag(self, monkeypatch):
-        """Should combine registry, image name, and tag."""
+        """Should combine registry, image path, and tag."""
         monkeypatch.setenv("OTS_REGISTRY", "registry.example.com/myorg")
         monkeypatch.setenv("TAG", "v2.0.0")
         from rots.config import Config
 
         cfg = Config()
-        assert cfg.private_image_with_tag == "registry.example.com/myorg/onetimesecret:v2.0.0"
+        expected = "registry.example.com/myorg/onetimesecret/onetimesecret:v2.0.0"
+        assert cfg.private_image_with_tag == expected
 
     def test_private_image_with_tag_uses_default_tag(self, monkeypatch):
         """Should use default tag when TAG env var is absent."""
@@ -675,27 +678,28 @@ class TestConfigPrivateImage:
         from rots.config import Config
 
         cfg = Config()
-        assert cfg.private_image_with_tag == "registry.example.com/myorg/onetimesecret:@current"
+        expected = "registry.example.com/myorg/onetimesecret/onetimesecret:@current"
+        assert cfg.private_image_with_tag == expected
 
-    def test_private_image_custom_image_derives_basename(self, monkeypatch):
-        """IMAGE env var with multi-segment path uses only the last segment as basename."""
+    def test_private_image_custom_image_strips_registry(self, monkeypatch):
+        """IMAGE env var with registry prefix: strip registry, keep full image path."""
         monkeypatch.setenv("IMAGE", "docker.io/myorg/customapp")
         monkeypatch.setenv("OTS_REGISTRY", "registry.example.com")
         from rots.config import Config
 
         cfg = Config()
-        # basename of "docker.io/myorg/customapp" is "customapp"
-        assert cfg.private_image == "registry.example.com/customapp"
+        # docker.io is a registry (contains dot) -> strip it, keep myorg/customapp
+        assert cfg.private_image == "registry.example.com/myorg/customapp"
 
-    def test_private_image_deep_registry_path_basename(self, monkeypatch):
-        """IMAGE with three path components strips all but the last as basename."""
+    def test_private_image_deep_registry_path(self, monkeypatch):
+        """IMAGE with registry prefix: strip registry hostname, keep image path."""
         monkeypatch.setenv("IMAGE", "registry.corp.com/team/webapp")
         monkeypatch.setenv("OTS_REGISTRY", "myreg.example.com")
         from rots.config import Config
 
         cfg = Config()
-        # basename of "registry.corp.com/team/webapp" is "webapp"
-        assert cfg.private_image == "myreg.example.com/webapp"
+        # registry.corp.com is a registry (contains dot) -> strip it, keep team/webapp
+        assert cfg.private_image == "myreg.example.com/team/webapp"
 
 
 class TestConfigResolveImageTag:
@@ -1730,7 +1734,7 @@ class TestResolvedImageWithTagRegistry:
             assert "registry" not in result.lower()
 
     def test_registry_prefixes_image(self, monkeypatch):
-        """With OTS_REGISTRY, should prefix the image basename."""
+        """With OTS_REGISTRY, should strip source registry and prepend new one."""
         monkeypatch.delenv("IMAGE", raising=False)
         monkeypatch.delenv("TAG", raising=False)
         monkeypatch.setenv("OTS_REGISTRY", "registry.example.com")
@@ -1742,10 +1746,11 @@ class TestResolvedImageWithTagRegistry:
 
         with patch("rots.db.get_alias", return_value=None):
             result = cfg.resolved_image_with_tag()
-            assert result == "registry.example.com/onetimesecret:v1.0.0"
+            # Default IMAGE ghcr.io/onetimesecret/onetimesecret -> strip ghcr.io
+            assert result == "registry.example.com/onetimesecret/onetimesecret:v1.0.0"
 
-    def test_registry_extracts_basename(self, monkeypatch):
-        """Registry prefix should use only the image basename (after last /)."""
+    def test_registry_strips_source_registry_only(self, monkeypatch):
+        """Registry should strip only the source hostname, keeping image path."""
         monkeypatch.setenv("IMAGE", "ghcr.io/custom/org/myapp")
         monkeypatch.delenv("TAG", raising=False)
         monkeypatch.setenv("OTS_REGISTRY", "private.registry.io")
@@ -1757,7 +1762,8 @@ class TestResolvedImageWithTagRegistry:
 
         with patch("rots.db.get_alias", return_value=None):
             result = cfg.resolved_image_with_tag()
-            assert result == "private.registry.io/myapp:v2.0.0"
+            # ghcr.io is the registry -> strip it, keep custom/org/myapp
+            assert result == "private.registry.io/custom/org/myapp:v2.0.0"
 
 
 class TestPodmanAuthArgs:

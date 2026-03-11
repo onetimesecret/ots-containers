@@ -522,7 +522,7 @@ def rollback(
             logger.info("Applying rollback: redeploying all running instances...")
             from ..instance.app import redeploy
 
-            redeploy(identifiers=(), delay=delay)
+            redeploy(delay=delay)
         else:
             logger.info("To apply: ots instance redeploy")
     else:

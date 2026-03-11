@@ -69,6 +69,36 @@ SYSTEMD_UNIT_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._@:-]{0,255}$")
 REGISTRY_RE = re.compile(r"^(?!.*\.\.)[a-zA-Z0-9][a-zA-Z0-9._/:-]{0,254}$")
 
 
+def _strip_registry_prefix(image: str) -> str:
+    """Strip the registry hostname from an OCI image reference, keeping the path.
+
+    OCI convention: the first ``/``-delimited component is a registry hostname
+    when it contains a ``.`` or ``:``.  Otherwise the entire string is an
+    image path (e.g. ``library/nginx``).
+
+    Examples::
+
+        _strip_registry_prefix("ghcr.io/onetimesecret/onetimesecret")
+        # -> "onetimesecret/onetimesecret"
+
+        _strip_registry_prefix("registry:5000/org/app")
+        # -> "org/app"
+
+        _strip_registry_prefix("onetimesecret/onetimesecret")
+        # -> "onetimesecret/onetimesecret"  (no registry to strip)
+
+        _strip_registry_prefix("myapp")
+        # -> "myapp"
+    """
+    slash = image.find("/")
+    if slash == -1:
+        return image
+    first_component = image[:slash]
+    if "." in first_component or ":" in first_component:
+        return image[slash + 1 :]
+    return image
+
+
 # Session-scoped SSH connection cache: hostname -> paramiko.SSHClient.
 # Avoids creating a new connection per get_executor() call within one CLI
 # invocation.  Connections are closed automatically at interpreter exit.
@@ -283,8 +313,8 @@ class Config:
         """Image path for private registry (requires OTS_REGISTRY env var)."""
         if not self.registry:
             return None
-        image_basename = self.image.split("/")[-1]
-        return f"{self.registry}/{image_basename}"
+        image_path = _strip_registry_prefix(self.image)
+        return f"{self.registry}/{image_path}"
 
     @property
     def private_image_with_tag(self) -> str | None:
@@ -554,8 +584,8 @@ class Config:
         """
         image, tag = self.resolve_image_tag(executor=executor)
         if self.registry:
-            image_basename = image.split("/")[-1]
-            image = f"{self.registry}/{image_basename}"
+            image_path = _strip_registry_prefix(image)
+            image = f"{self.registry}/{image_path}"
         return f"{image}:{tag}"
 
     def podman_auth_args(self, *, executor: Executor | None = None) -> list[str]:
