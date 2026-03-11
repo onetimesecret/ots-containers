@@ -33,6 +33,10 @@ class TestConfigTransformCommand:
             "ghcr.io/onetimesecret/onetimesecret",
             "current",
         )
+        mock_config.resolved_image_with_tag.return_value = (
+            "ghcr.io/onetimesecret/onetimesecret:current"
+        )
+        mock_config.podman_auth_args.return_value = []
         mock_config.config_dir = tmp_path / "etc"
         mock_config.config_dir.mkdir()
         (mock_config.config_dir / "config.yaml").write_text("key: value\n")
@@ -117,6 +121,10 @@ class TestConfigTransformCommand:
             "ghcr.io/onetimesecret/onetimesecret",
             "current",
         )
+        mock_config.resolved_image_with_tag.return_value = (
+            "ghcr.io/onetimesecret/onetimesecret:current"
+        )
+        mock_config.podman_auth_args.return_value = []
         mock_config.config_dir = tmp_path / "etc"
         mock_config.config_dir.mkdir()
         (mock_config.config_dir / "config.yaml").write_text("key: value\n")
@@ -157,6 +165,10 @@ class TestConfigTransformCommand:
             "ghcr.io/onetimesecret/onetimesecret",
             "current",
         )
+        mock_config.resolved_image_with_tag.return_value = (
+            "ghcr.io/onetimesecret/onetimesecret:current"
+        )
+        mock_config.podman_auth_args.return_value = []
         mock_config.config_dir = tmp_path / "etc"
         mock_config.config_dir.mkdir()
         (mock_config.config_dir / "config.yaml").write_text("key: value\n")
@@ -201,6 +213,10 @@ class TestConfigTransformCommand:
             "ghcr.io/onetimesecret/onetimesecret",
             "current",
         )
+        mock_config.resolved_image_with_tag.return_value = (
+            "ghcr.io/onetimesecret/onetimesecret:current"
+        )
+        mock_config.podman_auth_args.return_value = []
         mock_config.config_dir = tmp_path / "etc"
         mock_config.config_dir.mkdir()
         (mock_config.config_dir / "config.yaml").write_text("key: value\n")
@@ -250,6 +266,10 @@ class TestConfigTransformCommand:
             "ghcr.io/onetimesecret/onetimesecret",
             "current",
         )
+        mock_config.resolved_image_with_tag.return_value = (
+            "ghcr.io/onetimesecret/onetimesecret:current"
+        )
+        mock_config.podman_auth_args.return_value = []
         mock_config.config_dir = tmp_path / "etc"
         mock_config.config_dir.mkdir()
         (mock_config.config_dir / "config.yaml").write_text("key: old_value\n")
@@ -295,6 +315,10 @@ class TestConfigTransformCommand:
             "ghcr.io/onetimesecret/onetimesecret",
             "current",
         )
+        mock_config.resolved_image_with_tag.return_value = (
+            "ghcr.io/onetimesecret/onetimesecret:current"
+        )
+        mock_config.podman_auth_args.return_value = []
         mock_config.config_dir = tmp_path / "etc"
         mock_config.config_dir.mkdir()
         config_file = mock_config.config_dir / "config.yaml"
@@ -338,6 +362,10 @@ class TestConfigTransformCommand:
             "ghcr.io/onetimesecret/onetimesecret",
             "current",
         )
+        mock_config.resolved_image_with_tag.return_value = (
+            "ghcr.io/onetimesecret/onetimesecret:current"
+        )
+        mock_config.podman_auth_args.return_value = []
         mock_config.config_dir = tmp_path / "etc"
         mock_config.config_dir.mkdir()
         config_file = mock_config.config_dir / "config.yaml"
@@ -379,6 +407,10 @@ class TestConfigTransformCommand:
             "ghcr.io/onetimesecret/onetimesecret",
             "current",
         )
+        mock_config.resolved_image_with_tag.return_value = (
+            "ghcr.io/onetimesecret/onetimesecret:current"
+        )
+        mock_config.podman_auth_args.return_value = []
         mock_config.config_dir = tmp_path / "etc"
         mock_config.config_dir.mkdir()
         config_file = mock_config.config_dir / "config.yaml"
@@ -422,6 +454,10 @@ class TestConfigTransformCommand:
             "ghcr.io/onetimesecret/onetimesecret",
             "current",
         )
+        mock_config.resolved_image_with_tag.return_value = (
+            "ghcr.io/onetimesecret/onetimesecret:current"
+        )
+        mock_config.podman_auth_args.return_value = []
         mock_config.config_dir = tmp_path / "etc"
         mock_config.config_dir.mkdir()
         (mock_config.config_dir / "config.yaml").write_text("key: value\n")
@@ -464,6 +500,10 @@ class TestConfigTransformCommand:
             "ghcr.io/onetimesecret/onetimesecret",
             "current",
         )
+        mock_config.resolved_image_with_tag.return_value = (
+            "ghcr.io/onetimesecret/onetimesecret:current"
+        )
+        mock_config.podman_auth_args.return_value = []
         mock_config.config_dir = tmp_path / "etc"
         mock_config.config_dir.mkdir()
         (mock_config.config_dir / "config.yaml").write_text("key: value\n")
@@ -508,6 +548,10 @@ class TestConfigTransformCommand:
             "ghcr.io/onetimesecret/onetimesecret",
             "current",
         )
+        mock_config.resolved_image_with_tag.return_value = (
+            "ghcr.io/onetimesecret/onetimesecret:current"
+        )
+        mock_config.podman_auth_args.return_value = []
         mock_config.config_dir = tmp_path / "etc"
         mock_config.config_dir.mkdir()
         (mock_config.config_dir / "auth.yaml").write_text("auth: config\n")
@@ -553,6 +597,10 @@ class TestConfigTransformCommand:
             "ghcr.io/onetimesecret/onetimesecret",
             "current",
         )
+        mock_config.resolved_image_with_tag.return_value = (
+            "ghcr.io/onetimesecret/onetimesecret:current"
+        )
+        mock_config.podman_auth_args.return_value = []
         mock_config.config_dir = tmp_path / "etc"
         mock_config.config_dir.mkdir()
         (mock_config.config_dir / "config.yaml").write_text("key: value\n")
@@ -610,6 +658,10 @@ class TestConfigTransformCommand:
             "ghcr.io/onetimesecret/onetimesecret",
             "current",
         )
+        mock_config.resolved_image_with_tag.return_value = (
+            "ghcr.io/onetimesecret/onetimesecret:current"
+        )
+        mock_config.podman_auth_args.return_value = []
         mock_config.config_dir = tmp_path / "etc"
         mock_config.config_dir.mkdir()
         config_file = mock_config.config_dir / "config.yaml"
@@ -698,6 +750,10 @@ class TestConfigTransformRemote:
             "ghcr.io/onetimesecret/onetimesecret",
             "current",
         )
+        mock_config.resolved_image_with_tag.return_value = (
+            "ghcr.io/onetimesecret/onetimesecret:current"
+        )
+        mock_config.podman_auth_args.return_value = []
         mock_config.config_dir = tmp_path / "etc"
         mock_config.config_dir.mkdir()
         mocker.patch("rots.commands.instance.app.Config", return_value=mock_config)
@@ -727,6 +783,8 @@ class TestConfigTransformRemote:
         mock_config.tag = "current"
         mock_config.image = "ghcr.io/test/img"
         mock_config.resolve_image_tag.return_value = ("ghcr.io/test/img", "current")
+        mock_config.resolved_image_with_tag.return_value = "ghcr.io/test/img:current"
+        mock_config.podman_auth_args.return_value = []
         mock_config.config_dir = tmp_path / "etc"
         mock_config.config_dir.mkdir()
         mocker.patch("rots.commands.instance.app.Config", return_value=mock_config)
@@ -793,6 +851,8 @@ class TestConfigTransformRemote:
         mock_config.tag = "current"
         mock_config.image = "ghcr.io/test/img"
         mock_config.resolve_image_tag.return_value = ("ghcr.io/test/img", "current")
+        mock_config.resolved_image_with_tag.return_value = "ghcr.io/test/img:current"
+        mock_config.podman_auth_args.return_value = []
         mock_config.config_dir = tmp_path / "etc"
         mock_config.config_dir.mkdir()
         mocker.patch("rots.commands.instance.app.Config", return_value=mock_config)
@@ -845,6 +905,8 @@ class TestConfigTransformPositionalReference:
         mock_config.tag = "current"
         mock_config.image = "ghcr.io/onetimesecret/onetimesecret"
         mock_config.resolve_image_tag.return_value = ("custom/image", "v2.0")
+        mock_config.resolved_image_with_tag.return_value = "custom/image:v2.0"
+        mock_config.podman_auth_args.return_value = []
         mock_config.config_dir = tmp_path / "etc"
         mock_config.config_dir.mkdir()
         (mock_config.config_dir / "config.yaml").write_text("key: value\n")
@@ -864,6 +926,8 @@ class TestConfigTransformPositionalReference:
             new_image = kwargs.get("image", obj.image)
             new_tag = kwargs.get("tag", obj.tag)
             obj.resolve_image_tag.return_value = (new_image, new_tag)
+            obj.resolved_image_with_tag.return_value = f"{new_image}:{new_tag}"
+            obj.podman_auth_args.return_value = []
             return obj
 
         mocker.patch(
@@ -896,6 +960,8 @@ class TestConfigTransformPositionalReference:
         mock_config.tag = "current"
         mock_config.image = "ghcr.io/onetimesecret/onetimesecret"
         mock_config.resolve_image_tag.return_value = ("img", "ref-tag")
+        mock_config.resolved_image_with_tag.return_value = "img:ref-tag"
+        mock_config.podman_auth_args.return_value = []
         mock_config.config_dir = tmp_path / "etc"
         mock_config.config_dir.mkdir()
         (mock_config.config_dir / "config.yaml").write_text("key: value\n")
@@ -914,6 +980,8 @@ class TestConfigTransformPositionalReference:
             new_image = kwargs.get("image", obj.image)
             new_tag = kwargs.get("tag", obj.tag)
             obj.resolve_image_tag.return_value = (new_image, new_tag)
+            obj.resolved_image_with_tag.return_value = f"{new_image}:{new_tag}"
+            obj.podman_auth_args.return_value = []
             return obj
 
         mocker.patch(
@@ -951,6 +1019,10 @@ class TestConfigTransformPositionalReference:
             "ghcr.io/onetimesecret/onetimesecret",
             "current",
         )
+        mock_config.resolved_image_with_tag.return_value = (
+            "ghcr.io/onetimesecret/onetimesecret:current"
+        )
+        mock_config.podman_auth_args.return_value = []
         mock_config.config_dir = tmp_path / "etc"
         mock_config.config_dir.mkdir()
         (mock_config.config_dir / "config.yaml").write_text("key: value\n")

@@ -140,6 +140,8 @@ class TestRunCommand:
         mock_config = mocker.MagicMock()
         mock_config.tag = "v0.23.0"  # Default uses local image with cfg.tag
         mock_config.resolve_image_tag.return_value = ("onetimesecret", "v0.23.0")
+        mock_config.resolved_image_with_tag.return_value = "onetimesecret:v0.23.0"
+        mock_config.podman_auth_args.return_value = []
         mock_config.config_dir = tmp_path / "etc"
         mock_config.config_dir.mkdir()
         mock_config.registry = None
@@ -179,6 +181,8 @@ class TestRunCommand:
 
         mock_config = mocker.MagicMock()
         mock_config.resolve_image_tag.return_value = ("onetimesecret", "latest")
+        mock_config.resolved_image_with_tag.return_value = "onetimesecret:latest"
+        mock_config.podman_auth_args.return_value = []
         mock_config.config_dir = tmp_path / "etc"
         mock_config.config_dir.mkdir()
         mock_config.existing_config_files = []
@@ -228,6 +232,8 @@ class TestRunCommand:
 
         mock_config = mocker.MagicMock()
         mock_config.resolve_image_tag.return_value = ("onetimesecret", "latest")
+        mock_config.resolved_image_with_tag.return_value = "onetimesecret:latest"
+        mock_config.podman_auth_args.return_value = []
         mock_config.get_executor.return_value = mock_executor
         mocker.patch("rots.commands.instance.app.Config", return_value=mock_config)
 
@@ -506,8 +512,8 @@ class TestExecCommand:
         mock_ex.run_interactive.assert_called_once()
         call_args = mock_ex.run_interactive.call_args[0][0]
         assert call_args[:3] == ["podman", "exec", "-it"]
-        # Container name uses -- as separator: systemd-onetime-web--7043
-        assert "systemd-onetime-web--7043" in call_args
+        # Container name matches unit name via ContainerName= in quadlet
+        assert "onetime-web@7043" in call_args
         assert "/bin/bash" in call_args
 
 
@@ -2249,6 +2255,10 @@ class TestRunCommandExists:
             "ghcr.io/onetimesecret/onetimesecret",
             "v0.23.0",
         )
+        mock_config.resolved_image_with_tag.return_value = (
+            "ghcr.io/onetimesecret/onetimesecret:v0.23.0"
+        )
+        mock_config.podman_auth_args.return_value = []
         mock_config.get_executor.return_value = mock_executor
         mocker.patch("rots.commands.instance.app.Config", return_value=mock_config)
         mocker.patch(
@@ -2279,6 +2289,8 @@ class TestRunCommandExists:
         mock_config.registry = None
         mock_config.existing_config_files = []
         mock_config.resolve_image_tag.return_value = (mock_config.image, mock_config.tag)
+        mock_config.resolved_image_with_tag.return_value = f"{mock_config.image}:{mock_config.tag}"
+        mock_config.podman_auth_args.return_value = []
         mock_config.get_executor.return_value = mock_executor
         mocker.patch("rots.commands.instance.app.Config", return_value=mock_config)
         mocker.patch(
@@ -2309,6 +2321,8 @@ class TestRunCommandExists:
         mock_config.registry = None
         mock_config.existing_config_files = []
         mock_config.resolve_image_tag.return_value = (mock_config.image, mock_config.tag)
+        mock_config.resolved_image_with_tag.return_value = f"{mock_config.image}:{mock_config.tag}"
+        mock_config.podman_auth_args.return_value = []
         mock_config.get_executor.return_value = mock_executor
         mocker.patch("rots.commands.instance.app.Config", return_value=mock_config)
         mocker.patch(
@@ -2332,6 +2346,8 @@ class TestRunCommandExists:
 
         cfg = Config()
         cfg.resolve_image_tag = Mock(return_value=(cfg.image, "v0.19.0"))
+        cfg.resolved_image_with_tag = Mock(return_value=f"{cfg.image}:v0.19.0")
+        cfg.podman_auth_args = Mock(return_value=[])
         cfg.get_executor = Mock(return_value=mock_executor)
         mocker.patch("rots.commands.instance.app.Config", lambda: cfg)
         mocker.patch(
@@ -2346,6 +2362,8 @@ class TestRunCommandExists:
             new_image = kwargs.get("image", obj.image)
             new_tag = kwargs.get("tag", obj.tag)
             obj.resolve_image_tag = Mock(return_value=(new_image, new_tag))
+            obj.resolved_image_with_tag = Mock(return_value=f"{new_image}:{new_tag}")
+            obj.podman_auth_args = Mock(return_value=[])
             obj.get_executor = Mock(return_value=mock_executor)
             return obj
 
@@ -2375,6 +2393,10 @@ class TestRunCommandExists:
             "ghcr.io/onetimesecret/onetimesecret",
             "v0.23.0",
         )
+        mock_config.resolved_image_with_tag.return_value = (
+            "ghcr.io/onetimesecret/onetimesecret:v0.23.0"
+        )
+        mock_config.podman_auth_args.return_value = []
         mock_config.get_executor.return_value = mock_executor
         mocker.patch("rots.commands.instance.app.Config", return_value=mock_config)
         mocker.patch(
@@ -2384,7 +2406,7 @@ class TestRunCommandExists:
 
         instance.run(port=7143, quiet=True)
 
-        mock_config.resolve_image_tag.assert_called_once()
+        mock_config.resolved_image_with_tag.assert_called_once()
         cmd = mock_executor.run_stream.call_args.args[0]
         full_image = cmd[-1]
         assert "v0.23.0" in full_image
@@ -2400,6 +2422,8 @@ class TestRunCommandExists:
         mock_config.registry = None
         mock_config.existing_config_files = []
         mock_config.resolve_image_tag.return_value = (mock_config.image, mock_config.tag)
+        mock_config.resolved_image_with_tag.return_value = f"{mock_config.image}:{mock_config.tag}"
+        mock_config.podman_auth_args.return_value = []
         mock_config.get_executor.return_value = mock_executor
         mocker.patch("rots.commands.instance.app.Config", return_value=mock_config)
         mocker.patch(
@@ -2423,6 +2447,8 @@ class TestRunCommandExists:
         mock_config.registry = None
         mock_config.existing_config_files = []
         mock_config.resolve_image_tag.return_value = (mock_config.image, mock_config.tag)
+        mock_config.resolved_image_with_tag.return_value = f"{mock_config.image}:{mock_config.tag}"
+        mock_config.podman_auth_args.return_value = []
         mock_config.get_executor.return_value = mock_executor
         mocker.patch("rots.commands.instance.app.Config", return_value=mock_config)
         mocker.patch(
@@ -2448,6 +2474,8 @@ class TestRunCommandExists:
         mock_config.registry = None
         mock_config.existing_config_files = []
         mock_config.resolve_image_tag.return_value = (mock_config.image, mock_config.tag)
+        mock_config.resolved_image_with_tag.return_value = f"{mock_config.image}:{mock_config.tag}"
+        mock_config.podman_auth_args.return_value = []
         mock_config.get_executor.return_value = mock_executor
         mocker.patch("rots.commands.instance.app.Config", return_value=mock_config)
         mocker.patch(
@@ -3063,8 +3091,7 @@ class TestRemoteExecutorPropagation:
             elif "stats" in cmd:
                 result.returncode = 0
                 result.stdout = (
-                    '[{"name":"systemd-onetime-web--7043",'
-                    '"cpu_percent":"0.5%","mem_usage":"100MiB"}]'
+                    '[{"name":"onetime-web@7043","cpu_percent":"0.5%","mem_usage":"100MiB"}]'
                 )
                 result.stderr = ""
             else:
@@ -3095,10 +3122,15 @@ class TestStreamingCommands:
         mock_config.image = "ghcr.io/onetimesecret/onetimesecret"
         mock_config.existing_config_files = []
         mock_config.has_custom_config = False
+        mock_config.registry = None
         mock_config.resolve_image_tag.return_value = (
             "ghcr.io/onetimesecret/onetimesecret",
             "v0.24.0",
         )
+        mock_config.resolved_image_with_tag.return_value = (
+            "ghcr.io/onetimesecret/onetimesecret:v0.24.0"
+        )
+        mock_config.podman_auth_args.return_value = []
         mocker.patch("rots.commands.instance.app.Config", return_value=mock_config)
 
         mock_ex = mocker.MagicMock()

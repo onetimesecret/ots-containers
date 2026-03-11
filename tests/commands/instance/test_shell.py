@@ -306,7 +306,7 @@ class TestShellImageReference:
 
         cmd = _get_cmd_from_executor(mock_executor, interactive=True)
         assert "ghcr.io/onetimesecret/onetimesecret:v0.23.0" in cmd
-        mock_config.resolve_image_tag.assert_called_once()
+        mock_config.resolve_image_tag.assert_called()
 
     def test_shell_tag_flag_bypasses_resolve(self, mocker, tmp_path):
         """shell --tag sets the tag via replace; resolve_image_tag passes it through."""

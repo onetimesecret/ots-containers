@@ -71,7 +71,7 @@ WEB_TEMPLATE = """\
 # TROUBLESHOOTING:
 #   List secrets:  podman secret ls
 #   Inspect:       podman secret inspect ots_hmac_secret
-#   Container:     podman exec -it systemd-onetime-web_7043 /bin/sh
+#   Container:     podman exec -it onetime-web@7043 /bin/sh
 
 [Unit]
 Description=OneTimeSecret Web Container %i
@@ -89,8 +89,9 @@ RestartSec=5
 TimeoutStopSec=30
 {resource_limits_section}
 [Container]
+ContainerName=onetime-web@%i
 Image={image}
-Network=host
+{auth_section}Network=host
 
 # Syslog tag for per-instance log filtering: journalctl -t onetime-web-7043 -f
 PodmanArgs=--log-opt tag=onetime-web-%i
@@ -341,8 +342,15 @@ def _build_fmt_vars(
     secrets_section = get_secrets_section(env_file_path, force=force, executor=executor)
     config_volumes_section = get_config_volumes_section(cfg, executor=executor)
 
+    if cfg.registry:
+        auth_file = cfg.get_registry_auth_file(executor=executor)
+        auth_section = f"AuthFile={auth_file}\n"
+    else:
+        auth_section = ""
+
     fmt_vars: dict = {
         "image": cfg.resolved_image_with_tag(executor=executor),
+        "auth_section": auth_section,
         "config_dir": cfg.config_dir,
         "secrets_section": secrets_section,
         "config_volumes_section": config_volumes_section,
@@ -508,7 +516,7 @@ WORKER_TEMPLATE = """\
 # TROUBLESHOOTING:
 #   List secrets:  podman secret ls
 #   Inspect:       podman secret inspect ots_hmac_secret
-#   Container:     podman exec -it systemd-onetime-worker@1 /bin/sh
+#   Container:     podman exec -it onetime-worker@1 /bin/sh
 
 [Unit]
 Description=OneTimeSecret Worker %i
@@ -522,8 +530,9 @@ RestartSec=5
 TimeoutStopSec=90
 {resource_limits_section}
 [Container]
+ContainerName=onetime-worker@%i
 Image={image}
-Network=host
+{auth_section}Network=host
 
 # Syslog tag for per-instance log filtering: journalctl -t onetime-worker-1 -f
 PodmanArgs=--log-opt tag=onetime-worker-%i
@@ -617,7 +626,7 @@ SCHEDULER_TEMPLATE = """\
 # TROUBLESHOOTING:
 #   List secrets:  podman secret ls
 #   Inspect:       podman secret inspect ots_hmac_secret
-#   Container:     podman exec -it systemd-onetime-scheduler_main /bin/sh
+#   Container:     podman exec -it onetime-scheduler@main /bin/sh
 
 [Unit]
 Description=OneTimeSecret Scheduler %i
@@ -631,8 +640,9 @@ RestartSec=5
 TimeoutStopSec=60
 {resource_limits_section}
 [Container]
+ContainerName=onetime-scheduler@%i
 Image={image}
-Network=host
+{auth_section}Network=host
 
 # Syslog tag for per-instance log filtering: journalctl -t onetime-scheduler-main -f
 PodmanArgs=--log-opt tag=onetime-scheduler-%i

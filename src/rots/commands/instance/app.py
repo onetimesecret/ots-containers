@@ -214,9 +214,9 @@ def ps(
     p = Podman(executor=ex)
 
     if itype is not None:
-        name_filter = f"name=systemd-onetime-{itype.value}"
+        name_filter = f"name=onetime-{itype.value}@"
     else:
-        name_filter = "name=systemd-onetime"
+        name_filter = "name=onetime-"
 
     p.ps(
         filter=name_filter,
@@ -312,13 +312,17 @@ def run(
     ref_image, ref_tag = parse_image_reference(reference) if reference else (None, None)
     override_tag = ref_tag or tag
     if ref_image or override_tag:
-        cfg = dataclasses.replace(cfg, image=ref_image or cfg.image, tag=override_tag or cfg.tag)
+        cfg = dataclasses.replace(
+            cfg,
+            image=ref_image or cfg.image,
+            tag=override_tag or cfg.tag,
+            _image_explicit=bool(ref_image) or cfg._image_explicit,
+        )
 
     ex = cfg.get_executor(host=context.host_var.get(None))
 
     # Resolve image/tag (handles @current/@rollback aliases)
-    image, resolved_tag = cfg.resolve_image_tag(executor=ex)
-    full_image = f"{image}:{resolved_tag}"
+    full_image = cfg.resolved_image_with_tag(executor=ex)
 
     # Container name
     container_name = name or f"onetimesecret-{port}"
@@ -377,9 +381,8 @@ def run(
             cmd.extend(["-v", f"{f}:/app/etc/{f.name}:ro"])
         cmd.extend(["-v", "static_assets:/app/public:ro"])
 
-        # Auth file for private registry
-        if cfg.registry:
-            cmd.extend(["--authfile", str(cfg.registry_auth_file)])
+    # Auth file for private registry (outside production block — needed for pull)
+    cmd.extend(cfg.podman_auth_args(executor=ex))
 
     # Image
     cmd.append(full_image)
@@ -514,7 +517,12 @@ def deploy(
     ref_image, ref_tag = parse_image_reference(reference) if reference else (None, None)
     override_tag = ref_tag or tag
     if ref_image or override_tag:
-        cfg = dataclasses.replace(cfg, image=ref_image or cfg.image, tag=override_tag or cfg.tag)
+        cfg = dataclasses.replace(
+            cfg,
+            image=ref_image or cfg.image,
+            tag=override_tag or cfg.tag,
+            _image_explicit=bool(ref_image) or cfg._image_explicit,
+        )
 
     ex = cfg.get_executor(host=context.host_var.get(None))
 
@@ -523,6 +531,8 @@ def deploy(
     apply_quiet(quiet)
     if not json_output:
         logger.info("Image: %s:%s", image, resolved_tag)
+        if cfg.registry:
+            logger.info("Registry: %s", cfg.registry)
         config_files = cfg.get_existing_config_files(executor=ex)
         if config_files:
             mounted = [f.name for f in config_files]
@@ -839,7 +849,12 @@ def redeploy(
     ref_image, ref_tag = parse_image_reference(reference) if reference else (None, None)
     override_tag = ref_tag or tag
     if ref_image or override_tag:
-        cfg = dataclasses.replace(cfg, image=ref_image or cfg.image, tag=override_tag or cfg.tag)
+        cfg = dataclasses.replace(
+            cfg,
+            image=ref_image or cfg.image,
+            tag=override_tag or cfg.tag,
+            _image_explicit=bool(ref_image) or cfg._image_explicit,
+        )
 
     ex = cfg.get_executor(host=context.host_var.get(None))
     instances = resolve_identifiers(identifiers, itype, running_only=True, executor=ex)
@@ -859,6 +874,8 @@ def redeploy(
     image, tag = cfg.resolve_image_tag(executor=ex)
     if not json_output:
         logger.info("Image: %s:%s", image, tag)
+        if cfg.registry:
+            logger.info("Registry: %s", cfg.registry)
         config_files = cfg.get_existing_config_files(executor=ex)
         if config_files:
             mounted = [f.name for f in config_files]
@@ -1740,26 +1757,27 @@ def shell(
     ref_image, ref_tag = parse_image_reference(reference) if reference else (None, None)
     override_tag = ref_tag or tag
     if ref_image or override_tag:
-        cfg = dataclasses.replace(cfg, image=ref_image or cfg.image, tag=override_tag or cfg.tag)
+        cfg = dataclasses.replace(
+            cfg,
+            image=ref_image or cfg.image,
+            tag=override_tag or cfg.tag,
+            _image_explicit=bool(ref_image) or cfg._image_explicit,
+        )
 
     # Obtain executor early for remote env file checks
     from rots.systemd import _get_executor
 
     ex = _get_executor(cfg.get_executor(host=context.host_var.get(None)))
 
-    # Resolve image/tag (handles @current/@rollback aliases)
-    image, resolved_tag = cfg.resolve_image_tag(executor=ex)
+    # Check for unresolved sentinel tags before proceeding
+    _canonical_image, resolved_tag = cfg.resolve_image_tag(executor=ex)
     if resolved_tag.startswith("@"):
         logger.error("tag '%s' is a sentinel (no deploy recorded).", resolved_tag)
         logger.error("Use --tag to specify an image tag, e.g.: rots instance shell --tag v0.24.0")
         raise SystemExit(1)
 
-    # Use private registry when OTS_REGISTRY is set
-    if cfg.registry:
-        image_basename = image.split("/")[-1]
-        image = f"{cfg.registry}/{image_basename}"
-
-    full_image = f"{image}:{resolved_tag}"
+    # Operational image:tag with registry prefix applied when OTS_REGISTRY is set
+    full_image = cfg.resolved_image_with_tag(executor=ex)
 
     # Build podman run command
     cmd = ["podman", "run", "--rm"]
@@ -1806,6 +1824,9 @@ def shell(
     for f in cfg.get_existing_config_files(executor=ex):
         resolved = f.resolve()  # symlink resolution for macOS podman VM
         cmd.extend(["-v", f"{resolved}:/app/etc/{f.name}:ro"])
+
+    # Auth file for private registry
+    cmd.extend(cfg.podman_auth_args(executor=ex))
 
     # Image
     cmd.append(full_image)
@@ -1907,7 +1928,12 @@ def config_transform(
     ref_image, ref_tag = parse_image_reference(reference) if reference else (None, None)
     override_tag = ref_tag or tag
     if ref_image or override_tag:
-        cfg = dataclasses.replace(cfg, image=ref_image or cfg.image, tag=override_tag or cfg.tag)
+        cfg = dataclasses.replace(
+            cfg,
+            image=ref_image or cfg.image,
+            tag=override_tag or cfg.tag,
+            _image_explicit=bool(ref_image) or cfg._image_explicit,
+        )
 
     ex = cfg.get_executor(host=context.host_var.get(None))
     p = Podman(executor=ex)
@@ -1928,9 +1954,8 @@ def config_transform(
     elif not config_path.exists():
         raise SystemExit(f"Config file not found: {config_path}")
 
-    # Resolve image/tag (handles @current/@rollback aliases)
-    image, resolved_tag = cfg.resolve_image_tag(executor=ex)
-    full_image = f"{image}:{resolved_tag}"
+    # Resolve image/tag (handles @current/@rollback aliases, applies registry prefix)
+    full_image = cfg.resolved_image_with_tag(executor=ex)
 
     # Create temporary volume with timestamp
     timestamp = int(time.time())
@@ -1973,6 +1998,7 @@ def config_transform(
         # Resolve symlinks for podman VM compatibility (macOS, local only)
         config_dir_str = str(cfg.config_dir.resolve()) if not is_remote else str(cfg.config_dir)
         cmd.extend(["-v", f"{config_dir_str}:/app/etc:ro"])
+        cmd.extend(cfg.podman_auth_args(executor=ex))
         cmd.append(full_image)
         cmd.extend(["/bin/bash", "-c", command])
 
