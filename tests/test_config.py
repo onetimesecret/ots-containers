@@ -678,7 +678,7 @@ class TestConfigPrivateImage:
         from rots.config import Config
 
         cfg = Config()
-        expected = "registry.example.com/myorg/onetimesecret/onetimesecret:@current"
+        expected = "registry.example.com/myorg/onetimesecret/onetimesecret@current"
         assert cfg.private_image_with_tag == expected
 
     def test_private_image_custom_image_strips_registry(self, monkeypatch):
@@ -1791,3 +1791,157 @@ class TestPodmanAuthArgs:
         assert len(args) == 2
         assert args[0] == "--authfile"
         assert isinstance(args[1], str)
+
+
+class TestJoinImageTag:
+    """Test join_image_tag() utility function."""
+
+    def test_named_tag(self):
+        """Named tag should use colon separator."""
+        from rots.config import join_image_tag
+
+        assert join_image_tag("ghcr.io/org/image", "v1.0") == "ghcr.io/org/image:v1.0"
+
+    def test_digest_tag(self):
+        """Digest tag (starting with @) should use @ separator, not colon."""
+        from rots.config import join_image_tag
+
+        assert (
+            join_image_tag("ghcr.io/org/image", "@sha256:abc123")
+            == "ghcr.io/org/image@sha256:abc123"
+        )
+
+    def test_simple_image_latest(self):
+        """Simple image name with latest tag."""
+        from rots.config import join_image_tag
+
+        assert join_image_tag("myapp", "latest") == "myapp:latest"
+
+    def test_sentinel_current(self):
+        """Sentinel @current should use @ separator."""
+        from rots.config import join_image_tag
+
+        assert join_image_tag("myapp", "@current") == "myapp@current"
+
+    def test_sentinel_rollback(self):
+        """Sentinel @rollback should use @ separator."""
+        from rots.config import join_image_tag
+
+        assert join_image_tag("myapp", "@rollback") == "myapp@rollback"
+
+
+class TestValidateRejectsEmbeddedTag:
+    """Test that Config.validate() rejects IMAGE values with embedded tags."""
+
+    def test_rejects_image_with_tag(self, monkeypatch):
+        """IMAGE containing a tag after the last slash should be rejected."""
+        monkeypatch.delenv("IMAGE", raising=False)
+        monkeypatch.delenv("TAG", raising=False)
+        from rots.config import Config
+
+        with pytest.raises(ValueError, match="IMAGE should not include a tag"):
+            Config(image="ghcr.io/org/app:v1.0")
+
+    def test_accepts_registry_port_without_tag(self, monkeypatch):
+        """Registry port (colon before last slash) should be allowed."""
+        monkeypatch.delenv("IMAGE", raising=False)
+        monkeypatch.delenv("TAG", raising=False)
+        from rots.config import Config
+
+        cfg = Config(image="registry:5000/org/app")
+        cfg.validate()  # should not raise
+
+    def test_accepts_simple_image(self, monkeypatch):
+        """Simple image without slashes or colons should be allowed."""
+        monkeypatch.delenv("IMAGE", raising=False)
+        monkeypatch.delenv("TAG", raising=False)
+        from rots.config import Config
+
+        cfg = Config(image="onetimesecret/onetimesecret")
+        cfg.validate()  # should not raise
+
+    def test_rejects_image_with_latest_tag(self, monkeypatch):
+        """IMAGE with :latest should be rejected."""
+        monkeypatch.delenv("IMAGE", raising=False)
+        monkeypatch.delenv("TAG", raising=False)
+        from rots.config import Config
+
+        with pytest.raises(ValueError, match="IMAGE should not include a tag"):
+            Config(image="docker.io/org/app:latest")
+
+    def test_accepts_registry_port_only(self, monkeypatch):
+        """Image like registry:5000/image (colon before slash) should be allowed."""
+        monkeypatch.delenv("IMAGE", raising=False)
+        monkeypatch.delenv("TAG", raising=False)
+        from rots.config import Config
+
+        cfg = Config(image="registry:5000/image")
+        cfg.validate()  # should not raise
+
+    def test_rejects_bare_image_with_tag(self, monkeypatch):
+        """myapp:v1.0 (no slash) should be rejected."""
+        monkeypatch.delenv("IMAGE", raising=False)
+        monkeypatch.delenv("TAG", raising=False)
+        from rots.config import Config
+
+        with pytest.raises(ValueError, match="should not include a tag"):
+            Config(image="myapp:v1.0", tag="latest")
+
+
+class TestImageWithTagDigest:
+    """Test image_with_tag property handles digest tags correctly via join_image_tag."""
+
+    def test_image_with_tag_digest(self, monkeypatch):
+        """image_with_tag with a digest tag should use @ separator."""
+        monkeypatch.delenv("IMAGE", raising=False)
+        monkeypatch.delenv("TAG", raising=False)
+        from rots.config import Config
+
+        cfg = Config(tag="@sha256:abc123")
+        assert "@sha256:abc123" in cfg.image_with_tag
+        assert ":@sha256" not in cfg.image_with_tag
+
+    def test_image_with_tag_named(self, monkeypatch):
+        """image_with_tag with a named tag should use colon separator."""
+        monkeypatch.setenv("IMAGE", "myregistry/myimage")
+        monkeypatch.setenv("TAG", "v1.0")
+        from rots.config import Config
+
+        cfg = Config()
+        assert cfg.image_with_tag == "myregistry/myimage:v1.0"
+
+
+class TestResolvedImageWithTagDigest:
+    """Test resolved_image_with_tag() produces correct output for digest tags with registry."""
+
+    def test_digest_tag_with_registry(self, monkeypatch):
+        """With OTS_REGISTRY and digest tag, should use @ separator."""
+        monkeypatch.delenv("IMAGE", raising=False)
+        monkeypatch.setenv("TAG", "@sha256:deadbeef")
+        monkeypatch.setenv("OTS_REGISTRY", "registry.example.com")
+        from unittest.mock import patch
+
+        from rots.config import Config
+
+        cfg = Config()
+
+        with patch("rots.db.get_alias", return_value=None):
+            result = cfg.resolved_image_with_tag()
+            assert result == "registry.example.com/onetimesecret/onetimesecret@sha256:deadbeef"
+            assert ":@sha256" not in result
+
+    def test_digest_tag_without_registry(self, monkeypatch):
+        """Without registry and digest tag, should use @ separator."""
+        monkeypatch.delenv("IMAGE", raising=False)
+        monkeypatch.setenv("TAG", "@sha256:deadbeef")
+        monkeypatch.delenv("OTS_REGISTRY", raising=False)
+        from unittest.mock import patch
+
+        from rots.config import Config
+
+        cfg = Config()
+
+        with patch("rots.db.get_alias", return_value=None):
+            result = cfg.resolved_image_with_tag()
+            assert "onetimesecret@sha256:deadbeef" in result
+            assert ":@sha256" not in result

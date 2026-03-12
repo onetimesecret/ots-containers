@@ -69,6 +69,17 @@ SYSTEMD_UNIT_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._@:-]{0,255}$")
 REGISTRY_RE = re.compile(r"^(?!.*\.\.)[a-zA-Z0-9][a-zA-Z0-9._/:-]{0,254}$")
 
 
+def join_image_tag(image: str, tag: str) -> str:
+    """Join image and tag using OCI reference syntax.
+
+    Digest tags (starting with '@') use '@' separator;
+    named tags use ':' separator.
+    """
+    if tag.startswith("@"):
+        return f"{image}{tag}"
+    return f"{image}:{tag}"
+
+
 def _strip_registry_prefix(image: str) -> str:
     """Strip the registry hostname from an OCI image reference, keeping the path.
 
@@ -231,7 +242,7 @@ class Config:
 
     @property
     def image_with_tag(self) -> str:
-        return f"{self.image}:{self.tag}"
+        return join_image_tag(self.image, self.tag)
 
     @property
     def registry_auth_file(self) -> Path:
@@ -321,7 +332,7 @@ class Config:
         """Full image reference for private registry."""
         if not self.private_image:
             return None
-        return f"{self.private_image}:{self.tag}"
+        return join_image_tag(self.private_image, self.tag)
 
     @property
     def config_yaml(self) -> Path:
@@ -455,6 +466,14 @@ class Config:
                 "Image names must start with an alphanumeric character and contain "
                 "only alphanumerics, dots, hyphens, underscores, and forward slashes."
             )
+        # Check for embedded tag in image (e.g. IMAGE=ghcr.io/org/app:v1.0)
+        last_slash = self.image.rfind("/")
+        colon_after = self.image.rfind(":")
+        if colon_after != -1 and colon_after > last_slash:
+            raise ValueError(
+                f"IMAGE should not include a tag (got '{self.image}'). "
+                f"Set the tag separately via TAG env var or --tag flag."
+            )
         if self.memory_max and not MEMORY_MAX_RE.match(self.memory_max):
             raise ValueError(
                 f"Invalid MEMORY_MAX: {self.memory_max!r}. "
@@ -586,7 +605,7 @@ class Config:
         if self.registry:
             image_path = _strip_registry_prefix(image)
             image = f"{self.registry}/{image_path}"
-        return f"{image}:{tag}"
+        return join_image_tag(image, tag)
 
     def podman_auth_args(self, *, executor: Executor | None = None) -> list[str]:
         """Return ``--authfile`` arguments when a private registry is configured.

@@ -11,7 +11,7 @@ from typing import Annotated
 import cyclopts
 
 from rots import assets, context, db, quadlet, systemd
-from rots.config import Config, parse_image_reference
+from rots.config import Config, join_image_tag, parse_image_reference
 from rots.podman import Podman
 
 from ..common import (
@@ -174,7 +174,7 @@ def _list_instances_impl(
                 )
             if deployments:
                 dep = deployments[0]
-                image_tag = f"{dep.image}:{dep.tag}"
+                image_tag = join_image_tag(dep.image, dep.tag)
                 # Format timestamp - strip microseconds and 'T'
                 deployed = dep.timestamp.split(".")[0].replace("T", " ")
                 action = dep.action
@@ -527,7 +527,7 @@ def deploy(
     image, resolved_tag = cfg.resolve_image_tag(executor=ex)
     apply_quiet(quiet)
     if not json_output:
-        logger.info(f"Image: {image}:{resolved_tag}")
+        logger.info(f"Image: {join_image_tag(image, resolved_tag)}")
         if cfg.registry:
             logger.info(f"Registry: {cfg.registry}")
         config_files = cfg.get_existing_config_files(executor=ex)
@@ -867,7 +867,7 @@ def redeploy(
     # Resolve image/tag (handles CURRENT/ROLLBACK aliases)
     image, tag = cfg.resolve_image_tag(executor=ex)
     if not json_output:
-        logger.info(f"Image: {image}:{tag}")
+        logger.info(f"Image: {join_image_tag(image, tag)}")
         if cfg.registry:
             logger.info(f"Registry: {cfg.registry}")
         config_files = cfg.get_existing_config_files(executor=ex)
@@ -2340,10 +2340,10 @@ def rollback(
         if json_output:
             print(json_mod.dumps(result, indent=2))
         else:
-            logger.info(f"[dry-run] Would roll back from {current_image}:{current_tag}")
-            logger.info(
-                f"         to {rollback_image}:{rollback_tag} (last deployed: {rollback_ts})"
-            )
+            current_ref = join_image_tag(current_image, current_tag)
+            rollback_ref = join_image_tag(rollback_image, rollback_tag)
+            logger.info(f"[dry-run] Would roll back from {current_ref}")
+            logger.info(f"         to {rollback_ref} (last deployed: {rollback_ts})")
             if instances:
                 for inst_type_key, ids in instances.items():
                     logger.info(f"[dry-run] Would redeploy {inst_type_key.value}: {', '.join(ids)}")
@@ -2353,8 +2353,10 @@ def rollback(
 
     # Confirm unless --yes or --json
     if not yes and not json_output:
-        print(f"Rolling back from {current_image}:{current_tag}")
-        print(f"           to    {rollback_image}:{rollback_tag} (last deployed: {rollback_ts})")
+        current_ref = join_image_tag(current_image, current_tag)
+        rollback_ref = join_image_tag(rollback_image, rollback_tag)
+        print(f"Rolling back from {current_ref}")
+        print(f"           to    {rollback_ref} (last deployed: {rollback_ts})")
         response = input("Continue? [y/N] ")
         if response.lower() not in ("y", "yes"):
             print("Aborted")
@@ -2374,8 +2376,8 @@ def rollback(
 
     if not json_output:
         logger.info(
-            f"Aliases updated: CURRENT={new_image}:{new_tag},"
-            f" ROLLBACK={current_image}:{current_tag}"
+            f"Aliases updated: CURRENT={join_image_tag(new_image, new_tag)},"
+            f" ROLLBACK={join_image_tag(current_image, current_tag)}"
         )
 
     # Redeploy running instances with the rolled-back image/tag
