@@ -50,6 +50,21 @@ cd ots-containers
 pipx install .
 ```
 
+### From a git branch
+
+Install a specific branch, tag, or commit for testing:
+
+```bash
+# Install from branch
+pipx install --force git+https://github.com/onetimesecret/rots.git@feature/sidecar
+
+# Install from tag
+pipx install --force git+https://github.com/onetimesecret/rots.git@v0.6.0
+
+# Install from commit
+pipx install --force git+https://github.com/onetimesecret/rots.git@abc123f
+```
+
 ## Upgrading
 
 ```bash

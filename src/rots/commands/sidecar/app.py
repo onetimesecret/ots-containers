@@ -52,10 +52,10 @@ RestartSec=5
 Environment=PYTHONUNBUFFERED=1
 
 # Security hardening
-NoNewPrivileges=true
+NoNewPrivileges=yes
 ProtectSystem=strict
-ProtectHome=true
-PrivateTmp=true
+ProtectHome=no
+PrivateTmp=yes
 ReadWritePaths=/run /var/lib/onetimesecret /etc/onetimesecret
 
 [Install]
