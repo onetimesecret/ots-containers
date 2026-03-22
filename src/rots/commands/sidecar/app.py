@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import logging
 import os
+import shutil
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated
 
@@ -31,8 +32,9 @@ app = cyclopts.App(
 SIDECAR_UNIT = "onetime-sidecar.service"
 SIDECAR_SOCKET = Path("/run/onetime-sidecar.sock")
 SIDECAR_UNIT_PATH = Path("/etc/systemd/system/onetime-sidecar.service")
+DEFAULT_ROTS_PATH = "/usr/local/bin/rots"
 
-# Systemd unit template
+# Systemd unit template (use {rots_path} placeholder)
 SYSTEMD_UNIT_TEMPLATE = """\
 [Unit]
 Description=OneTimeSecret Sidecar Daemon
@@ -46,7 +48,7 @@ Type=simple
 # (ProtectSystem=strict makes /etc read-only unless path already exists)
 ExecStartPre=/usr/bin/mkdir -p /etc/onetimesecret /var/lib/onetimesecret
 
-ExecStart=/usr/local/bin/rots sidecar run
+ExecStart={rots_path} sidecar run
 Restart=always
 RestartSec=5
 Environment=PYTHONUNBUFFERED=1
@@ -61,6 +63,29 @@ ReadWritePaths=/run /var/lib/onetimesecret /etc/onetimesecret
 [Install]
 WantedBy=multi-user.target
 """
+
+
+def _resolve_rots_path(explicit_path: str | None = None) -> str:
+    """Resolve the rots binary path.
+
+    Priority: explicit flag > auto-detect via shutil.which > default fallback.
+
+    Args:
+        explicit_path: Explicitly provided path (from --rots-path flag).
+
+    Returns:
+        Resolved path to the rots binary.
+    """
+    if explicit_path:
+        return explicit_path
+
+    detected = shutil.which("rots")
+    if detected:
+        logger.debug("Auto-detected rots path: %s", detected)
+        return detected
+
+    logger.debug("Using default rots path: %s", DEFAULT_ROTS_PATH)
+    return DEFAULT_ROTS_PATH
 
 
 def _get_executor() -> Executor | None:
@@ -103,17 +128,34 @@ def install(
             help="Overwrite existing unit file",
         ),
     ] = False,
+    rots_path: Annotated[
+        str | None,
+        cyclopts.Parameter(
+            name="--rots-path",
+            help="Explicit path to rots binary (default: auto-detect or /usr/local/bin/rots)",
+        ),
+    ] = None,
 ):
     """Install the sidecar systemd unit.
 
     Writes the systemd unit file and enables the service.
     Does not start the service automatically.
 
+    The rots binary path in the unit file is determined by:
+    1. --rots-path flag (if provided)
+    2. Auto-detection via shutil.which("rots")
+    3. Default fallback: /usr/local/bin/rots
+
     Examples:
         rots sidecar install
         rots sidecar install --force
+        rots sidecar install --rots-path ~/.local/bin/rots
     """
     ex = _get_executor()
+
+    # Resolve rots path
+    resolved_rots_path = _resolve_rots_path(rots_path)
+    unit_content = SYSTEMD_UNIT_TEMPLATE.format(rots_path=resolved_rots_path)
 
     # Check if unit exists
     if ex is None:
@@ -129,8 +171,9 @@ def install(
 
     if dry_run:
         print(f"Would write: {SIDECAR_UNIT_PATH}")
+        print(f"Using rots path: {resolved_rots_path}")
         print("---")
-        print(SYSTEMD_UNIT_TEMPLATE)
+        print(unit_content)
         print("---")
         print("Would run: systemctl daemon-reload")
         print("Would run: systemctl enable onetime-sidecar.service")
@@ -143,7 +186,7 @@ def install(
         # Use sudo tee to write with elevated privileges
         proc = subprocess.run(
             ["sudo", "tee", str(SIDECAR_UNIT_PATH)],
-            input=SYSTEMD_UNIT_TEMPLATE,
+            input=unit_content,
             capture_output=True,
             text=True,
         )
@@ -154,13 +197,14 @@ def install(
         result = ex.run(
             ["sh", "-c", f"cat > {SIDECAR_UNIT_PATH}"],
             sudo=True,
-            input=SYSTEMD_UNIT_TEMPLATE,
+            input=unit_content,
             timeout=30,
         )
         if not result.ok:
             raise RuntimeError(f"Failed to write unit file: {result.stderr}")
 
     print(f"Wrote: {SIDECAR_UNIT_PATH}")
+    print(f"Using rots path: {resolved_rots_path}")
 
     # Reload systemd
     _run_systemctl("daemon-reload", executor=ex)
