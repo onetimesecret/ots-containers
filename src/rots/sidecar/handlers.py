@@ -426,18 +426,28 @@ def dispatch(command: str, payload: dict[str, Any]) -> HandlerResult:
     """Dispatch a command to its handler.
 
     Args:
-        command: Command name (e.g., "restart.web")
+        command: Command name (e.g., "restart.web" or "rots.env.process")
         payload: Command parameters
 
     Returns:
         Handler result dict
+
+    Commands starting with "rots." are routed to the generic CLI invoker,
+    allowing any rots subcommand to be executed (subject to allowlist).
     """
+    from .handlers_rots import invoke_rots, is_rots_command, list_allowed_commands
+
+    # Route rots.* commands to the CLI invoker
+    if is_rots_command(command):
+        return invoke_rots(command, payload)
+
+    # Built-in handlers
     handler = HANDLERS.get(command)
     if handler is None:
         return {
             "status": "error",
             "error": f"Unknown command: {command}",
-            "available_commands": list(HANDLERS.keys()),
+            "available_commands": list(HANDLERS.keys()) + list_allowed_commands(),
         }
 
     try:
