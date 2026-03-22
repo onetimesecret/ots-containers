@@ -25,8 +25,9 @@ import cyclopts
 
 from . import __version__
 from .commands import assets as assets_cmd
-from .commands import cloudinit, dns, env, host, image, init, instance, proxy, service
+from .commands import cloudinit, dns, env, host, image, init, instance, proxy, service, sidecar
 from .commands import db as db_cmd
+from .commands import self as self_cmd
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +49,8 @@ app.command(dns.app)
 app.command(cloudinit.app)
 app.command(env.app)
 app.command(db_cmd.app)
+app.command(sidecar.app)
+app.command(self_cmd.app)
 
 
 class _CLIFormatter(logging.Formatter):
