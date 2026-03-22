@@ -460,18 +460,34 @@ def send(
             help="Response timeout in seconds",
         ),
     ] = 30.0,
+    socket: Annotated[
+        bool,
+        cyclopts.Parameter(
+            name=["--socket", "-s"],
+            help="Send via Unix socket (default)",
+        ),
+    ] = False,
+    rabbitmq: Annotated[
+        bool,
+        cyclopts.Parameter(
+            name=["--rabbitmq", "-r"],
+            help="Send via RabbitMQ message queue",
+        ),
+    ] = False,
 ):
-    """Send a command to the sidecar via Unix socket.
+    """Send a command to the sidecar.
 
-    Useful for testing and debugging.
+    Specify transport with --socket (default) or --rabbitmq.
 
     Examples:
-        rots sidecar send health
-        rots sidecar send status
+        rots sidecar send health --socket
+        rots sidecar send status --rabbitmq
         rots sidecar send restart.web identifier=7043
     """
-    import json
-    import socket as sock
+
+    if socket and rabbitmq:
+        print("Error: Cannot specify both --socket and --rabbitmq")
+        raise SystemExit(1)
 
     # Parse args into payload
     payload: dict[str, str] = {}
@@ -482,21 +498,28 @@ def send(
         else:
             print(f"Warning: Ignoring invalid argument (no =): {arg}")
 
-    # Build message
+    if rabbitmq:
+        _send_via_rabbitmq(command, payload, timeout)
+    else:
+        _send_via_socket(command, payload, timeout)
+
+
+def _send_via_socket(command: str, payload: dict, timeout: float) -> None:
+    """Send command via Unix socket."""
+    import json
+    import socket as sock
+
     message = {"command": command, "payload": payload}
     message_bytes = json.dumps(message).encode("utf-8")
 
-    # Connect to socket
     try:
         client = sock.socket(sock.AF_UNIX, sock.SOCK_STREAM)
         client.settimeout(timeout)
         client.connect(str(SIDECAR_SOCKET))
 
-        # Send message
         client.sendall(message_bytes)
         client.shutdown(sock.SHUT_WR)
 
-        # Receive response
         response_data = b""
         while True:
             chunk = client.recv(4096)
@@ -506,7 +529,6 @@ def send(
 
         client.close()
 
-        # Parse and print response
         response = json.loads(response_data.decode("utf-8"))
         print(json.dumps(response, indent=2))
 
@@ -516,6 +538,31 @@ def send(
         raise SystemExit(1)
     except TimeoutError:
         print(f"Error: Timeout waiting for response ({timeout}s)")
+        raise SystemExit(1)
+    except Exception as e:
+        print(f"Error: {e}")
+        raise SystemExit(1)
+
+
+def _send_via_rabbitmq(command: str, payload: dict, timeout: float) -> None:
+    """Send command via RabbitMQ."""
+    import json
+
+    from rots.sidecar.rabbitmq import RabbitMQConfig, publish_command
+
+    try:
+        config = RabbitMQConfig.from_environment()
+        print(f"Connecting to RabbitMQ at {config.host}:{config.port}/{config.vhost}")
+
+        response = publish_command(command, payload, config=config, timeout=timeout)
+        print(json.dumps(response, indent=2))
+
+    except TimeoutError:
+        print(f"Error: Timeout waiting for response ({timeout}s)")
+        raise SystemExit(1)
+    except ImportError as e:
+        print(f"Error: Missing dependency: {e}")
+        print("Install with: pipx inject rots pika")
         raise SystemExit(1)
     except Exception as e:
         print(f"Error: {e}")
