@@ -39,6 +39,18 @@ def _decode(value: bytes | str) -> str:
     return value.decode() if isinstance(value, bytes) else value
 
 
+def _normalize(name: str) -> str:
+    """Ensure a unit name has a type suffix (default ``.service``).
+
+    pystemd's Manager methods (``StartUnit``, ``StopUnit``, …) and ``Unit()``
+    require a fully-qualified name like ``onetime-web@7043.service``.
+    ``systemctl`` auto-appends ``.service`` but D-Bus does not.
+    """
+    if "." not in name.split("@")[-1]:
+        return f"{name}.service"
+    return name
+
+
 def _manager():  # noqa: ANN202
     """Import and return pystemd Manager at call time (avoids module-level None)."""
     from pystemd.systemd1 import Manager  # pyright: ignore[reportMissingImports]
@@ -50,7 +62,7 @@ def _unit(name: str):  # noqa: ANN202
     """Import and return pystemd Unit at call time."""
     from pystemd.systemd1 import Unit  # pyright: ignore[reportMissingImports]
 
-    return Unit(name.encode(), _autoload=True)
+    return Unit(_normalize(name).encode(), _autoload=True)
 
 
 def available() -> bool:
@@ -62,6 +74,7 @@ def available() -> bool:
             _decode(m.Manager.Version)
         return True
     except Exception:
+        logger.debug("D-Bus system bus probe failed", exc_info=True)
         return False
 
 
@@ -96,38 +109,42 @@ def reload_manager() -> None:
 
 def start_unit(name: str) -> None:
     """Start a unit (``systemctl start``)."""
+    fq = _normalize(name)
     with _manager() as m:
-        m.Manager.StartUnit(name.encode(), b"replace")
+        m.Manager.StartUnit(fq.encode(), b"replace")
 
 
 def stop_unit(name: str) -> None:
     """Stop a unit (``systemctl stop``)."""
+    fq = _normalize(name)
     with _manager() as m:
-        m.Manager.StopUnit(name.encode(), b"replace")
+        m.Manager.StopUnit(fq.encode(), b"replace")
 
 
 def restart_unit(name: str) -> None:
     """Restart a unit (``systemctl restart``)."""
+    fq = _normalize(name)
     with _manager() as m:
-        m.Manager.RestartUnit(name.encode(), b"replace")
+        m.Manager.RestartUnit(fq.encode(), b"replace")
 
 
 def enable_unit_files(names: list[str]) -> None:
     """Enable unit files (``systemctl enable``)."""
     with _manager() as m:
-        m.Manager.EnableUnitFiles([n.encode() for n in names], False, True)
+        m.Manager.EnableUnitFiles([_normalize(n).encode() for n in names], False, True)
 
 
 def disable_unit_files(names: list[str]) -> None:
     """Disable unit files (``systemctl disable``)."""
     with _manager() as m:
-        m.Manager.DisableUnitFiles([n.encode() for n in names], False)
+        m.Manager.DisableUnitFiles([_normalize(n).encode() for n in names], False)
 
 
 def reset_failed_unit(name: str) -> None:
     """Clear failed state for a unit (``systemctl reset-failed``)."""
+    fq = _normalize(name)
     with _manager() as m:
-        m.Manager.ResetFailedUnit(name.encode())
+        m.Manager.ResetFailedUnit(fq.encode())
 
 
 # ---------------------------------------------------------------------------
@@ -152,4 +169,5 @@ def unit_file_exists(name: str) -> bool:
     try:
         return get_load_state(name) != "not-found"
     except Exception:
+        logger.debug("Failed to query LoadState for %s via D-Bus", name, exc_info=True)
         return False

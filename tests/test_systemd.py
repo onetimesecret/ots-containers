@@ -31,9 +31,13 @@ def mock_systemctl_available(mocker):
 
 @pytest.fixture()
 def dbus_on(mocker):
-    """Enable D-Bus backend and return a mock of the ``rots._dbus`` module."""
+    """Enable D-Bus backend for tests.
+
+    Patches the availability check so the D-Bus code path is taken.
+    Individual tests still need to mock the specific ``rots._dbus.*``
+    functions they exercise.
+    """
     mocker.patch("rots.systemd._dbus_is_available", return_value=True)
-    return mocker.patch("rots.systemd._dbus", create=True)
 
 
 @pytest.fixture()
@@ -1150,3 +1154,176 @@ class TestRequireSystemctl:
             systemd.require_systemctl()
 
         assert exc_info.value.code == 1
+
+
+# ===================================================================
+# Unit name normalization (_dbus._normalize)
+# ===================================================================
+
+
+class TestNormalize:
+    """Test _normalize helper in _dbus module."""
+
+    def test_appends_service_suffix(self):
+        from rots._dbus import _normalize
+
+        assert _normalize("onetime-web@7043") == "onetime-web@7043.service"
+
+    def test_preserves_existing_service_suffix(self):
+        from rots._dbus import _normalize
+
+        assert _normalize("onetime-web@7043.service") == "onetime-web@7043.service"
+
+    def test_preserves_other_suffixes(self):
+        from rots._dbus import _normalize
+
+        assert _normalize("myunit.timer") == "myunit.timer"
+        assert _normalize("myunit.socket") == "myunit.socket"
+
+    def test_template_instance_without_suffix(self):
+        from rots._dbus import _normalize
+
+        assert _normalize("onetime-worker@billing") == "onetime-worker@billing.service"
+
+    def test_plain_unit_without_suffix(self):
+        from rots._dbus import _normalize
+
+        assert _normalize("sshd") == "sshd.service"
+
+
+# ===================================================================
+# Remote executor tests (D-Bus should never be used over SSH)
+# ===================================================================
+
+
+class TestRemoteExecutorUsesCLI:
+    """Verify that remote executors always use CLI, even when D-Bus is available."""
+
+    def _make_remote_executor(self, mocker):
+        """Create a mock executor that is NOT a LocalExecutor."""
+        mock_ex = mocker.Mock()
+        # _is_local checks isinstance(executor, LocalExecutor) — a Mock is not.
+        return mock_ex
+
+    def test_start_uses_cli_for_remote(self, mocker):
+        """start() should shell out via the remote executor, not D-Bus."""
+        from rots import systemd
+
+        # Even if D-Bus reports available, remote executor must use CLI
+        mocker.patch("rots.systemd._dbus_is_available", return_value=True)
+        mock_ex = self._make_remote_executor(mocker)
+        mock_ex.run.return_value = mocker.Mock(ok=True, stdout="", stderr="")
+
+        systemd.start("onetime-web@7043", executor=mock_ex)
+
+        mock_ex.run.assert_called_once_with(
+            ["systemctl", "start", "onetime-web@7043"],
+            sudo=True,
+            timeout=90,
+        )
+
+    def test_discover_uses_cli_for_remote(self, mocker):
+        """discover_web_instances() should shell out via the remote executor."""
+        from rots import systemd
+
+        mocker.patch("rots.systemd._dbus_is_available", return_value=True)
+        mock_ex = self._make_remote_executor(mocker)
+        mock_ex.run.return_value = mocker.Mock(
+            ok=True,
+            stdout="onetime-web@7043.service loaded active running OTS\n",
+        )
+
+        ports = systemd.discover_web_instances(executor=mock_ex)
+
+        assert ports == [7043]
+        mock_ex.run.assert_called_once()
+
+    def test_is_active_uses_cli_for_remote(self, mocker):
+        """is_active() should shell out via the remote executor."""
+        from rots import systemd
+
+        mocker.patch("rots.systemd._dbus_is_available", return_value=True)
+        mock_ex = self._make_remote_executor(mocker)
+        mock_ex.run.return_value = mocker.Mock(stdout="active\n")
+
+        state = systemd.is_active("onetime-web@7043", executor=mock_ex)
+
+        assert state == "active"
+        mock_ex.run.assert_called_once_with(
+            ["systemctl", "is-active", "onetime-web@7043"],
+            timeout=10,
+        )
+
+
+# ===================================================================
+# wait_for_healthy tests (both D-Bus and CLI paths)
+# ===================================================================
+
+
+class TestWaitForHealthyDBus:
+    """Test wait_for_healthy via D-Bus polling."""
+
+    def test_returns_immediately_when_active(self, mocker, dbus_on):
+        from rots import systemd
+
+        mocker.patch("rots._dbus.get_active_state", return_value="active")
+
+        systemd.wait_for_healthy("onetime-web@7043", timeout=5, poll_interval=0.01)
+
+    def test_raises_on_persistent_failure(self, mocker, dbus_on):
+        from rots import systemd
+        from rots.systemd import HealthCheckTimeoutError
+
+        mocker.patch("rots._dbus.get_active_state", return_value="failed")
+
+        with pytest.raises(HealthCheckTimeoutError, match="failed"):
+            systemd.wait_for_healthy(
+                "onetime-web@7043",
+                timeout=0.1,
+                poll_interval=0.01,
+                consecutive_failures_threshold=2,
+            )
+
+    def test_tolerates_dbus_exceptions_as_unknown(self, mocker, dbus_on):
+        """D-Bus exceptions during polling should be treated as unknown state."""
+        from rots import systemd
+        from rots.systemd import HealthCheckTimeoutError
+
+        mocker.patch("rots._dbus.get_active_state", side_effect=RuntimeError("D-Bus gone"))
+
+        with pytest.raises(HealthCheckTimeoutError, match="unknown"):
+            systemd.wait_for_healthy(
+                "onetime-web@7043",
+                timeout=0.1,
+                poll_interval=0.01,
+            )
+
+
+class TestWaitForHealthyCLI:
+    """Test wait_for_healthy CLI fallback polling."""
+
+    def test_returns_immediately_when_active(self, mocker, dbus_off):
+        from rots import systemd
+
+        mock_result = mocker.Mock()
+        mock_result.ok = True
+        mock_result.stdout = "active"
+        mocker.patch("subprocess.run", return_value=mock_result)
+
+        systemd.wait_for_healthy("onetime-web@7043", timeout=5, poll_interval=0.01)
+
+    def test_raises_on_timeout(self, mocker, dbus_off):
+        from rots import systemd
+        from rots.systemd import HealthCheckTimeoutError
+
+        mock_result = mocker.Mock()
+        mock_result.ok = False
+        mock_result.stdout = "activating"
+        mocker.patch("subprocess.run", return_value=mock_result)
+
+        with pytest.raises(HealthCheckTimeoutError, match="activating"):
+            systemd.wait_for_healthy(
+                "onetime-web@7043",
+                timeout=0.1,
+                poll_interval=0.01,
+            )

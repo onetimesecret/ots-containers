@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import functools
 import logging
+import os
 import re
 import shutil
 import sys
@@ -31,21 +32,37 @@ logger = logging.getLogger(__name__)
 def _dbus_is_available() -> bool:
     """Return True when the pystemd D-Bus backend can talk to PID 1.
 
+    D-Bus calls to the system bus bypass the executor's ``sudo=True``
+    mechanism, so we only enable the D-Bus path when the process is
+    already running as root (``euid == 0``).  Non-root processes fall
+    back to the CLI path which uses ``sudo``.
+
     The result is cached for the lifetime of the process.  In tests,
     call ``_dbus_is_available.cache_clear()`` or mock this function.
     """
+    if os.geteuid() != 0:
+        logger.debug("Not running as root (euid=%d), using systemctl CLI backend", os.geteuid())
+        return False
     try:
         from rots._dbus import available
-
-        ok = available()
-        if ok:
-            logger.debug("Using D-Bus backend for systemd operations")
-        else:
-            logger.debug("D-Bus not reachable, falling back to systemctl CLI")
-        return ok
-    except Exception:
-        logger.debug("pystemd not available, using systemctl CLI backend")
+    except ImportError:
+        logger.debug("pystemd not installed, using systemctl CLI backend")
         return False
+
+    try:
+        ok = available()
+    except Exception:
+        logger.debug(
+            "D-Bus probing via pystemd failed unexpectedly, falling back to systemctl CLI",
+            exc_info=True,
+        )
+        return False
+
+    if ok:
+        logger.debug("Using D-Bus backend for systemd operations")
+    else:
+        logger.debug("D-Bus not reachable, falling back to systemctl CLI")
+    return ok
 
 
 def _use_dbus(executor: Executor | None) -> bool:
