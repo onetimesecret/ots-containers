@@ -7,7 +7,7 @@ replacing fragile CLI output parsing. Used automatically for local
 operations when pystemd is available, with transparent fallback to the
 CLI path when it is not.
 
-Requires: pystemd (``pip install pystemd``), libsystemd, systemd 245+.
+Requires: ``pip install rots[dbus]`` (pystemd), libsystemd, systemd 245+.
 """
 
 from __future__ import annotations
@@ -18,12 +18,10 @@ from typing import NamedTuple
 logger = logging.getLogger(__name__)
 
 try:
-    from pystemd.systemd1 import Manager, Unit
+    import pystemd.systemd1  # noqa: F401  # pyright: ignore[reportMissingImports]
 
     PYSTEMD_AVAILABLE = True
 except ImportError:
-    Manager = None  # type: ignore[assignment,misc]
-    Unit = None  # type: ignore[assignment,misc]
     PYSTEMD_AVAILABLE = False
 
 
@@ -41,12 +39,26 @@ def _decode(value: bytes | str) -> str:
     return value.decode() if isinstance(value, bytes) else value
 
 
+def _manager():  # noqa: ANN202
+    """Import and return pystemd Manager at call time (avoids module-level None)."""
+    from pystemd.systemd1 import Manager  # pyright: ignore[reportMissingImports]
+
+    return Manager()
+
+
+def _unit(name: str):  # noqa: ANN202
+    """Import and return pystemd Unit at call time."""
+    from pystemd.systemd1 import Unit  # pyright: ignore[reportMissingImports]
+
+    return Unit(name.encode(), _autoload=True)
+
+
 def available() -> bool:
     """Return True if pystemd is importable and the system bus is reachable."""
     if not PYSTEMD_AVAILABLE:
         return False
     try:
-        with Manager() as m:
+        with _manager() as m:
             _decode(m.Manager.Version)
         return True
     except Exception:
@@ -63,7 +75,7 @@ def list_units_by_pattern(pattern: str) -> list[UnitInfo]:
 
     Returns a list of :class:`UnitInfo` tuples with decoded string fields.
     """
-    with Manager() as m:
+    with _manager() as m:
         raw = m.Manager.ListUnitsByPatterns([], [pattern.encode()])
     return [
         UnitInfo(
@@ -78,43 +90,43 @@ def list_units_by_pattern(pattern: str) -> list[UnitInfo]:
 
 def reload_manager() -> None:
     """Reload systemd manager configuration (``daemon-reload``)."""
-    with Manager() as m:
+    with _manager() as m:
         m.Manager.Reload()
 
 
 def start_unit(name: str) -> None:
     """Start a unit (``systemctl start``)."""
-    with Manager() as m:
+    with _manager() as m:
         m.Manager.StartUnit(name.encode(), b"replace")
 
 
 def stop_unit(name: str) -> None:
     """Stop a unit (``systemctl stop``)."""
-    with Manager() as m:
+    with _manager() as m:
         m.Manager.StopUnit(name.encode(), b"replace")
 
 
 def restart_unit(name: str) -> None:
     """Restart a unit (``systemctl restart``)."""
-    with Manager() as m:
+    with _manager() as m:
         m.Manager.RestartUnit(name.encode(), b"replace")
 
 
 def enable_unit_files(names: list[str]) -> None:
     """Enable unit files (``systemctl enable``)."""
-    with Manager() as m:
+    with _manager() as m:
         m.Manager.EnableUnitFiles([n.encode() for n in names], False, True)
 
 
 def disable_unit_files(names: list[str]) -> None:
     """Disable unit files (``systemctl disable``)."""
-    with Manager() as m:
+    with _manager() as m:
         m.Manager.DisableUnitFiles([n.encode() for n in names], False)
 
 
 def reset_failed_unit(name: str) -> None:
     """Clear failed state for a unit (``systemctl reset-failed``)."""
-    with Manager() as m:
+    with _manager() as m:
         m.Manager.ResetFailedUnit(name.encode())
 
 
@@ -125,13 +137,13 @@ def reset_failed_unit(name: str) -> None:
 
 def get_active_state(name: str) -> str:
     """Return ActiveState property (e.g. ``'active'``, ``'inactive'``, ``'failed'``)."""
-    with Unit(name.encode(), _autoload=True) as u:
+    with _unit(name) as u:
         return _decode(u.Unit.ActiveState)
 
 
 def get_load_state(name: str) -> str:
     """Return LoadState property (e.g. ``'loaded'``, ``'not-found'``)."""
-    with Unit(name.encode(), _autoload=True) as u:
+    with _unit(name) as u:
         return _decode(u.Unit.LoadState)
 
 
