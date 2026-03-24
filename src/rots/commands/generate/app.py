@@ -35,9 +35,10 @@ from typing import Annotated
 import cyclopts
 
 from rots import quadlet
-from rots.commands.common import DryRun
+from rots.commands.common import EXIT_FAILURE, DryRun
 from rots.config import Config
 from rots.environment_file import ENV_FILE_TEMPLATE
+from rots.quadlet import DEFAULT_ENV_FILE
 
 logger = logging.getLogger(__name__)
 
@@ -152,7 +153,7 @@ def generate(
 
     if stdout and output_dir:
         logger.error("Cannot use --stdout with an output directory")
-        raise SystemExit(1)
+        raise SystemExit(EXIT_FAILURE)
 
     if not stdout and not output_dir:
         logger.error(
@@ -162,7 +163,7 @@ def generate(
             "  rots generate ./my-units/\n"
             "  rots generate --stdout --web"
         )
-        raise SystemExit(1)
+        raise SystemExit(EXIT_FAILURE)
 
     cfg = Config()
 
@@ -224,7 +225,7 @@ def _write_directory(
     logger.info("Next steps:")
     logger.info(f"  1. Review the generated files in {dest}/")
     logger.info("  2. Copy quadlet files to /etc/containers/systemd/")
-    logger.info("  3. Configure /etc/default/onetimesecret with your settings")
+    logger.info(f"  3. Configure {DEFAULT_ENV_FILE} with your settings")
     logger.info("  4. Run: ots env process  (to create podman secrets)")
     logger.info("  5. Run: systemctl daemon-reload")
     logger.info("  6. Start instances: systemctl start onetime-web@7043")

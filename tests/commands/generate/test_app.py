@@ -218,6 +218,8 @@ class TestGenerateIntegration:
 
     def test_generate_with_env_template(self, tmp_path):
         """Generate with --with-env-template includes the env file."""
+        from rots.environment_file import ENV_FILE_TEMPLATE
+
         cfg = Config(var_dir=tmp_path / "var")
         files = _render_all_selected(cfg, web=True, worker=False, scheduler=False, force=True)
         files.append((_ENV_TEMPLATE_FILENAME, ENV_FILE_TEMPLATE))
@@ -227,7 +229,3 @@ class TestGenerateIntegration:
 
         assert (dest / _WEB_FILENAME).exists()
         assert (dest / _ENV_TEMPLATE_FILENAME).exists()
-
-
-# Re-import for the integration test
-from rots.environment_file import ENV_FILE_TEMPLATE  # noqa: E402
