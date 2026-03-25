@@ -1393,3 +1393,12 @@ class TestBackendOverride:
 
         mocker.patch("rots.systemd._dbus_is_available", return_value=False)
         assert systemd._use_dbus(None) is False
+
+    def test_remote_executor_always_uses_cli_in_auto_detect(self, mocker):
+        """Remote executors always use CLI even when D-Bus is available (no override)."""
+        from rots import systemd
+
+        mocker.patch("rots.systemd._dbus_is_available", return_value=True)
+        mocker.patch("rots.systemd._is_local", return_value=False)
+        remote_exec = mocker.Mock()
+        assert systemd._use_dbus(remote_exec) is False

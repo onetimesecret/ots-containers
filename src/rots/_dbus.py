@@ -165,7 +165,11 @@ def get_load_state(name: str) -> str:
 
 
 def unit_file_exists(name: str) -> bool:
-    """Check whether a unit file exists by querying LoadState != 'not-found'."""
+    """Check whether a unit file exists by querying LoadState != 'not-found'.
+
+    Returns False (rather than raising) when the D-Bus query itself fails,
+    so callers can fall through to the CLI path or treat the unit as absent.
+    """
     try:
         return get_load_state(name) != "not-found"
     except Exception:
