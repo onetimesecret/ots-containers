@@ -102,13 +102,27 @@ def _meta(
             help="Target host for remote execution (overrides OTS_HOST and .otsinfra.env)",
         ),
     ] = None,
+    backend: Annotated[
+        str | None,
+        cyclopts.Parameter(
+            name=["--backend"],
+            help="Systemd backend: 'dbus' (default when available) or 'cli' (legacy systemctl)",
+        ),
+    ] = None,
 ):
     """Global options processed before any subcommand."""
+    import sys
+
     from . import context
 
     _configure_logging(verbose)
     if host is not None:
         context.host_var.set(host)
+    if backend is not None:
+        if backend not in ("dbus", "cli"):
+            print(f"Error: --backend must be 'dbus' or 'cli', got '{backend}'", file=sys.stderr)
+            raise SystemExit(1)
+        context.backend_var.set(backend)
     app(tokens)
 
 

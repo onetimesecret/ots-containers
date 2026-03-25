@@ -24,6 +24,16 @@ def _clear_dbus_cache():
 
 
 @pytest.fixture(autouse=True)
+def _reset_backend_override():
+    """Reset the backend context variable between tests."""
+    from rots import context
+
+    token = context.backend_var.set(None)
+    yield
+    context.backend_var.reset(token)
+
+
+@pytest.fixture(autouse=True)
 def mock_systemctl_available(mocker):
     """Mock shutil.which to report systemctl as available for all tests."""
     mocker.patch("shutil.which", return_value="/mock/bin/systemctl")
@@ -1327,3 +1337,59 @@ class TestWaitForHealthyCLI:
                 timeout=0.1,
                 poll_interval=0.01,
             )
+
+
+# ===================================================================
+# Backend override (--backend flag)
+# ===================================================================
+
+
+class TestBackendOverride:
+    """Tests for the --backend dbus|cli context variable override."""
+
+    def test_cli_override_forces_cli_path(self, mocker):
+        """--backend=cli forces CLI even when D-Bus is available."""
+        from rots import context, systemd
+
+        mocker.patch("rots.systemd._dbus_is_available", return_value=True)
+        context.backend_var.set("cli")
+        assert systemd._use_dbus(None) is False
+
+    def test_dbus_override_forces_dbus_path(self, mocker):
+        """--backend=dbus forces D-Bus when it is available."""
+        from rots import context, systemd
+
+        mocker.patch("rots.systemd._dbus_is_available", return_value=True)
+        context.backend_var.set("dbus")
+        assert systemd._use_dbus(None) is True
+
+    def test_dbus_override_warns_when_unavailable(self, mocker, caplog):
+        """--backend=dbus falls back to CLI with a warning when D-Bus is unavailable."""
+        from rots import context, systemd
+
+        mocker.patch("rots.systemd._dbus_is_available", return_value=False)
+        context.backend_var.set("dbus")
+        assert systemd._use_dbus(None) is False
+        assert "--backend=dbus requested but D-Bus is not available" in caplog.text
+
+    def test_dbus_override_still_requires_local_executor(self, mocker):
+        """--backend=dbus cannot enable D-Bus for remote executors."""
+        from rots import context, systemd
+
+        mocker.patch("rots.systemd._dbus_is_available", return_value=True)
+        remote_exec = mocker.Mock()
+        remote_exec.__class__.__name__ = "SSHExecutor"
+        mocker.patch("rots.systemd._is_local", return_value=False)
+        context.backend_var.set("dbus")
+        assert systemd._use_dbus(remote_exec) is False
+
+    def test_no_override_uses_auto_detect(self, mocker):
+        """Without --backend, auto-detection is used (default behavior)."""
+        from rots import context, systemd
+
+        mocker.patch("rots.systemd._dbus_is_available", return_value=True)
+        assert context.backend_var.get(None) is None
+        assert systemd._use_dbus(None) is True
+
+        mocker.patch("rots.systemd._dbus_is_available", return_value=False)
+        assert systemd._use_dbus(None) is False

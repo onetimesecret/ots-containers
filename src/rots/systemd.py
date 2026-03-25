@@ -67,6 +67,22 @@ def _dbus_is_available() -> bool:
 
 def _use_dbus(executor: Executor | None) -> bool:
     """True when the operation should go through D-Bus rather than CLI."""
+    from rots import context
+
+    override = context.backend_var.get(None)
+    if override == "cli":
+        return False
+    if override == "dbus":
+        if not _is_local(_get_executor(executor)):
+            return False  # D-Bus is never valid for remote executors
+        if not _dbus_is_available():
+            logger.warning(
+                "--backend=dbus requested but D-Bus is not available, falling back to CLI"
+            )
+            return False
+        return True
+
+    # Default: auto-detect
     return _is_local(_get_executor(executor)) and _dbus_is_available()
 
 
